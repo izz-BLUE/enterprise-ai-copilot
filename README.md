@@ -22,3 +22,9 @@
 - data：模拟知识库文档
 - docs：项目设计文档
 - docker-compose.yml：基础组件编排
+
+
+
+
+
+github仓库地址:https://github.com/izz-BLUE/enterprise-ai-copilot.git
