@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(reg query *)",
+      "Bash(curl -s --max-time 3 http://127.0.0.1:7890)",
+      "Bash(\"g:/跳槽计划/项目/enterprise-ai-copilot/agent-python/Scripts/python.exe\" -c \"import fastapi; print\\(fastapi.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import fastapi; print\\(fastapi.__version__\\)\")"
+    ]
+  }
+}
