@@ -59,6 +59,7 @@ POST /agent/chat
   "model": "mock-agent",
   "traceId": "xxx"
 }
+```
 
 ###2. Java 主系统新增聊天接口
 
