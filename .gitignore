@@ -1,0 +1,27 @@
+# env
+.env
+*.env
+agent-python/.env
+
+# python
+agent-python/.venv/
+.venv/
+__pycache__/
+*.pyc
+
+# claude
+.claude/
+
+# java
+target/
+backend-java/target/
+HELP.md
+backend-java/HELP.md
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# docs
+docs/面试总结.md
