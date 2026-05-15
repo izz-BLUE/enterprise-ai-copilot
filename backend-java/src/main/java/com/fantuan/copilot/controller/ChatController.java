@@ -2,26 +2,56 @@ package com.fantuan.copilot.controller;
 
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.ChatResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.UUID;
 
 @RestController
 public class ChatController {
 
-    private final RestClient restClient;
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
 
-    public ChatController(RestClient restClient) {
-        this.restClient = restClient;
+    private final RestTemplate restTemplate;
+
+    public ChatController(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
     }
 
     @PostMapping("/api/chat")
     public ChatResponse chat(@RequestBody ChatRequest request) {
-        return restClient.post()
-                .uri("http://localhost:8000/agent/chat")
-                .body(request)
-                .retrieve()
-                .body(ChatResponse.class);
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<ChatRequest> httpEntity = new HttpEntity<>(request, headers);
+            ResponseEntity<ChatResponse> response = restTemplate.postForEntity(
+                    "http://localhost:8000/agent/chat", httpEntity, ChatResponse.class);
+            return response.getBody();
+        } catch (HttpClientErrorException e) {
+            log.error("调用 Python Agent 返回 HTTP 4xx: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString(), e);
+            return new ChatResponse(
+                    "当前 AI 服务暂时不可用，请稍后重试。",
+                    "unknown",
+                    UUID.randomUUID().toString(),
+                    false
+            );
+        } catch (Exception e) {
+            log.error("调用 Python Agent 发生未知异常", e);
+            return new ChatResponse(
+                    "当前 AI 服务暂时不可用，请稍后重试。",
+                    "unknown",
+                    UUID.randomUUID().toString(),
+                    false
+            );
+        }
     }
 }
