@@ -1,4 +1,4 @@
 package com.fantuan.copilot.dto;
 
-public record ChatResponse(String answer, String model, String traceId) {
+public record ChatResponse(String answer, String model, String traceId, boolean success) {
 }

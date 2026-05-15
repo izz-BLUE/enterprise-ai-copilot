@@ -189,3 +189,71 @@ BaseModel
 ·接入真实大模型 API
 ·替换 mock answer
 ·实现真正 AI 回复
+
+## D3：接入 DeepSeek 大模型 API
+
+### 今日完成
+
+1. 在 Python Agent 服务中接入 DeepSeek Chat Completion API。
+2. 使用 `.env` 管理 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`。
+3. 将 `/agent/chat` 从 mock answer 替换为真实大模型回答。
+4. 验证 Java `/api/chat` 可以通过 Python Agent 服务获取 DeepSeek 回答。
+5. 当前链路：Postman → Java → Python → DeepSeek → Python → Java。
+
+### 今日理解
+
+大模型 API 本质也是 HTTP + JSON 调用。  
+Java 负责业务入口，Python 负责 AI 调用和模型编排。
+
+# D4：Prompt 工程与异常处理
+
+## 今日完成
+
+- 抽离 SYSTEM_PROMPT，完成 Prompt 与业务逻辑分离
+- 增加企业 AI 行为约束，避免模型伪造企业制度
+- Python 增加 try/except，处理 DeepSeek 调用失败
+- Java 增加 Python 服务异常兜底
+- 新增统一响应结构：success / answer / traceId
+- Java 调 Python 链路恢复正常
+
+## 今日问题
+
+### 1. Java 调 Python 返回 422
+
+FastAPI 返回：
+
+```text
+422 Unprocessable Entity
+body: null
+```
+
+排查发现：
+
+Java 与 Python DTO 字段不一致
+RestClient 请求体解析异常
+
+最终改用：
+    RestTemplate + HttpEntity
+
+解决问题。
+
+2. Prompt 幻觉问题
+
+模型在未接入知识库时，会生成“看似真实”的企业制度内容。
+
+通过增加 Prompt 约束：
+    未接入知识库时仅提供通用建议
+
+降低幻觉风险。
+
+今日理解
+·Prompt 的核心是行为约束，而不只是“让 AI 更聪明”
+·企业 AI 不能自由发挥，需要限制幻觉
+·Java 与 Python 本质是 HTTP 服务调用
+·跨服务 DTO 必须保持一致
+·工程排障要区分：现象、猜测、证据、结论
+下一步
+·文件上传
+·文本切片
+·Embedding
+·RAG 基础
