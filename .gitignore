@@ -12,6 +12,9 @@ __pycache__/
 # claude
 .claude/
 
+# logs
+*.log
+
 # java
 target/
 backend-java/target/
