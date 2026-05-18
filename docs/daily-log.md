@@ -313,3 +313,238 @@ Day6：第一版知识库构建
 简单检索测试
 Prompt 拼接测试
 保持 Git 工程化，提交阶段性成果
+
+Day6 - Daily Log
+
+日期：2026-05-19
+
+今日学习内容
+1. 第一版企业知识库搭建
+
+新增知识库目录：
+
+data/
+├── bank/
+├── hr/
+└── it/
+
+新增企业样例文档：
+
+leave_policy.md
+onboarding.md
+vpn_guide.md
+
+开始形成：
+
+企业知识文档
+→ RAG
+
+的基础结构。
+
+2. 文本切片（Chunking）
+
+完成：
+
+build_chunks.py
+
+脚本开发。
+
+实现：
+
+原始文档
+→ 段落切分
+→ 长文本 chunk
+→ chunks.json
+
+核心逻辑：
+
+按空行拆段落
+超长文本按句末切分
+输出 metadata：
+domain
+source_file
+chunk_index
+content
+
+输出文件：
+
+data/processed/chunks.json
+3. 第一版 Retrieval（关键词检索）
+
+完成：
+
+simple_retrieval.py
+
+实现：
+
+用户问题
+→ 关键词提取
+→ chunk 匹配
+→ topK 返回
+
+当前检索方案：
+
+子串匹配 + 词频加权
+
+支持：
+
+stop words
+2-gram
+3-gram
+topK retrieval
+
+测试结果：
+
+请假三天怎么走流程
+→ 命中 leave_policy
+
+VPN怎么连接
+→ 命中 vpn_guide
+4. 第一版 RAG 闭环
+
+Python /agent/chat 已升级为：
+
+用户问题
+→ retrieval
+→ chunk
+→ Prompt 拼接
+→ DeepSeek
+→ 基于知识回答
+
+新增：
+
+retrieval()
+build_rag_prompt()
+
+实现：
+
+Grounded Answer
+
+而不是：
+
+自由生成
+
+。
+
+5. Hallucination 控制升级
+
+当知识库未命中时：
+
+AI 不再自由编造制度。
+
+现在会：
+
+明确说明：
+当前知识库暂无相关信息
+
+。
+
+同时：
+
+Prompt 中新增：
+
+来源：domain/source_file
+
+开始形成：
+
+知识来源追踪
+
+能力。
+
+今日核心理解
+1. 企业 AI ≠ 聊天机器人
+
+企业 AI 核心是：
+
+基于企业知识回答
+
+而不是自由聊天。
+
+2. 为什么需要 Chunk
+
+因为：
+
+LLM 上下文有限
+整篇文档 token 成本太高
+retrieval 粒度需要更细
+3. 为什么关键词检索不是最终方案
+
+因为：
+
+字面匹配
+≠
+语义理解
+
+。
+
+例如：
+
+休三天假
+≠
+请假超过两日
+
+关键词检索可能无法命中。
+
+4. Metadata 的作用
+
+保存：
+
+domain
+source_file
+chunk_index
+
+本质是：
+
+知识来源元数据
+
+后续可用于：
+
+来源追踪
+权限控制
+引用展示
+调试
+chunk 排序
+今日工程成果
+
+已完成：
+
+第一版企业 RAG 系统
+
+核心链路：
+
+知识文档
+→ chunk
+→ retrieval
+→ Prompt
+→ LLM
+→ grounded answer
+
+。
+
+Git 提交
+
+建议提交：
+
+git add .
+git commit -m "add first rag pipeline with chunk retrieval"
+git push
+今日学习时长
+
+约 5~6 小时
+
+明日计划（Day7）
+
+进入：
+
+Embedding
+
+阶段。
+
+包括：
+
+什么是真正向量检索
+为什么关键词检索不够
+sentence-transformers
+embedding 向量化
+cosine similarity
+第一版 semantic retrieval
