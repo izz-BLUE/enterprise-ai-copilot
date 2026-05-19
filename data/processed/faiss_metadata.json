@@ -1,0 +1,44 @@
+[
+  {
+    "id": "bank_README_001",
+    "domain": "bank",
+    "source_file": "README.md",
+    "chunk_index": 1,
+    "content": "# 银行业务制度样例文档"
+  },
+  {
+    "id": "bank_leave_policy_001",
+    "domain": "bank",
+    "source_file": "leave_policy.md",
+    "chunk_index": 1,
+    "content": "员工请假超过 2 天需部门负责人审批。\n请假类型包括：事假、病假、年假。\n请假流程：\n1. 提前提交申请\n2. 上级审批\n3. 系统记录"
+  },
+  {
+    "id": "hr_README_001",
+    "domain": "hr",
+    "source_file": "README.md",
+    "chunk_index": 1,
+    "content": "# 企业 HR / 行政制度样例文档"
+  },
+  {
+    "id": "hr_onboarding_001",
+    "domain": "hr",
+    "source_file": "onboarding.md",
+    "chunk_index": 1,
+    "content": "新员工入职流程：\n1. 提交入职信息\n2. 领取工牌和电脑\n3. 完成入职培训"
+  },
+  {
+    "id": "it_README_001",
+    "domain": "it",
+    "source_file": "README.md",
+    "chunk_index": 1,
+    "content": "\\# IT 运维知识库样例文档"
+  },
+  {
+    "id": "it_vpn_guide_001",
+    "domain": "it",
+    "source_file": "vpn_guide.md",
+    "chunk_index": 1,
+    "content": "公司 VPN 使用说明：\n1. 下载 VPN 客户端\n2. 输入用户名和密码\n3. 连接成功后可访问内网资源"
+  }
+]
