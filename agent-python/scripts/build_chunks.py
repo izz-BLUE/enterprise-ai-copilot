@@ -3,7 +3,11 @@
 build_chunks.py — 知识库文档切片脚本
 
 从 data/{bank,hr,it} 读取 .md / .txt 文档，
-按段落和字符长度切分为 chunk，输出到 data/processed/chunks.json。
+按段落和字符长度切分为 chunk，支持相邻 chunk 重叠，输出到 data/processed/chunks.json。
+
+参数:
+    CHUNK_SIZE    = 500   每个 chunk 的目标字符数
+    CHUNK_OVERLAP = 100   相邻 chunk 之间的重叠字符数
 
 用法:
     python agent-python/scripts/build_chunks.py
@@ -20,7 +24,8 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
 
 DOMAINS = ['bank', 'hr', 'it']
-CHUNK_MAX_CHARS = 500
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 100
 
 
 def _input_dir(domain: str) -> str:
@@ -44,45 +49,58 @@ def _split_paragraphs(text: str) -> list[str]:
     return [p.strip() for p in raw if p.strip()]
 
 
-def _split_long_paragraph(para: str) -> list[str]:
-    """将过长的段落按 500 字符左右切分，优先在句末断开。"""
+def _split_long_paragraph(para: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """将过长的段落按 chunk_size 切分，相邻 chunk 重叠 chunk_overlap 字符。
+
+    重叠策略：
+      chunk1: [0          ~ chunk_size)
+      chunk2: [chunk_size - overlap  ~ chunk_size * 2 - overlap)
+      chunk3: [chunk_size * 2 - overlap * 2  ~ ...)
+    """
+    step = chunk_size - chunk_overlap  # 每次实际前进的字符数
     chunks = []
     start = 0
     length = len(para)
 
     while start < length:
-        end = min(start + CHUNK_MAX_CHARS, length)
+        remaining = length - start
 
-        if end < length:
-            # 在最后 100 字符内寻找合适的断句位置
-            search_start = max(start + CHUNK_MAX_CHARS - 100, start)
-            tail = para[search_start:end]
-            # 优先中文句号、分号、感叹号、问号、换行
-            break_at = -1
-            for sep in ('。', '；', '！', '？', '\n'):
-                pos = tail.rfind(sep)
-                if pos > break_at:
-                    break_at = pos
-            if break_at >= 25:  # 至少向后推进 25 个字符
-                end = search_start + break_at + 1
+        # 剩余不足一步时，直接取到末尾并结束
+        if remaining <= step:
+            chunks.append(para[start:].strip())
+            break
 
-        chunk_text = para[start:end].strip()
-        if chunk_text:
-            chunks.append(chunk_text)
-        start = end
+        end = min(start + chunk_size, length)
+
+        # 在最后 chunk_overlap 字符范围内寻找句尾（句号、分号、感叹号、问号、换行）
+        search_start = end - chunk_overlap
+        tail = para[search_start:end]
+        best_pos = -1
+        for sep in ('。', '；', '！', '？', '\n'):
+            pos = tail.rfind(sep)
+            if pos > best_pos:
+                best_pos = pos
+        MIN_ADVANCE = 25
+        if best_pos >= 0 and (search_start + best_pos + 1) > start + MIN_ADVANCE:
+            end = search_start + best_pos + 1
+
+        chunks.append(para[start:end].strip())
+
+        # 下一次起点 = 当前结尾 - overlap（实现重叠）
+        start = end - chunk_overlap
 
     return chunks
 
 
-def _split_file(text: str) -> list[str]:
-    """完整切片流程：段落 → 长段落拆分。"""
+def _split_file(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """完整切片流程：段落 → 长段落重叠拆分。"""
     paragraphs = _split_paragraphs(text)
     chunks = []
     for para in paragraphs:
-        if len(para) <= CHUNK_MAX_CHARS:
+        if len(para) <= chunk_size:
             chunks.append(para)
         else:
-            chunks.extend(_split_long_paragraph(para))
+            chunks.extend(_split_long_paragraph(para, chunk_size, chunk_overlap))
     return chunks
 
 
@@ -130,6 +148,7 @@ def _process_domain(domain: str) -> list[dict]:
 def main():
     total_files = sum(len(_find_doc_files(d)) for d in DOMAINS)
     print(f"发现 {total_files} 个文档\n")
+    print(f"chunk_size={CHUNK_SIZE}, chunk_overlap={CHUNK_OVERLAP}\n")
 
     all_chunks = []
     for domain in DOMAINS:
