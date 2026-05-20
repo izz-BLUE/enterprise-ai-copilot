@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from app.core.config import DEEPSEEK_MODEL, logger
 from app.prompts.system_prompt import SYSTEM_PROMPT, build_rag_prompt
-from app.retrieval.faiss_retriever import retrieve
+from app.retrieval.hybrid_retriever import retrieve
 from app.schemas.chat_schema import ChatResponse
 from app.services.llm_service import call_llm
 
