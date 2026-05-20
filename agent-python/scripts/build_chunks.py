@@ -8,6 +8,7 @@ build_chunks.py — 知识库文档切片脚本
 参数:
     CHUNK_SIZE    = 500   每个 chunk 的目标字符数
     CHUNK_OVERLAP = 100   相邻 chunk 之间的重叠字符数
+    MIN_CHUNK_SIZE = 250  短段落合并的最小目标字符数
 
 用法:
     python agent-python/scripts/build_chunks.py
@@ -26,6 +27,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
 DOMAINS = ['bank', 'hr', 'it']
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
+MIN_CHUNK_SIZE = 250
 
 
 def _input_dir(domain: str) -> str:
@@ -47,6 +49,61 @@ def _split_paragraphs(text: str) -> list[str]:
     """按空行拆分为段落，忽略空白段落。"""
     raw = re.split(r'\n\s*\n', text.strip())
     return [p.strip() for p in raw if p.strip()]
+
+
+def _merge_short_paragraphs(paragraphs: list[str], min_chunk_size: int, chunk_size: int) -> list[str]:
+    """合并短段落，避免产生过多的碎片 chunk。
+
+    策略：
+    - 标题（# 开头）始终作为新组的起点，flush 当前缓冲区
+    - 其余段落不断追加到缓冲区
+    - 当缓冲区 >= min_chunk_size 且追加下一个会超过 chunk_size 时 flush
+    - 段落本身超过 chunk_size 的单独处理（后续会 overlap 切分）
+    """
+    merged = []
+    buffer = []
+    buffer_len = 0
+
+    def flush():
+        nonlocal buffer, buffer_len
+        if buffer:
+            merged.append('\n\n'.join(buffer))
+            buffer, buffer_len = [], 0
+
+    for para in paragraphs:
+        para_len = len(para)
+
+        # 标题：flush 当前缓冲区，重新开始
+        if re.match(r'^#{1,6}\s', para):
+            flush()
+            buffer.append(para)
+            buffer_len += para_len
+            continue
+
+        # 长段落（超过 chunk_size）：flush 缓冲区，自身作为独立 chunk
+        if para_len >= chunk_size:
+            flush()
+            merged.append(para)
+            continue
+
+        # 追加到缓冲区是否超过 chunk_size？
+        if buffer_len + para_len > chunk_size:
+            if buffer_len >= min_chunk_size:
+                # 缓冲区已够大，先 flush，再重新开始
+                flush()
+                buffer.append(para)
+                buffer_len = para_len
+            else:
+                # 缓冲区还不够大，追加后一起 flush
+                buffer.append(para)
+                buffer_len += para_len
+                flush()
+        else:
+            buffer.append(para)
+            buffer_len += para_len
+
+    flush()
+    return merged
 
 
 def _split_long_paragraph(para: str, chunk_size: int, chunk_overlap: int) -> list[str]:
@@ -92,11 +149,16 @@ def _split_long_paragraph(para: str, chunk_size: int, chunk_overlap: int) -> lis
     return chunks
 
 
-def _split_file(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """完整切片流程：段落 → 长段落重叠拆分。"""
+def _split_file(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CHUNK_OVERLAP, min_chunk_size: int = MIN_CHUNK_SIZE) -> list[str]:
+    """完整切片流程：段落 → 短段落合并 → 长段落重叠拆分。"""
     paragraphs = _split_paragraphs(text)
+
+    # 合并短段落
+    merged = _merge_short_paragraphs(paragraphs, min_chunk_size, chunk_size)
+
+    # 长段落 overlap 切分
     chunks = []
-    for para in paragraphs:
+    for para in merged:
         if len(para) <= chunk_size:
             chunks.append(para)
         else:
@@ -138,7 +200,14 @@ def _process_domain(domain: str) -> list[dict]:
                 'content': content,
             })
 
-        print(f"  {domain}/{filename:25s} → {len(parts)} chunks")
+        lengths = [len(p) for p in parts]
+        if lengths:
+            avg = sum(lengths) // len(lengths)
+            print(f"  {domain}/{filename:30s} → {len(parts):3d}"
+                  f" chunks  avg={avg:3d}  min={min(lengths):3d}"
+                  f"  max={max(lengths):3d}")
+        else:
+            print(f"  {domain}/{filename:30s} → {len(parts):3d} chunks")
     return chunks
 
 
@@ -158,9 +227,14 @@ def main():
     with open(_output_file(), 'w', encoding='utf-8') as f:
         json.dump(all_chunks, f, ensure_ascii=False, indent=2)
 
+    lengths = [len(c['content']) for c in all_chunks]
+    avg_len = sum(lengths) // len(lengths) if lengths else 0
     print(f"\n处理完成！")
     print(f"  处理文件数: {total_files}")
     print(f"  生成 chunk 数: {len(all_chunks)}")
+    print(f"  avg_chunk_len: {avg_len}")
+    print(f"  min_chunk_len: {min(lengths) if lengths else 0}")
+    print(f"  max_chunk_len: {max(lengths) if lengths else 0}")
     print(f"  输出文件: {_output_file()}")
 
 
