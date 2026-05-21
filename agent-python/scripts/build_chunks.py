@@ -55,7 +55,9 @@ def _merge_short_paragraphs(paragraphs: list[str], min_chunk_size: int, chunk_si
     """合并短段落，避免产生过多的碎片 chunk。
 
     策略：
-    - 标题（# 开头）始终作为新组的起点，flush 当前缓冲区
+    - 标题（# 开头）默认 flush 当前缓冲区并启动新组
+    - 但当 ### 子节标题恰好比当前组深一级（## 下的首个 ###）时，不 flush，
+      让子节标题+正文合并到章节标题组中，避免标题与正文分离
     - 其余段落不断追加到缓冲区
     - 当缓冲区 >= min_chunk_size 且追加下一个会超过 chunk_size 时 flush
     - 段落本身超过 chunk_size 的单独处理（后续会 overlap 切分）
@@ -63,19 +65,39 @@ def _merge_short_paragraphs(paragraphs: list[str], min_chunk_size: int, chunk_si
     merged = []
     buffer = []
     buffer_len = 0
+    buffer_section_level = 0  # 缓冲区首个标题的级别（#=1, ##=2, ###=3）
+    has_absorbed_h3 = False   # 当前 ## 组是否已吸收过一个 ###
 
     def flush():
-        nonlocal buffer, buffer_len
+        nonlocal buffer, buffer_len, buffer_section_level, has_absorbed_h3
         if buffer:
             merged.append('\n\n'.join(buffer))
-            buffer, buffer_len = [], 0
+        buffer, buffer_len, buffer_section_level, has_absorbed_h3 = [], 0, 0, False
 
     for para in paragraphs:
         para_len = len(para)
 
-        # 标题：flush 当前缓冲区，重新开始
-        if re.match(r'^#{1,6}\s', para):
-            flush()
+        heading_m = re.match(r'^(#+)\s', para)
+        if heading_m:
+            h_level = len(heading_m.group(1))
+
+            # 当新标题比当前组深一级（如 ### 在 ## 下），且组还不够大，
+            # 且未曾吸收过 h3：吸收（不 flush），让子节合并到当前章节组
+            should_flush = True
+            if (buffer_section_level >= 2
+                    and buffer_len < min_chunk_size
+                    and h_level == buffer_section_level + 1
+                    and not has_absorbed_h3):
+                should_flush = False
+
+            if should_flush:
+                flush()
+                buffer_section_level = h_level
+                if h_level >= 3:
+                    has_absorbed_h3 = True  # 非 ## 启动的组，标记已吸收过
+            else:
+                has_absorbed_h3 = True  # 首个 ### 已被吸收
+
             buffer.append(para)
             buffer_len += para_len
             continue
@@ -153,10 +175,10 @@ def _split_file(text: str, chunk_size: int = CHUNK_SIZE, chunk_overlap: int = CH
     """完整切片流程：段落 → 短段落合并 → 长段落重叠拆分。"""
     paragraphs = _split_paragraphs(text)
 
-    # 合并短段落
+    # 第一阶段：合并短段落（标题与正文基础合并，吸收首个 ### 到 ##）
     merged = _merge_short_paragraphs(paragraphs, min_chunk_size, chunk_size)
 
-    # 长段落 overlap 切分
+    # 第二阶段：长段落 overlap 切分
     chunks = []
     for para in merged:
         if len(para) <= chunk_size:
