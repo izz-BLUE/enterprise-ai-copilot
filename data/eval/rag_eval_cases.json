@@ -3,48 +3,56 @@
     "id": "leave_001",
     "question": "公司上班时间是什么？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["9:30", "13:30", "18:30"]
+    "expected_keywords": ["9:30", "13:30", "18:30"],
+    "expected_answer_keywords": ["9:30", "18:30"]
   },
   {
     "id": "leave_002",
     "question": "请假三天需要提前多久申请？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["提前十个工作日"]
+    "expected_keywords": ["提前十个工作日"],
+    "expected_answer_keywords": ["提前十个工作日"]
   },
   {
     "id": "leave_003",
     "question": "病假需要提供哪些材料？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["病历本", "挂号单", "缴费清单"]
+    "expected_keywords": ["病历本", "挂号单", "缴费清单"],
+    "expected_answer_keywords": ["病历本", "挂号单", "缴费清单"]
   },
   {
     "id": "leave_004",
     "question": "年假怎么计算？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["年休假", "5 天", "10 天", "15 天"]
+    "expected_keywords": ["年休假", "5 天", "10 天", "15 天"],
+    "expected_answer_keywords": ["5天", "10天", "15天"]
   },
   {
     "id": "leave_005",
     "question": "旷工几天会被解除劳动合同？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["旷工", "解除劳动合同"]
+    "expected_keywords": ["旷工", "解除劳动合同"],
+    "expected_answer_keywords": ["旷工", "解除劳动合同"]
   },
   {
     "id": "leave_006",
     "question": "迟到早退怎么处罚？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["罚款", "200 元"]
+    "expected_keywords": ["罚款", "200 元"],
+    "expected_answer_keywords": ["罚款", "200"]
   },
   {
     "id": "leave_007",
     "question": "婚假有多少天？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["婚假", "10 天"]
+    "expected_keywords": ["婚假", "10 天"],
+    "expected_answer_keywords": ["婚假", "10 天"]
   },
   {
     "id": "leave_008",
     "question": "产假有多少天？",
     "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["产假", "98 天", "30 天"]
+    "expected_keywords": ["产假", "98 天", "30 天"],
+    "expected_answer_keywords": ["产假", "98", "30"]
   }
 ]
