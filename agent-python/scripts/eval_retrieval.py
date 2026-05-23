@@ -17,6 +17,7 @@ eval_retrieval.py — RAG 检索评估脚本（Source + Keyword 双层评估）
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 # ── 路径自动识别 ────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +26,8 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, 'agent-python'))
 
 EVAL_FILE = os.path.join(PROJECT_ROOT, 'data', 'eval', 'rag_eval_cases.json')
 FAISS_INDEX = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss.index')
+REPORTS_DIR = os.path.join(PROJECT_ROOT, 'data', 'eval', 'reports')
+REPORT_FILE = os.path.join(REPORTS_DIR, 'retrieval_eval_report.json')
 
 TOP_K = 3
 
@@ -171,7 +174,34 @@ def main():
             print(f'  TopK chunk IDs:   {r["top_chunk_ids"]}')
 
     # ── 退出码 ──
+    _save_report(results, total, passed_count, failed_count,
+                 source_hit_rate, keyword_hit_rate, final_pass_rate)
     sys.exit(0 if failed_count == 0 else 1)
+
+
+def _save_report(results: list[dict], total: int, passed_count: int,
+                 failed_count: int, source_hit_rate: float, keyword_hit_rate: float,
+                 final_pass_rate: float) -> None:
+    """将评估结果写入 JSON 报告文件。"""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    report = {
+        'eval_type': 'retrieval',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'top_k': TOP_K,
+        'total': total,
+        'passed': passed_count,
+        'failed': failed_count,
+        'source_hit_rate': round(source_hit_rate / 100, 4),
+        'keyword_hit_rate': round(keyword_hit_rate / 100, 4),
+        'final_pass_rate': round(final_pass_rate / 100, 4),
+        'cases': results,
+    }
+
+    with open(REPORT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    print(f'\n报告已生成: {REPORT_FILE}')
 
 
 if __name__ == '__main__':
