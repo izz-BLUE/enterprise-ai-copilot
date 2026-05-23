@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 
 # ── 路径自动识别 ────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +21,8 @@ PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, 'agent-python'))
 
 EVAL_FILE = os.path.join(PROJECT_ROOT, 'data', 'eval', 'rag_eval_cases.json')
+REPORTS_DIR = os.path.join(PROJECT_ROOT, 'data', 'eval', 'reports')
+REPORT_FILE = os.path.join(REPORTS_DIR, 'generation_eval_report.json')
 
 
 def _check_prerequisites() -> bool:
@@ -230,7 +233,46 @@ def main():
             print(f'  回答预览:                 {r["answer_preview"]}')
 
     # ── 退出码 ──
+    _save_report(results, total, passed_count, failed_count,
+                 llm_fail_count, pass_rate)
     sys.exit(0 if failed_count == 0 else 1)
+
+
+def _save_report(results: list[dict], total: int, passed_count: int,
+                 failed_count: int, llm_fail_count: int,
+                 pass_rate: float) -> None:
+    """将生成评估结果写入 JSON 报告文件。"""
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    # 精简 cases 字段，去掉评估不需要的内部字段
+    slim_cases = []
+    for r in results:
+        slim_cases.append({
+            'id': r['id'],
+            'question': r['question'],
+            'passed': r['passed'],
+            'success': r['success'],
+            'expected_answer_keywords': r['expected_answer_keywords'],
+            'raw_missing_keywords': r.get('raw_missing_keywords', []),
+            'norm_missing_keywords': r.get('norm_missing_keywords', []),
+            'answer_preview': r['answer_preview'],
+        })
+
+    report = {
+        'eval_type': 'generation',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'total': total,
+        'passed': passed_count,
+        'failed': failed_count,
+        'llm_failed': llm_fail_count,
+        'pass_rate': round(pass_rate / 100, 4),
+        'cases': slim_cases,
+    }
+
+    with open(REPORT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    print(f'\n报告已生成: {REPORT_FILE}')
 
 
 if __name__ == '__main__':
