@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 # ── 路径自动识别 ────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, 'agent-python'))
 
 EVAL_FILE = os.path.join(PROJECT_ROOT, 'data', 'eval', 'rag_eval_cases.json')
