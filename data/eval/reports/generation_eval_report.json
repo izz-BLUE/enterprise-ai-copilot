@@ -1,13 +1,13 @@
 {
   "eval_type": "generation",
-  "timestamp": "2026-05-24T17:43:24.376263+00:00",
+  "timestamp": "2026-05-24T19:37:51.898719+00:00",
   "total": 8,
   "passed": 8,
   "failed": 0,
-  "flaky_count": 1,
+  "flaky_count": 0,
   "llm_failed": 0,
   "pass_rate": 1.0,
-  "stable_pass_rate": 0.875,
+  "stable_pass_rate": 1.0,
   "cases": [
     {
       "id": "leave_001",
@@ -23,7 +23,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库，公司上班时间存在不同来源的差异，具体如下：  - 来源一（hr/leave_policy_real_sample.md）：每周一至周五，上..."
+      "answer_preview": "根据企业知识库，不同来源对工作时间的规定存在差异：  - **来源1（hr/leave_policy_real_sample.md）**：     实行标..."
     },
     {
       "id": "leave_002",
@@ -38,16 +38,16 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库，不同来源对“请假三天需提前多久申请”存在不同规定，具体如下：  - **来源1（hr/leave_policy_real_sample.m..."
+      "answer_preview": "根据企业知识库，不同制度文件对请假三天的提前申请时间有不同规定，具体如下：  - **来源【知识1】**（hr/leave_policy_real_sam..."
     },
     {
       "id": "leave_003",
       "question": "病假需要提供哪些材料？",
       "passed": true,
       "success": true,
-      "attempts": 2,
-      "flaky": true,
-      "first_passed": false,
+      "attempts": 1,
+      "flaky": false,
+      "first_passed": true,
       "expected_answer_keywords": [
         "病历本",
         "挂号单",
@@ -55,7 +55,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库，关于病假所需材料存在两处不同来源的规定，具体如下：  - **来源【请假资料提供对照表】**：病假需提供 **病历本复印件**、**缴费清..."
+      "answer_preview": "根据企业知识库规定，病假需提供以下材料：  1. 病历本复印件 2. 缴费清单 3. 病假证明  另注：若病假超过1天，还需提供医院就诊有效证明（包括挂号..."
     },
     {
       "id": "leave_004",
@@ -72,7 +72,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库内容，年假计算如下：  1. **年假天数依据累计工作年限**：    - 累计工作已满1年不满10年：**5天**    - 已满10年不..."
+      "answer_preview": "根据企业知识库，年假计算如下：  1. **年假天数标准**（需提供社保缴费记录单或可验证的工作证明）：    - 累计工作已满1年不满10年：**5天*..."
     },
     {
       "id": "leave_005",
@@ -88,7 +88,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库，不同来源对旷工解除劳动合同的天数规定存在差异，具体如下：  - **知识1（来源：hr/leave_policy_real_sample...."
+      "answer_preview": "根据企业知识库，不同来源制度对旷工解除劳动合同的规定存在差异，具体如下：  - **【知识1】来源：hr/leave_policy_real_sample..."
     },
     {
       "id": "leave_006",
@@ -104,7 +104,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库内容，**不同来源/不同制度存在差异**，具体如下：  ### 知识库1（来源：`hr/leave_policy_real_sample.m..."
+      "answer_preview": "根据企业知识库内容，**不同来源/不同制度存在差异**，具体如下：  ---  ### 来源一：hr/leave_policy_real_sample.m..."
     },
     {
       "id": "leave_007",
@@ -118,11 +118,9 @@
         "婚假",
         "10 天"
       ],
-      "raw_missing_keywords": [
-        "10 天"
-      ],
+      "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据现有知识库，关于婚假天数的规定存在 **不同来源之间的差异**，具体如下：  ---  ### 【来源1】《hr/leave_policy_real_..."
+      "answer_preview": "根据企业知识库内容，不同来源/不同制度对婚假天数存在差异，具体如下：  - **来源一**（`hr/leave_policy_real_sample.md..."
     },
     {
       "id": "leave_008",
@@ -139,7 +137,7 @@
       ],
       "raw_missing_keywords": [],
       "norm_missing_keywords": [],
-      "answer_preview": "根据企业知识库，产假天数规定如下：  - **基准天数**：符合国家计划生育规定的女员工，享有**98天（日历日）+ 30天** = **128天（日历日..."
+      "answer_preview": "根据企业知识库，符合国家计划生育规定的女员工，产假天数为：在原产假 **98 天（日历日）** 基础上增加 **30 天**，合计 **128 天（日历日..."
     }
   ]
 }
