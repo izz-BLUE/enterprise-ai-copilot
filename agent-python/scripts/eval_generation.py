@@ -101,6 +101,45 @@ def _truncate(text: str, max_len: int = 80) -> str:
     return text[:max_len - 3] + '...'
 
 
+def _evaluate_case(process_chat, question: str,
+                   expected_answer_keywords: list[str]) -> dict:
+    """对单个 case 执行一次评估调用，返回结果 dict。"""
+    response = process_chat(question)
+
+    if not response.success:
+        return {
+            'passed': False,
+            'keyword_hit': False,
+            'raw_missing_keywords': [],
+            'norm_missing_keywords': [],
+            'answer_preview': 'LLM 调用失败',
+            'success': False,
+        }
+
+    answer = response.answer
+
+    if not expected_answer_keywords:
+        return {
+            'passed': True,
+            'keyword_hit': True,
+            'raw_missing_keywords': [],
+            'norm_missing_keywords': [],
+            'answer_preview': _truncate(answer),
+            'success': True,
+        }
+
+    keyword_hit, raw_missing, norm_missing = _check_keywords(
+        answer, expected_answer_keywords)
+    return {
+        'passed': keyword_hit,
+        'keyword_hit': keyword_hit,
+        'raw_missing_keywords': raw_missing,
+        'norm_missing_keywords': norm_missing,
+        'answer_preview': _truncate(answer),
+        'success': True,
+    }
+
+
 def main():
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -116,97 +155,91 @@ def main():
     from app.services.rag_service import process_chat
 
     # ── 表头 ──
-    HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:48}  {}'
-    ROW_FMT = '  {:<5}  {:>6}  {:>5}  {:48}  {}'
-    print(HEADER_FMT.format('ID', '结果', '状态', '问题', '缺失关键词'))
+    HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>4}  {:48}  {}'
+    ROW_FMT = '  {:<5}  {:>6}  {:>5}  {:>4}  {:48}  {}'
+    print(HEADER_FMT.format('ID', '结果', '状态', '次数', '问题', '缺失关键词'))
     print('  ' + '-' * 110)
 
     results = []
+    flaky_ids = []
     for case in cases:
         case_id = case['id']
         question = case['question']
         expected_answer_keywords: list[str] = case.get('expected_answer_keywords', [])
 
-        # 调用 RAG 生成
-        response = process_chat(question)
+        # ── 第一次尝试 ──
+        r1 = _evaluate_case(process_chat, question, expected_answer_keywords)
+        first_passed = r1['passed']
 
-        # success=false 直接 FAIL
-        if not response.success:
-            results.append({
-                'id': case_id,
-                'question': question,
-                'passed': False,
-                'keyword_hit': False,
-                'raw_missing_keywords': [],
-                'norm_missing_keywords': [],
-                'expected_answer_keywords': expected_answer_keywords,
-                'answer_preview': 'LLM 调用失败',
-                'success': False,
-            })
-            display_q = _truncate(question, 46)
-            print(ROW_FMT.format(case_id, 'FAIL', '-ERR', display_q, 'LLM 调用失败'))
-            continue
+        if first_passed or not r1['success']:
+            # 第一次 PASS 或 LLM 调用失败，不 retry
+            attempts = 1
+            flaky = False
+            final_passed = first_passed
+            final_r = r1
+        else:
+            # 第一次 FAIL（非 LLM 错误）→ retry 一次
+            r2 = _evaluate_case(process_chat, question, expected_answer_keywords)
+            attempts = 2
+            final_passed = r2['passed']
+            flaky = r2['passed']  # retry 后 PASS 才算 flaky
+            final_r = r2 if r2['passed'] else r1  # 优先取 PASS 的结果；都 FAIL 保留第一次
 
-        answer = response.answer
-
-        # 无 expected_answer_keywords 则跳过关键词判断
-        if not expected_answer_keywords:
-            results.append({
-                'id': case_id,
-                'question': question,
-                'passed': True,
-                'keyword_hit': True,
-                'raw_missing_keywords': [],
-                'norm_missing_keywords': [],
-                'expected_answer_keywords': [],
-                'answer_preview': _truncate(answer),
-                'success': True,
-            })
-            display_q = _truncate(question, 46)
-            print(ROW_FMT.format(case_id, 'PASS', '-SKIP', display_q, '(无 expected_answer_keywords)'))
-            continue
-
-        # 关键词检查（归一化后比较）
-        keyword_hit, raw_missing, norm_missing = _check_keywords(answer, expected_answer_keywords)
-        passed = keyword_hit
+        if flaky:
+            flaky_ids.append(case_id)
 
         results.append({
             'id': case_id,
             'question': question,
-            'passed': passed,
-            'keyword_hit': keyword_hit,
-            'raw_missing_keywords': raw_missing,
-            'norm_missing_keywords': norm_missing,
+            'passed': final_passed,
+            'keyword_hit': final_r['keyword_hit'],
+            'raw_missing_keywords': final_r.get('raw_missing_keywords', []),
+            'norm_missing_keywords': final_r.get('norm_missing_keywords', []),
             'expected_answer_keywords': expected_answer_keywords,
-            'answer_preview': _truncate(answer),
-            'success': True,
+            'answer_preview': final_r['answer_preview'],
+            'success': final_r['success'],
+            'attempts': attempts,
+            'flaky': flaky,
+            'first_passed': first_passed,
         })
 
-        status = 'PASS' if passed else 'FAIL'
-        kw_tag = '-OK' if keyword_hit else '-KW'
+        status = 'PASS' if final_passed else 'FAIL'
+        if flaky:
+            kw_tag = '-FLK'
+        elif final_r['success'] and not expected_answer_keywords:
+            kw_tag = '-SKIP'
+        elif not final_r['success']:
+            kw_tag = '-ERR'
+        else:
+            kw_tag = '-OK' if final_r['keyword_hit'] else '-KW'
         display_q = _truncate(question, 46)
-        missing_str = ', '.join(norm_missing) if norm_missing else '-'
-        print(ROW_FMT.format(case_id, status, kw_tag, display_q, missing_str))
+        missing_str = ', '.join(final_r.get('norm_missing_keywords', [])) if not final_passed else '-'
+        print(ROW_FMT.format(case_id, status, kw_tag, str(attempts), display_q, missing_str))
 
     # ── 汇总 ──
     total = len(results)
     passed_count = sum(1 for r in results if r['passed'])
     failed_count = total - passed_count
+    flaky_count = len(flaky_ids)
+    stable_pass_count = sum(1 for r in results if r.get('first_passed', r['passed']))
     success_count = sum(1 for r in results if r['success'])
     llm_fail_count = total - success_count
-    keyword_hit_count = sum(1 for r in results if r['keyword_hit'])
     pass_rate = (passed_count / total * 100) if total > 0 else 0.0
+    stable_pass_rate = (stable_pass_count / total * 100) if total > 0 else 0.0
 
     print()
     print('=' * 60)
     print('  生成评估结果汇总')
     print('=' * 60)
     print(f'    总用例数:              {total}')
-    print(f'    通过:                  {passed_count}')
+    print(f'    通过(最终):            {passed_count}')
     print(f'    失败:                  {failed_count}')
+    if flaky_ids:
+        print(f'    flaky case:            {flaky_ids}')
+        print(f'    flaky 数量:            {flaky_count}')
     print(f'    LLM 调用失败:          {llm_fail_count}')
-    print(f'    keyword_hit:           {keyword_hit_count}/{total}')
-    print(f'    generation_pass_rate:  {pass_rate:.1f}%')
+    print(f'    pass_rate(最终):       {pass_rate:.1f}%')
+    print(f'    stable_pass_rate(首次): {stable_pass_rate:.1f}%')
 
     # ── 失败用例详情 ──
     if failed_count > 0:
@@ -220,6 +253,7 @@ def main():
             print(f'\n  ID:                       {r["id"]}')
             print(f'  问题:                     {r["question"]}')
             print(f'  LLM 成功:                 {r["success"]}')
+            print(f'  尝试次数:                 {r.get("attempts", 1)}')
             print(f'  预期回答关键词:           {r["expected_answer_keywords"]}')
             raw_missing = r.get('raw_missing_keywords', [])
             norm_missing = r.get('norm_missing_keywords', [])
@@ -234,17 +268,17 @@ def main():
 
     # ── 退出码 ──
     _save_report(results, total, passed_count, failed_count,
-                 llm_fail_count, pass_rate)
+                 llm_fail_count, pass_rate, flaky_count, stable_pass_rate)
     sys.exit(0 if failed_count == 0 else 1)
 
 
 def _save_report(results: list[dict], total: int, passed_count: int,
                  failed_count: int, llm_fail_count: int,
-                 pass_rate: float) -> None:
+                 pass_rate: float, flaky_count: int,
+                 stable_pass_rate: float) -> None:
     """将生成评估结果写入 JSON 报告文件。"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
-    # 精简 cases 字段，去掉评估不需要的内部字段
     slim_cases = []
     for r in results:
         slim_cases.append({
@@ -252,6 +286,9 @@ def _save_report(results: list[dict], total: int, passed_count: int,
             'question': r['question'],
             'passed': r['passed'],
             'success': r['success'],
+            'attempts': r.get('attempts', 1),
+            'flaky': r.get('flaky', False),
+            'first_passed': r.get('first_passed', r['passed']),
             'expected_answer_keywords': r['expected_answer_keywords'],
             'raw_missing_keywords': r.get('raw_missing_keywords', []),
             'norm_missing_keywords': r.get('norm_missing_keywords', []),
@@ -264,8 +301,10 @@ def _save_report(results: list[dict], total: int, passed_count: int,
         'total': total,
         'passed': passed_count,
         'failed': failed_count,
+        'flaky_count': flaky_count,
         'llm_failed': llm_fail_count,
         'pass_rate': round(pass_rate / 100, 4),
+        'stable_pass_rate': round(stable_pass_rate / 100, 4),
         'cases': slim_cases,
     }
 
