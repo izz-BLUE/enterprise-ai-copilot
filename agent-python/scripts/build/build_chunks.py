@@ -22,7 +22,7 @@ import re
 # 脚本位于 agent-python/scripts/build_chunks.py
 # 项目根目录 = 脚本所在目录的父目录的父目录
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..', '..'))
 
 DOMAINS = ['bank', 'hr', 'it']
 CHUNK_SIZE = 500

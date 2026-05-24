@@ -17,7 +17,7 @@ import sys
 
 # ── 路径 ──────────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..', '..'))
 
 RETRIEVAL_SCRIPT = os.path.join(_SCRIPT_DIR, 'eval_retrieval.py')
 GENERATION_SCRIPT = os.path.join(_SCRIPT_DIR, 'eval_generation.py')
@@ -25,6 +25,9 @@ COMPARE_SCRIPT = os.path.join(_SCRIPT_DIR, 'compare_eval_reports.py')
 
 GENERATION_REPORT = os.path.join(PROJECT_ROOT, 'data', 'eval', 'reports', 'generation_eval_report.json')
 RETRIEVAL_REPORT = os.path.join(PROJECT_ROOT, 'data', 'eval', 'reports', 'retrieval_eval_report.json')
+
+GENERATION_BASELINE = os.path.join(PROJECT_ROOT, 'data', 'eval', 'baselines', 'generation_eval_baseline.json')
+RETRIEVAL_BASELINE = os.path.join(PROJECT_ROOT, 'data', 'eval', 'baselines', 'retrieval_eval_baseline.json')
 
 
 def _run_step(name: str, cmd: list[str]) -> int:
@@ -54,6 +57,7 @@ def main():
 
     # ── 3. 可选 regression 对比 ──
     args = sys.argv[1:]
+    use_baseline = '--with-baseline' in args
 
     if '--compare-generation' in args:
         idx = args.index('--compare-generation')
@@ -72,6 +76,21 @@ def main():
                            [sys.executable, COMPARE_SCRIPT, baseline, RETRIEVAL_REPORT])
             if rc != 0:
                 failed_steps.append('retrieval_regression')
+
+    if use_baseline:
+        for name, baseline_path, current_path in [
+            ('retrieval', RETRIEVAL_BASELINE, RETRIEVAL_REPORT),
+            ('generation', GENERATION_BASELINE, GENERATION_REPORT),
+        ]:
+            if not os.path.isfile(baseline_path):
+                print(f'\n  提示: {name} baseline 不存在 ({baseline_path})')
+                print(f'  请先运行 update_eval_baseline.py 初始化 baseline。')
+                failed_steps.append(f'{name}_baseline_missing')
+                continue
+            rc = _run_step(f'Regression Check: {name}',
+                           [sys.executable, COMPARE_SCRIPT, baseline_path, current_path])
+            if rc != 0:
+                failed_steps.append(f'{name}_regression')
 
     # ── 最终结论 ──
     print()

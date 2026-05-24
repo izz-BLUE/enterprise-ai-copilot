@@ -49,13 +49,15 @@ Faiss 负责语义召回，Keyword 检索负责精确关键词补充，去重后
 
 | 层级 | 脚本 | 评估内容 | 输出 |
 |------|------|----------|------|
-| 检索评估 | `eval_retrieval.py` | source_hit / keyword_hit / final_pass_rate | `retrieval_eval_report.json` |
-| 生成评估 | `eval_generation.py` | answer 关键词命中 / LLM 成功率 / pass_rate | `generation_eval_report.json` |
+| 检索评估 | `scripts/eval/eval_retrieval.py` | source_hit / keyword_hit / final_pass_rate | `reports/retrieval_eval_report.json` |
+| 生成评估 | `scripts/eval/eval_generation.py` | answer 关键词命中 / flaky 检测 / pass_rate | `reports/generation_eval_report.json` |
+| 回归检查 | `scripts/eval/compare_eval_reports.py` | baseline vs current 对比 | 控制台 + 退出码 |
+| 一键评估 | `scripts/eval/run_rag_eval.py` | 串联检索+生成+回归 | 控制台汇总 |
 
 - 检索评估不调用 LLM，零 token 消耗
-- 生成评估调用 LLM 但使用关键词规则判断，不引入 LLM-as-judge
+- 生成评估支持 retry 机制，自动标记 flaky case
 - 支持文本归一化（去空格、全角转半角），减少格式误判
-- JSON 报告支持 CI 接入、回归测试和质量追踪
+- JSON 报告 + baseline 对比，支持 CI 质量门禁
 
 ### 7. 已验证的测试集
 
@@ -90,7 +92,7 @@ enterprise-ai-copilot/
 │   │   ├── retrieval/         # faiss_retriever, keyword_retriever, hybrid_retriever
 │   │   ├── schemas/           # ChatRequest, ChatResponse
 │   │   └── services/          # rag_service, llm_service
-│   └── scripts/               # build_chunks, build_embeddings, build_faiss_index, eval_*
+│   └── scripts/               # build/ 构建, eval/ 评估, experiments/ 早期实验
 ├── data/
 │   ├── hr/ bank/ it/          # 知识库源文档
 │   ├── processed/             # chunks.json, faiss.index, faiss_metadata.json
@@ -104,10 +106,10 @@ enterprise-ai-copilot/
 
 ### 离线构建
 
-```
-Markdown → build_chunks.py → chunks.json
-         → build_embeddings.py → embeddings.json
-         → build_faiss_index.py → faiss.index + faiss_metadata.json
+```bash
+python agent-python/scripts/build/build_chunks.py
+python agent-python/scripts/build/build_embeddings.py
+python agent-python/scripts/build/build_faiss_index.py
 ```
 
 ### 在线问答
@@ -120,9 +122,20 @@ Markdown → build_chunks.py → chunks.json
 
 ### 评估
 
-```
-rag_eval_cases.json → eval_retrieval.py  → retrieval_eval_report.json
-rag_eval_cases.json → eval_generation.py → generation_eval_report.json
+```bash
+# 一键运行全部评估
+python agent-python/scripts/eval/run_rag_eval.py
+
+# 初始化 baseline（需先确保当前报告全部通过）
+python agent-python/scripts/eval/update_eval_baseline.py
+
+# 评估 + 质量门禁（对比 baseline）
+python agent-python/scripts/eval/run_rag_eval.py --with-baseline
+
+# 单独运行
+python agent-python/scripts/eval/eval_retrieval.py
+python agent-python/scripts/eval/eval_generation.py
+python agent-python/scripts/eval/compare_eval_reports.py baseline.json current.json
 ```
 
 ---
