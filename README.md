@@ -63,6 +63,18 @@ Faiss 负责语义召回，Keyword 检索负责精确关键词补充，去重后
 
 当前 8 个测试用例覆盖请假、年假、婚假、产假、病假材料、迟到早退处罚、旷工解除合同等场景。
 
+### 8. LangChain RAG Chain（实验性模块）
+
+`app/chains/langchain_rag_chain.py` 提供 `answer_with_langchain_rag()` 函数，使用 LangChain ChatPromptTemplate + ChatOpenAI 封装 RAG 问答链路。
+
+```
+python agent-python/scripts/experiments/langchain_rag_demo.py "病假需要提供哪些材料？"
+```
+
+- 复用现有 `hybrid_retriever` 做检索，LangChain 负责 Prompt 模板和 LLM 调用
+- 当前 /agent/chat 主流程仍使用手写 RAG（`rag_service.py`），未替换
+- 此模块作为实验性可复用封装，用于对比手写实现和框架实现的差异
+
 ---
 
 ## 技术栈
