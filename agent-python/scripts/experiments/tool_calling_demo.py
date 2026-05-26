@@ -17,6 +17,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..', '..'))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, 'agent-python'))
 
+from app.guards.safety_guard import check_user_query_safety
 from app.tools.rag_tools import rag_answer_tool, eval_report_tool
 
 # ── 路由规则 ───────────────────────────────────────────────
@@ -36,13 +37,24 @@ def main():
         sys.exit(1)
 
     question = sys.argv[1]
-    tool_name = _route(question)
 
     print(f'用户问题: {question}')
+
+    # ── Safety Guard ──
+    safety = check_user_query_safety(question)
+    if not safety["safe"]:
+        print(f'选择的工具: safety_guard')
+        print(f'类别: {safety["category"]}')
+        print(f'原因: {safety["reason"]}')
+        print(f'\n{"=" * 60}')
+        print(f'{safety["message"]}')
+        print(f'{"=" * 60}')
+        sys.exit(0)
+
+    tool_name = _route(question)
     print(f'选择的工具: {tool_name}')
 
     if tool_name == 'eval_report_tool':
-        # 默认查全部报告
         result = eval_report_tool.invoke({"report_type": "all"})
     else:
         result = rag_answer_tool.invoke({"question": question})
