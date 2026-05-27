@@ -124,11 +124,12 @@ enterprise-ai-copilot/
 │   │   ├── agents/            # langgraph_agent — LangGraph 状态图
 │   │   └── guards/            # safety_guard — 输入安全边界控制
 │   └── scripts/               # build/ 构建, eval/ 评估, experiments/ 实验
+├── frontend/                   # React 前端演示页面
 ├── data/
 │   ├── hr/ bank/ it/          # 知识库源文档
 │   ├── processed/             # chunks.json, faiss.index, faiss_metadata.json
 │   └── eval/                  # rag_eval_cases.json, reports/
-└── docs/                      # 项目文档, 架构说明, 每日日志
+└── docs/                      # 项目文档, 架构说明, 接口文档
 ```
 
 ---
@@ -148,6 +149,29 @@ uv run uvicorn app.main:app --reload --port 8000
 ```bash
 cd backend-java
 ./mvnw spring-boot:run
+```
+
+### 前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+默认调用 Java 服务 `http://localhost:8080`，支持 LangGraph Agent 和普通 RAG 两种模式。
+
+### 三端启动顺序
+
+```bash
+# 1. Python AI 服务
+cd agent-python && uv run uvicorn app.main:app --reload --port 8000
+
+# 2. Java 业务服务
+cd backend-java && ./mvnw spring-boot:run
+
+# 3. 前端演示页面
+cd frontend && npm run dev
 ```
 
 Java 调用 Python 的地址配置在 `application.properties`：
