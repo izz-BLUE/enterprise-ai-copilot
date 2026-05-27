@@ -10,3 +10,13 @@ class ChatResponse(BaseModel):
     model: str
     traceId: str
     success: bool
+
+
+class AgentResponse(BaseModel):
+    answer: str
+    route: str
+    safe: bool
+    category: str
+    reason: str
+    sources: list = []
+    success: bool
