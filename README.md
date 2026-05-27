@@ -75,6 +75,21 @@ python agent-python/scripts/experiments/langchain_rag_demo.py "病假需要提�
 - 当前 /agent/chat 主流程仍使用手写 RAG（`rag_service.py`），未替换
 - 此模块作为实验性可复用封装，用于对比手写实现和框架实现的差异
 
+### 9. LangGraph Agent（实验性模块）
+
+`app/agents/langgraph_agent.py` 实现 safety → router → (rag | eval | refuse) 状态图。
+
+- 集成 Safety Guard 输入安全检查（5 类风险规则）
+- 规则路由：自动区分 RAG 问答、评估查询、安全拒答
+- 暴露为 `POST /agent/langgraph/chat` 和 Java `POST /api/agent/langgraph/chat`
+- 与 `/agent/chat` **并行运行**，不替换原 RAG 主链路
+
+### 10. Java 代理接口
+
+- `POST /api/chat` — 代理 Python `/agent/chat`（RAG 主链路）
+- `POST /api/agent/langgraph/chat` — 代理 Python `/agent/langgraph/chat`（Agent 链路）
+- Python 服务地址统一配置：`python.agent.base-url=http://localhost:8000`
+
 ---
 
 ## 技术栈
@@ -102,9 +117,13 @@ enterprise-ai-copilot/
 │   │   ├── core/              # config, 日志
 │   │   ├── prompts/           # system prompt, RAG prompt 构造
 │   │   ├── retrieval/         # faiss_retriever, keyword_retriever, hybrid_retriever
-│   │   ├── schemas/           # ChatRequest, ChatResponse
-│   │   └── services/          # rag_service, llm_service
-│   └── scripts/               # build/ 构建, eval/ 评估, experiments/ 早期实验
+│   │   ├── schemas/           # ChatRequest, ChatResponse, AgentResponse
+│   │   ├── services/          # rag_service, llm_service
+│   │   ├── chains/            # langchain_rag_chain — LangChain RAG 封装
+│   │   ├── tools/             # rag_answer_tool, eval_report_tool
+│   │   ├── agents/            # langgraph_agent — LangGraph 状态图
+│   │   └── guards/            # safety_guard — 输入安全边界控制
+│   └── scripts/               # build/ 构建, eval/ 评估, experiments/ 实验
 ├── data/
 │   ├── hr/ bank/ it/          # 知识库源文档
 │   ├── processed/             # chunks.json, faiss.index, faiss_metadata.json
@@ -114,14 +133,55 @@ enterprise-ai-copilot/
 
 ---
 
+## 快速启动
+
+### Python 服务
+
+```bash
+cd agent-python
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+### Java 服务
+
+```bash
+cd backend-java
+./mvnw spring-boot:run
+```
+
+Java 调用 Python 的地址配置在 `application.properties`：
+```properties
+python.agent.base-url=http://localhost:8000
+```
+
+---
+
+## 两条聊天链路
+
+| 特性 | `/api/chat` | `/api/agent/langgraph/chat` |
+|------|------------|---------------------------|
+| Python 接口 | `/agent/chat` | `/agent/langgraph/chat` |
+| 实现方式 | 手写 RAG（rag_service） | LangGraph Agent 状态图 |
+| Safety Guard | 无 | 有（5 类风险规则） |
+| 意图路由 | 无 | 有（rag / eval / refuse） |
+| Tool Calling | 无 | 有（rag_answer_tool + eval_report_tool） |
+| 稳定性 | 稳定主链路 | 实验链路 |
+| 接口文档 | [docs/api.md](docs/api.md) | [docs/api.md](docs/api.md) |
+
+**`/api/chat` 是稳定 RAG 主链路，`/api/agent/langgraph/chat` 是 Agent 实验链路。采用并行接口便于灰度验证。**
+
+---
+
 ## 链路说明
 
 ### 离线构建
 
 ```bash
-python agent-python/scripts/build/build_chunks.py
-python agent-python/scripts/build/build_embeddings.py
-python agent-python/scripts/build/build_faiss_index.py
+cd agent-python
+uv run python scripts/build/build_chunks.py
+uv run python scripts/build/build_embeddings.py
+uv run python scripts/build/build_faiss_index.py
 ```
 
 ### 在线问答
@@ -135,19 +195,20 @@ python agent-python/scripts/build/build_faiss_index.py
 ### 评估
 
 ```bash
+cd agent-python
+
 # 一键运行全部评估
-python agent-python/scripts/eval/run_rag_eval.py
+uv run python scripts/eval/run_rag_eval.py
 
 # 初始化 baseline（需先确保当前报告全部通过）
-python agent-python/scripts/eval/update_eval_baseline.py
+uv run python scripts/eval/update_eval_baseline.py
 
 # 评估 + 质量门禁（对比 baseline）
-python agent-python/scripts/eval/run_rag_eval.py --with-baseline
+uv run python scripts/eval/run_rag_eval.py --with-baseline
 
-# 单独运行
-python agent-python/scripts/eval/eval_retrieval.py
-python agent-python/scripts/eval/eval_generation.py
-python agent-python/scripts/eval/compare_eval_reports.py baseline.json current.json
+# 实验脚本
+uv run python scripts/experiments/langgraph_agent_demo.py "病假需要提供哪些材料？"
+uv run python scripts/experiments/tool_calling_demo.py "当前RAG评估通过率是多少？"
 ```
 
 ---
@@ -160,7 +221,7 @@ python agent-python/scripts/eval/compare_eval_reports.py baseline.json current.j
 - Cross Encoder Re-rank
 - Query Rewrite
 - 多轮对话上下文管理
-- LangChain / LangGraph 任务编排
+- LLM 自动 Tool Calling（当前为规则路由）
 - Qdrant / Milvus 向量数据库
 - 文档上传与知识库管理
 - 用户权限控制
