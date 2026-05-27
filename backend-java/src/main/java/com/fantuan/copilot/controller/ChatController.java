@@ -8,6 +8,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +24,9 @@ public class ChatController {
 
     private final RestTemplate restTemplate;
 
+    @Value("${python.agent.base-url}")
+    private String agentBaseUrl;
+
     public ChatController(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
     }
@@ -33,8 +37,9 @@ public class ChatController {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<ChatRequest> httpEntity = new HttpEntity<>(request, headers);
+            String url = agentBaseUrl + "/agent/chat";
             ResponseEntity<ChatResponse> response = restTemplate.postForEntity(
-                    "http://localhost:8000/agent/chat", httpEntity, ChatResponse.class);
+                    url, httpEntity, ChatResponse.class);
             return response.getBody();
         } catch (HttpClientErrorException e) {
             log.error("调用 Python Agent 返回 HTTP 4xx: status={}, body={}", e.getStatusCode(), e.getResponseBodyAsString(), e);
