@@ -20,3 +20,4 @@ class AgentResponse(BaseModel):
     reason: str
     sources: list = []
     success: bool
+    traceId: str = ""

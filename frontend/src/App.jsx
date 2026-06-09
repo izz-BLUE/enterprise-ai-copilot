@@ -45,17 +45,27 @@ function App() {
       ? '/api/agent/langgraph/chat'
       : '/api/chat'
 
+    // 生成 traceId
+    const traceId = crypto.randomUUID
+      ? crypto.randomUUID()
+      : Date.now() + '-' + Math.random().toString(36).slice(2)
+
     try {
       const response = await fetch(`${JAVA_BASE_URL}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Trace-Id': traceId,
+        },
         body: JSON.stringify({ message: question }),
       })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
+      // 如果后端没有返回 traceId，用前端生成的兜底
+      if (!data.traceId) data.traceId = traceId
       setResult({ question, ...data })
     } catch (e) {
-      setError(`请求失败: ${e.message}`)
+      setError(`请求失败: ${e.message} (traceId: ${traceId})`)
     } finally {
       setLoading(false)
     }
@@ -141,6 +151,7 @@ function App() {
                   )}
                 </>
               )}
+              {result.traceId && <span className="tag tag-gray">traceId: {result.traceId}</span>}
             </div>
           )}
 
