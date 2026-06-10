@@ -4,55 +4,199 @@
     "question": "公司上班时间是什么？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["9:30", "13:30", "18:30"],
-    "expected_answer_keywords": ["9:30", "18:30"]
+    "expected_answer_keywords": ["9:30", "18:30"],
+    "answerable": true
   },
   {
     "id": "leave_002",
     "question": "请假三天需要提前多久申请？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["提前十个工作日"],
-    "expected_answer_keywords": ["提前十个工作日"]
+    "expected_answer_keywords": ["提前十个工作日"],
+    "answerable": true
   },
   {
     "id": "leave_003",
     "question": "病假需要提供哪些材料？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["病历本", "挂号单", "缴费清单"],
-    "expected_answer_keywords": ["病历本", "挂号单", "缴费清单"]
+    "expected_answer_keywords": ["病历本", "挂号单", "缴费清单"],
+    "answerable": true
   },
   {
     "id": "leave_004",
     "question": "年假怎么计算？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["年休假", "5 天", "10 天", "15 天"],
-    "expected_answer_keywords": ["5天", "10天", "15天"]
+    "expected_answer_keywords": ["5天", "10天", "15天"],
+    "answerable": true
   },
   {
     "id": "leave_005",
     "question": "旷工几天会被解除劳动合同？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["旷工", "解除劳动合同"],
-    "expected_answer_keywords": ["旷工", "解除劳动合同"]
+    "expected_answer_keywords": ["旷工", "解除劳动合同"],
+    "answerable": true
   },
   {
     "id": "leave_006",
     "question": "迟到早退怎么处罚？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["罚款", "200 元"],
-    "expected_answer_keywords": ["罚款", "200"]
+    "expected_answer_keywords": ["罚款", "200"],
+    "answerable": true
   },
   {
     "id": "leave_007",
     "question": "婚假有多少天？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["婚假", "10 天"],
-    "expected_answer_keywords": ["婚假", "10 天"]
+    "expected_answer_keywords": ["婚假", "10 天"],
+    "answerable": true
   },
   {
     "id": "leave_008",
     "question": "产假有多少天？",
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["产假", "98 天", "30 天"],
-    "expected_answer_keywords": ["产假", "98", "30"]
+    "expected_answer_keywords": ["产假", "98", "30"],
+    "answerable": true
+  },
+  {
+    "id": "leave_009",
+    "question": "丧假有几天？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["丧假", "三天"],
+    "expected_answer_keywords": ["丧假", "3"],
+    "answerable": true
+  },
+  {
+    "id": "leave_010",
+    "question": "病假工资怎么算？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["病假工资", "70%"],
+    "expected_answer_keywords": ["70"],
+    "answerable": true
+  },
+  {
+    "id": "leave_011",
+    "question": "事假超过多少天会影响年度调薪？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["事假", "10 个工作日"],
+    "expected_answer_keywords": ["10"],
+    "answerable": true
+  },
+  {
+    "id": "leave_012",
+    "question": "加班到几点可以打车报销？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["22:00", "打车"],
+    "expected_answer_keywords": ["22"],
+    "answerable": true
+  },
+  {
+    "id": "leave_013",
+    "question": "婚假需要提供什么材料？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["结婚证"],
+    "expected_answer_keywords": ["结婚证"],
+    "answerable": true
+  },
+  {
+    "id": "leave_014",
+    "question": "员工请假审批流程是怎样的？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["直接主管", "部门"],
+    "expected_answer_keywords": ["审批"],
+    "answerable": true
+  },
+  {
+    "id": "leave_015",
+    "question": "哺乳假每天有多长时间？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["哺乳假", "一小时"],
+    "expected_answer_keywords": ["一小时", "1小时"],
+    "answerable": true
+  },
+  {
+    "id": "it_001",
+    "question": "怎么申请公司VPN？",
+    "expected_sources": ["vpn_guide.md"],
+    "expected_keywords": ["VPN", "下载"],
+    "expected_answer_keywords": ["VPN", "下载"],
+    "answerable": true
+  },
+  {
+    "id": "it_002",
+    "question": "VPN客户端怎么使用？",
+    "expected_sources": ["vpn_guide.md"],
+    "expected_keywords": ["用户名", "密码"],
+    "expected_answer_keywords": ["用户名", "密码"],
+    "answerable": true
+  },
+  {
+    "id": "onboard_001",
+    "question": "新员工入职需要做什么？",
+    "expected_sources": ["onboarding.md"],
+    "expected_keywords": ["入职信息", "工牌"],
+    "expected_answer_keywords": ["入职", "工牌"],
+    "answerable": true
+  },
+  {
+    "id": "none_001",
+    "question": "公司股票期权怎么分配？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_002",
+    "question": "员工购房补贴标准是什么？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_003",
+    "question": "年终奖一定发几个月？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_004",
+    "question": "公司是否提供商业保险？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_005",
+    "question": "内推奖金是多少？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_006",
+    "question": "离职补偿如何计算？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "none_007",
+    "question": "可以远程办公几天？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
   }
 ]

@@ -6,8 +6,12 @@ eval_retrieval.py — RAG 检索评估脚本（Source + Keyword 双层评估）
 以及预期关键词是否出现在 TopK chunk content 中。
 不调用 LLM，不消耗 token。
 
+支持 answerable / no-answer 两类 case：
+  - answerable case：检查 source_hit + keyword_hit
+  - no-answer case：只记录检索结果，单独统计，不判 fail
+
 用法:
-    python agent-python/scripts/eval_retrieval.py
+    python agent-python/scripts/eval/eval_retrieval.py
 
 依赖:
     - data/eval/rag_eval_cases.json（测试集）
@@ -70,23 +74,28 @@ def main():
     with open(EVAL_FILE, 'r', encoding='utf-8') as f:
         cases = json.load(f)
 
-    print(f'加载 {len(cases)} 个测试用例\n')
+    # ── 区分 answerable / no-answer ──
+    answerable_cases = [c for c in cases if c.get('answerable', True)]
+    no_answer_cases = [c for c in cases if not c.get('answerable', True)]
+
+    print(f'加载 {len(cases)} 个测试用例 (answerable={len(answerable_cases)}, no_answer={len(no_answer_cases)})\n')
 
     # ── 导入检索器（延迟导入，避免前置检查失败时因缺少依赖而崩溃） ──
     from app.retrieval.hybrid_retriever import retrieve
 
     # ── 表头 ──
-    HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:40}  {}'
-    ROW_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:40}  {}'
-    print(HEADER_FMT.format('ID', '结果', 'SRC', 'KW', '问题', '预期来源'))
+    HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:>4}  {:38}  {}'
+    ROW_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:>4}  {:38}  {}'
+    print(HEADER_FMT.format('ID', '结果', 'SRC', 'KW', '类型', '问题', '预期来源'))
     print('  ' + '-' * 120)
 
     results = []
     for case in cases:
         case_id = case['id']
         question = case['question']
-        expected_sources: list[str] = case['expected_sources']
+        expected_sources: list[str] = case.get('expected_sources', [])
         expected_keywords: list[str] = case.get('expected_keywords', [])
+        answerable = case.get('answerable', True)
 
         # 调用 hybrid retriever
         topk = retrieve(question, top_k=TOP_K)
@@ -95,64 +104,91 @@ def main():
         actual_sources = sorted({r['source_file'] for r in topk})
         top_chunk_ids = [r['id'] for r in topk]
 
-        # ── source_hit：预期来源是否出现在 TopK 中 ──
-        source_hit = any(es in actual_sources for es in expected_sources)
+        if answerable:
+            # ── answerable case：原有逻辑 ──
+            source_hit = any(es in actual_sources for es in expected_sources)
 
-        # ── keyword_hit：预期关键词是否出现在 TopK content 中 ──
-        all_content = '\n'.join(r['content'] for r in topk)
-        keyword_hit = True
-        missing_keywords: list[str] = []
-        if expected_keywords:
-            keyword_hit, missing_keywords = _check_keywords(all_content, expected_keywords)
+            all_content = '\n'.join(r['content'] for r in topk)
+            keyword_hit = True
+            missing_keywords: list[str] = []
+            if expected_keywords:
+                keyword_hit, missing_keywords = _check_keywords(all_content, expected_keywords)
 
-        # ── 最终判定 ──
-        # 如果有 expected_keywords，必须 source_hit AND keyword_hit
-        # 如果没有 expected_keywords，只按 source_hit 判断
-        if expected_keywords:
-            passed = source_hit and keyword_hit
+            if expected_keywords:
+                passed = source_hit and keyword_hit
+            else:
+                passed = source_hit
+
+            results.append({
+                'id': case_id,
+                'question': question,
+                'answerable': True,
+                'passed': passed,
+                'source_hit': source_hit,
+                'keyword_hit': keyword_hit,
+                'missing_keywords': missing_keywords,
+                'expected_sources': expected_sources,
+                'expected_keywords': expected_keywords,
+                'actual_sources': actual_sources,
+                'top_chunk_ids': top_chunk_ids,
+            })
+
+            status = 'PASS' if passed else 'FAIL'
+            src_tag = '+SRC' if source_hit else '-SRC'
+            kw_tag = '+KW ' if keyword_hit else '-KW '
         else:
-            passed = source_hit
+            # ── no-answer case：只记录检索结果，不判 fail ──
+            results.append({
+                'id': case_id,
+                'question': question,
+                'answerable': False,
+                'passed': True,  # no-answer case 在 retrieval 层不判 fail
+                'source_hit': False,
+                'keyword_hit': False,
+                'missing_keywords': [],
+                'expected_sources': [],
+                'expected_keywords': [],
+                'actual_sources': actual_sources,
+                'top_chunk_ids': top_chunk_ids,
+            })
 
-        results.append({
-            'id': case_id,
-            'question': question,
-            'passed': passed,
-            'source_hit': source_hit,
-            'keyword_hit': keyword_hit,
-            'missing_keywords': missing_keywords,
-            'expected_sources': expected_sources,
-            'expected_keywords': expected_keywords,
-            'actual_sources': actual_sources,
-            'top_chunk_ids': top_chunk_ids,
-        })
+            status = 'SKIP'
+            src_tag = ' N/A'
+            kw_tag = ' N/A'
 
-        status = 'PASS' if passed else 'FAIL'
-        src_tag = '+SRC' if source_hit else '-SRC'
-        kw_tag = '+KW ' if keyword_hit else '-KW '
-        display_question = question if len(question) <= 38 else question[:35] + '...'
-        print(ROW_FMT.format(case_id, status, src_tag, kw_tag,
-                             display_question, ', '.join(expected_sources)))
+        display_question = question if len(question) <= 36 else question[:33] + '...'
+        type_tag = '是' if answerable else '否'
+        print(ROW_FMT.format(case_id, status, src_tag, kw_tag, type_tag,
+                             display_question, ', '.join(expected_sources) if expected_sources else '-'))
 
-    # ── 汇总 ──
+    # ── 汇总（只统计 answerable case）──
+    answerable_results = [r for r in results if r['answerable']]
+    no_answer_results = [r for r in results if not r['answerable']]
+
     total = len(results)
-    source_hit_count = sum(1 for r in results if r['source_hit'])
-    keyword_hit_count = sum(1 for r in results if r['keyword_hit'])
-    passed_count = sum(1 for r in results if r['passed'])
-    failed_count = total - passed_count
-    source_hit_rate = (source_hit_count / total * 100) if total > 0 else 0.0
-    keyword_hit_rate = (keyword_hit_count / total * 100) if total > 0 else 0.0
-    final_pass_rate = (passed_count / total * 100) if total > 0 else 0.0
+    ab_total = len(answerable_results)
+    na_total = len(no_answer_results)
+
+    source_hit_count = sum(1 for r in answerable_results if r['source_hit'])
+    keyword_hit_count = sum(1 for r in answerable_results if r['keyword_hit'])
+    passed_count = sum(1 for r in answerable_results if r['passed'])
+    failed_count = ab_total - passed_count
+    source_hit_rate = (source_hit_count / ab_total * 100) if ab_total > 0 else 0.0
+    keyword_hit_rate = (keyword_hit_count / ab_total * 100) if ab_total > 0 else 0.0
+    final_pass_rate = (passed_count / ab_total * 100) if ab_total > 0 else 0.0
 
     print()
     print('=' * 60)
     print('  评估结果汇总')
     print('=' * 60)
-    print(f'    总用例数:          {total}')
-    print(f'    通过:              {passed_count}')
-    print(f'    失败:              {failed_count}')
-    print(f'    source_hit_rate:   {source_hit_rate:.1f}%')
-    print(f'    keyword_hit_rate:  {keyword_hit_rate:.1f}%')
-    print(f'    final_pass_rate:   {final_pass_rate:.1f}%')
+    print(f'    总用例数:              {total}')
+    print(f'    answerable 用例数:     {ab_total}')
+    print(f'    no-answer 用例数:      {na_total}')
+    print(f'    answerable 通过:       {passed_count}')
+    print(f'    answerable 失败:       {failed_count}')
+    print(f'    source_hit_rate:       {source_hit_rate:.1f}%')
+    print(f'    keyword_hit_rate:      {keyword_hit_rate:.1f}%')
+    print(f'    final_pass_rate:       {final_pass_rate:.1f}%')
 
     # ── 失败用例详情 ──
     if failed_count > 0:
@@ -161,7 +197,7 @@ def main():
         print('  失败用例分析')
         print('=' * 60)
         for r in results:
-            if r['passed']:
+            if r['passed'] or not r['answerable']:
                 continue
             print(f'\n  ID:               {r["id"]}')
             print(f'  问题:             {r["question"]}')
@@ -174,13 +210,16 @@ def main():
             print(f'  TopK chunk IDs:   {r["top_chunk_ids"]}')
 
     # ── 退出码 ──
-    _save_report(results, total, passed_count, failed_count,
+    _save_report(results, total, ab_total, na_total,
+                 passed_count, failed_count,
                  source_hit_rate, keyword_hit_rate, final_pass_rate)
     sys.exit(0 if failed_count == 0 else 1)
 
 
-def _save_report(results: list[dict], total: int, passed_count: int,
-                 failed_count: int, source_hit_rate: float, keyword_hit_rate: float,
+def _save_report(results: list[dict], total: int,
+                 ab_total: int, na_total: int,
+                 passed_count: int, failed_count: int,
+                 source_hit_rate: float, keyword_hit_rate: float,
                  final_pass_rate: float) -> None:
     """将评估结果写入 JSON 报告文件。"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -190,6 +229,8 @@ def _save_report(results: list[dict], total: int, passed_count: int,
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'top_k': TOP_K,
         'total': total,
+        'answerable_cases': ab_total,
+        'no_answer_cases': na_total,
         'passed': passed_count,
         'failed': failed_count,
         'source_hit_rate': round(source_hit_rate / 100, 4),

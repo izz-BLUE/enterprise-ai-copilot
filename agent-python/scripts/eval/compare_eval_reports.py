@@ -39,6 +39,12 @@ def _load_report(path: str) -> dict:
         print(f'[错误] 报告缺少必要字段: {missing}')
         sys.exit(2)
 
+    # 兼容新报告格式：如果 current 有 answerable/no-answer 分组字段，打印摘要
+    if 'answerable_cases' in report:
+        print(f'  answerable_cases={report["answerable_cases"]}, no_answer_cases={report.get("no_answer_cases", 0)}')
+    if 'answerable_pass_rate' in report:
+        print(f'  answerable_pass_rate={report["answerable_pass_rate"]}, no_answer_pass_rate={report.get("no_answer_pass_rate", 0)}')
+
     return report
 
 
