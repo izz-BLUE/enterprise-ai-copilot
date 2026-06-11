@@ -18,6 +18,7 @@ eval_retrieval.py — RAG 检索评估脚本（Source + Keyword 双层评估）
     - data/processed/faiss.index（需先运行 build_faiss_index.py）
 """
 
+import argparse
 import json
 import os
 import sys
@@ -66,6 +67,13 @@ def _check_keywords(content: str, expected_keywords: list[str]) -> tuple[bool, l
 
 
 def main():
+    # ── 解析命令行参数 ──
+    parser = argparse.ArgumentParser(description='RAG 检索评估')
+    parser.add_argument('--top-k', type=int, default=TOP_K,
+                        help=f'TopK 值（默认 {TOP_K}）')
+    args = parser.parse_args()
+    top_k = args.top_k
+
     # ── 前置检查 ──
     if not _check_prerequisites():
         sys.exit(1)
@@ -98,7 +106,7 @@ def main():
         answerable = case.get('answerable', True)
 
         # 调用 hybrid retriever
-        topk = retrieve(question, top_k=TOP_K)
+        topk = retrieve(question, top_k=top_k)
 
         # 提取实际 source_file（去重）
         actual_sources = sorted({r['source_file'] for r in topk})
@@ -212,7 +220,7 @@ def main():
     # ── 退出码 ──
     _save_report(results, total, ab_total, na_total,
                  passed_count, failed_count,
-                 source_hit_rate, keyword_hit_rate, final_pass_rate)
+                 source_hit_rate, keyword_hit_rate, final_pass_rate, top_k)
     sys.exit(0 if failed_count == 0 else 1)
 
 
@@ -220,14 +228,14 @@ def _save_report(results: list[dict], total: int,
                  ab_total: int, na_total: int,
                  passed_count: int, failed_count: int,
                  source_hit_rate: float, keyword_hit_rate: float,
-                 final_pass_rate: float) -> None:
+                 final_pass_rate: float, top_k: int = TOP_K) -> None:
     """将评估结果写入 JSON 报告文件。"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
     report = {
         'eval_type': 'retrieval',
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'top_k': TOP_K,
+        'top_k': top_k,
         'total': total,
         'answerable_cases': ab_total,
         'no_answer_cases': na_total,

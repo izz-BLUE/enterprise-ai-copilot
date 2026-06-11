@@ -13,6 +13,7 @@ eval_generation.py — RAG 生成评估脚本（Answer 关键词评估）
     python agent-python/scripts/eval/eval_generation.py
 """
 
+import argparse
 import json
 import os
 import re
@@ -193,6 +194,13 @@ def _evaluate_no_answer(process_chat, question: str) -> dict:
 
 
 def main():
+    # ── 解析命令行参数 ──
+    parser = argparse.ArgumentParser(description='RAG 生成评估')
+    parser.add_argument('--top-k', type=int, default=3,
+                        help='TopK 值（默认 3）')
+    args = parser.parse_args()
+    top_k = args.top_k
+
     # ── 前置检查 ──
     if not _check_prerequisites():
         sys.exit(1)
@@ -204,10 +212,12 @@ def main():
     answerable_cases = [c for c in cases if c.get('answerable', True)]
     no_answer_cases = [c for c in cases if not c.get('answerable', True)]
 
-    print(f'加载 {len(cases)} 个测试用例 (answerable={len(answerable_cases)}, no_answer={len(no_answer_cases)})\n')
+    print(f'加载 {len(cases)} 个测试用例 (answerable={len(answerable_cases)}, no_answer={len(no_answer_cases)}, top_k={top_k})\n')
 
     # ── 延迟导入 ──
     from app.services.rag_service import process_chat
+    # 包装 process_chat，注入 top_k
+    _chat = lambda q: process_chat(q, top_k=top_k)
 
     # ── 表头 ──
     HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>4}  {:>4}  {:38}  {}'
@@ -225,7 +235,7 @@ def main():
 
         if answerable:
             # ── answerable case：原有逻辑 ──
-            r1 = _evaluate_answerable(process_chat, question, expected_answer_keywords)
+            r1 = _evaluate_answerable(_chat, question, expected_answer_keywords)
             first_passed = r1['passed']
 
             if first_passed or not r1['success']:
@@ -234,7 +244,7 @@ def main():
                 final_passed = first_passed
                 final_r = r1
             else:
-                r2 = _evaluate_answerable(process_chat, question, expected_answer_keywords)
+                r2 = _evaluate_answerable(_chat, question, expected_answer_keywords)
                 attempts = 2
                 final_passed = r2['passed']
                 flaky = r2['passed']
@@ -273,7 +283,7 @@ def main():
 
         else:
             # ── no-answer case：检查拒答 ──
-            r1 = _evaluate_no_answer(process_chat, question)
+            r1 = _evaluate_no_answer(_chat, question)
             first_passed = r1['passed']
 
             if first_passed or not r1['success']:
@@ -282,7 +292,7 @@ def main():
                 final_passed = first_passed
                 final_r = r1
             else:
-                r2 = _evaluate_no_answer(process_chat, question)
+                r2 = _evaluate_no_answer(_chat, question)
                 attempts = 2
                 final_passed = r2['passed']
                 flaky = r2['passed']
