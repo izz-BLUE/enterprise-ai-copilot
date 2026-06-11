@@ -1,6 +1,0 @@
-{
-  "answer": "当前知识库暂无相关信息。",
-  "model": "deepseek-v4-flash",
-  "traceId": "a1ecba25-eb1e-4659-bf21-f2ff38df1cc6",
-  "success": true
-}

@@ -1,6 +1,0 @@
-{
-  "answer": "当前 AI 服务暂时不可用，请稍后重试。",
-  "model": "deepseek-v4-flash",
-  "traceId": "09463e95-77c8-42dc-98f2-77ccd3097da7",
-  "success": false
-}
