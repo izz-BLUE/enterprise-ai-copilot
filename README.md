@@ -571,6 +571,6 @@ The goal is not to train models, but to build **production-oriented AI applicati
 
 ## License
 
-This project is currently for learning, portfolio, and open-source reference purposes.
+This project is licensed under the MIT License.
 
-A formal open-source license will be added later.
+See [LICENSE](LICENSE) for details.
