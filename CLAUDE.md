@@ -1,81 +1,95 @@
-# enterprise-ai-copilot
+# CLAUDE.md
 
-## 项目目标
+## Project Overview
 
-企业级 AI 知识库助手。Java Spring Boot 业务主系统 + Python FastAPI AI Agent 服务，支持 RAG 检索增强生成问答。
+Enterprise AI Copilot 是一个企业知识库 AI 应用后端项目，采用 Java Spring Boot + Python FastAPI + React 三端架构，支持 RAG 检索增强生成问答、LangGraph Agent 实验链路和两层评估体系。
 
-## 技术栈
-
-| 层 | 技术 |
-|---|------|
-| 业务后端 | Java 17, Spring Boot 3.x, MyBatis Plus, MySQL, Redis |
-| AI 服务 | Python 3.11, FastAPI, sentence-transformers, faiss-cpu |
-| 大模型 | DeepSeek V4 (via OpenAI SDK, base_url=https://api.deepseek.com) |
-| RAG | BAAI/bge-small-zh-v1.5 embedding + FAISS 向量检索 + keyword 关键词检索 (hybrid) |
-
-## 目录结构
+## Current Architecture
 
 ```
-g:/跳槽计划/项目/enterprise-ai-copilot/
-├── backend-java/           # Java Spring Boot 业务系统
-│   ├── src/main/java/com/enterprise/
-│   └── pom.xml
-├── agent-python/           # Python FastAPI AI Agent
-│   ├── app/
-│   │   ├── core/           # config.py, 日志
-│   │   ├── retrieval/      # faiss_retriever, keyword_retriever, hybrid_retriever
-│   │   ├── services/       # rag_service, llm_service
-│   │   ├── schemas/        # chat_schema (ChatRequest/ChatResponse)
-│   │   └── prompts/        # system_prompt, build_rag_prompt
-│   ├── scripts/            # build_chunks, build_embeddings, build_faiss_index, eval_*
-│   └── .env                # DEEPSEEK_API_KEY, DEEPSEEK_MODEL
-├── data/
-│   ├── hr/                 # HR 知识库源文档 (.md)
-│   ├── eval/               # rag_eval_cases.json
-│   └── processed/          # chunks.json, faiss.index, faiss_metadata.json
-└── docs/                   # 项目文档、每日日志
+frontend/          → React + Vite (port 5173)
+backend-java/      → Java Spring Boot (port 8080)，统一入口，代理 Python
+agent-python/      → Python FastAPI (port 8000)，RAG + Agent + Evaluation
+data/              → 知识库文档、评估测试集、FAISS 索引
+docs/              → 架构、API、Roadmap 文档
 ```
 
-## 启动命令
+**两条主链路：**
+
+- `/api/chat` → `/agent/chat`：稳定 RAG 主链路（手写全链路，不依赖 LangChain）
+- `/api/agent/langgraph/chat` → `/agent/langgraph/chat`：实验性 LangGraph Agent 链路（Safety Guard + 意图路由 + Tool Calling）
+
+两条链路并行运行，Agent 链路不替换 RAG 稳定接口。
+
+## Important Documents
+
+- `README.md` — 项目全貌、Quick Start、功能列表
+- `docs/architecture.md` — 架构图、模块说明、Hybrid Retrieval 设计
+- `docs/api.md` — 接口文档、请求响应格式、curl 示例
+- `docs/roadmap.md` — 已完成 / 计划中 / 未来功能
+
+## Development Commands
 
 ```bash
-# Java 后端 (port 8080)
-cd backend-java && ./mvnw spring-boot:run
+# Python AI Service (port 8000)
+cd agent-python
+uv sync
+uv run uvicorn app.main:app --reload --port 8000
 
-# Python Agent (port 8000)
-cd agent-python && .venv/Scripts/uvicorn app.main:app --port 8000
+# Java Backend (port 8080)
+cd backend-java
+./mvnw spring-boot:run
+
+# Frontend (port 5173)
+cd frontend
+npm install
+npm run dev
+
+# Build knowledge base
+cd agent-python
+uv run python scripts/build/build_chunks.py
+uv run python scripts/build/build_embeddings.py
+uv run python scripts/build/build_faiss_index.py
+
+# Run evaluation
+cd agent-python
+uv run python scripts/eval/run_rag_eval.py
+uv run python scripts/eval/run_rag_eval.py --with-baseline
+
+# Update baseline (only after all cases pass and manual review)
+uv run python scripts/eval/update_eval_baseline.py
+
+# TopK comparison
+uv run python scripts/eval/compare_topk_eval.py --top-k-list 3,5,8
 ```
 
-## 常用脚本
+## Coding Rules
 
-```bash
-# 知识库切片
-python agent-python/scripts/build_chunks.py
-
-# 构建 embedding + FAISS 索引
-python agent-python/scripts/build_embeddings.py
-python agent-python/scripts/build_faiss_index.py
-
-# 检索评估（不调用 LLM）
-python agent-python/scripts/eval_retrieval.py
-
-# 生成评估（调用 LLM）
-python agent-python/scripts/eval_generation.py
-```
-
-## 代码规范
-
-- Java: 标准 Spring Boot 分层架构 (controller → service → mapper)
-- Python: FastAPI + Pydantic schemas, 服务模块化
-- 不引入不必要的新依赖
-- 不修改不相关模块的代码
-- 修改前备份配置文件
-
-## 长期约束
-
-- 用户是 4 年 Java 后端转 AI 应用后端候选人
-- 代码需要考虑简历可解释性和面试追问
-- 不修改 Java 代码，除非明确要求
-- 不修改 /agent/chat 接口，除非明确要求
+- 不要提交 `.env`、API key、token、密码
+- 不要提交 `.venv/`、`target/`、`node_modules/`
+- 不要提交 current eval reports（`data/eval/reports/`），除非明确是 baseline
+- 修改接口时同步更新 `docs/api.md`
+- 修改架构时同步更新 `docs/architecture.md`
+- 修改 RAG / Agent / Eval 行为时同步更新 `README.md` 或 `docs/roadmap.md`
+- 不要虚构未实现功能
+- 不要把 experimental 模块写成 production-ready
+- `/agent/chat` 是稳定主链路，修改时必须确认不影响已有行为
 - Python 评估脚本不引入新依赖
-- 当前 Claude Code 直连 DeepSeek Anthropic API
+
+## Testing / Verification
+
+修改后优先运行：
+
+```bash
+# Python 改动 → 运行 eval
+cd agent-python && uv run python scripts/eval/run_rag_eval.py
+
+# Java 改动 → 编译检查
+cd backend-java && ./mvnw compile
+
+# Frontend 改动 → 启动检查
+cd frontend && npm run dev
+
+# 确认工作区干净
+git status
+```
