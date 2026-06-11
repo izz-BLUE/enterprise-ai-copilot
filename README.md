@@ -21,7 +21,7 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 - Java + Python 双服务架构
 - RAG 主问答链路
 - Hybrid Retrieval（Faiss 向量检索 + Keyword 关键词检索）
-- RAG Evaluation（两层评估 + flaky 检测 + baseline 回归）
+- RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比）
 - LangChain RAG Chain 实验模块
 - LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
 - Java 代理接口（traceId 全链路透传）
@@ -495,14 +495,12 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 
 Current evaluation cases cover scenarios such as:
 
-- leave application
-- annual leave
-- marriage leave
-- maternity leave
-- sick leave materials
-- lateness and early leave
-- absenteeism
-- labor contract termination
+- leave application, annual leave, marriage leave, maternity leave
+- sick leave materials, lateness and early leave, absenteeism
+- labor contract termination, overtime, attendance
+- IT support (VPN), onboarding
+- **No-answer negative samples** (7 cases): questions with no knowledge base answer, verifying the system refuses to fabricate
+- **TopK comparison**: evaluation across TopK=3/5/8 to balance recall quality and cost
 
 ## Stable RAG vs Experimental Agent
 
