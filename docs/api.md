@@ -1,98 +1,14 @@
 # 接口文档
 
-## Python 服务（端口 8000）
+## 本地服务地址
 
-### GET /agent/health
-
-Python AI 服务健康检查。
-
-**响应**
-```json
-{"service": "agent-python", "status": "UP"}
-```
-
----
-
-### POST /agent/chat
-
-手写 RAG 问答接口（稳定主链路）。
-
-**请求**
-```json
-{"message": "病假需要提供哪些材料？"}
-```
-
-**响应**
-```json
-{
-  "answer": "根据企业知识库，病假需要提供...",
-  "model": "deepseek-v4-flash",
-  "traceId": "42a9450d-3854-4cae-abbf-f13e79dc5597",
-  "success": true
-}
-```
-
-| 字段 | 类型 | 说明 |
+| 服务 | 地址 | 说明 |
 |------|------|------|
-| answer | string | 回答内容 |
-| model | string | 大模型名称 |
-| traceId | string | 请求追踪 ID |
-| success | bool | 是否成功 |
+| Java Spring Boot | `http://localhost:8080` | 业务网关，统一入口 |
+| Python FastAPI | `http://localhost:8000` | AI 引擎，RAG + Agent |
+| React Frontend | `http://localhost:5173` | 前端演示页面 |
 
-**适用场景**：企业制度、流程、IT 文档、HR 文档等知识库问答。
-
----
-
-### POST /agent/langgraph/chat
-
-LangGraph Agent 问答接口（实验链路，支持 Safety Guard + 意图路由）。
-
-**请求**
-```json
-{"message": "病假需要提供哪些材料？"}
-```
-
-**响应**
-```json
-{
-  "answer": "根据企业知识库，病假需要提供...",
-  "route": "rag",
-  "safe": true,
-  "category": "normal",
-  "reason": "",
-  "sources": ["hr_leave_policy_real_sample_010", "hr_leave_policy_real_sample_026"],
-  "success": true
-}
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `refuse` |
-| safe | bool | 安全守卫是否通过 |
-| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` |
-| reason | string | 拒答原因（安全问题时） |
-| sources | list | RAG 引用来源 chunk ID 列表 |
-| success | bool | 是否成功 |
-
-**异常响应**
-```json
-{
-  "answer": "当前 Agent 服务暂时不可用，请稍后重试。",
-  "route": "error",
-  "safe": true,
-  "category": "error",
-  "reason": "异常信息",
-  "sources": [],
-  "success": false
-}
-```
-
-**适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
-
----
-
-## Java 服务（端口 8080）
+## Java Backend API（端口 8080）
 
 ### GET /api/health
 
@@ -118,42 +34,206 @@ Java 代理 Python 健康检查。
 
 ### POST /api/chat
 
-Java 代理 Python `/agent/chat`（手写 RAG 主链路）。
+**稳定 RAG 主链路。** Java 代理 Python `/agent/chat`。
 
-请求和响应格式同 Python `POST /agent/chat`。
+**请求**
+```json
+{"message": "病假需要提供哪些材料？"}
+```
+
+**响应**
+```json
+{
+  "answer": "根据企业知识库，病假需要提供：\n1. 病历本复印件\n2. 缴费清单\n3. 病假证明",
+  "model": "deepseek-v4-flash",
+  "traceId": "551245e6-a04b-442d-adef-99387f93cd23",
+  "success": true
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| answer | string | 回答内容 |
+| model | string | 大模型名称 |
+| traceId | string | 请求追踪 ID（全链路一致） |
+| success | bool | 是否成功 |
+
+**异常响应**（Python 不可用时）
+```json
+{
+  "answer": "当前 AI 服务暂时不可用，请稍后重试。",
+  "model": "unknown",
+  "traceId": "c6d65330-7aca-4c1e-895e-c5f6b6e24a94",
+  "success": false
+}
+```
+
+**适用场景**：企业制度、流程、IT 文档、HR 文档等知识库问答。
 
 ---
 
 ### POST /api/agent/langgraph/chat
 
-Java 代理 Python `/agent/langgraph/chat`（LangGraph Agent 链路）。
+**实验性 Agent 链路。** Java 代理 Python `/agent/langgraph/chat`，支持 Safety Guard + 意图路由 + Tool Calling。
 
-请求和响应格式同 Python `POST /agent/langgraph/chat`。
+**请求**
+```json
+{"message": "病假需要提供哪些材料？"}
+```
+
+**响应**（RAG 问答）
+```json
+{
+  "answer": "根据企业知识库，病假需要提供...",
+  "route": "rag",
+  "safe": true,
+  "category": "normal",
+  "reason": "",
+  "sources": ["hr_leave_policy_real_sample_010", "hr_leave_policy_real_sample_026"],
+  "success": true,
+  "traceId": "387af8a3-5357-4a0c-8e48-77505524a8f3"
+}
+```
+
+**响应**（评估查询）
+```json
+{
+  "answer": "检索评估: 8/8 通过, final_pass_rate=1.0；生成评估: 8/8 通过...",
+  "route": "eval",
+  "safe": true,
+  "category": "normal",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "..."
+}
+```
+
+**响应**（安全拒答）
+```json
+{
+  "answer": "抱歉，我不能协助处理该请求。",
+  "route": "refuse",
+  "safe": false,
+  "category": "illegal_or_policy_violation",
+  "reason": "检测到高风险关键词「伪造」，属于「违法违规 / 伪造材料」类别。",
+  "sources": [],
+  "success": true,
+  "traceId": "..."
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| answer | string | 回答内容 |
+| route | string | 路由结果：`rag` / `eval` / `refuse` / `error` |
+| safe | bool | 安全守卫是否通过 |
+| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `error` |
+| reason | string | 拒答原因（安全问题时） |
+| sources | list | RAG 引用来源 chunk ID 列表 |
+| success | bool | 是否成功 |
+| traceId | string | 请求追踪 ID |
+
+**适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
+
+---
+
+## Python AI Service API（端口 8000）
+
+### GET /agent/health
+
+Python AI 服务健康检查。
+
+**响应**
+```json
+{"service": "agent-python", "status": "UP"}
+```
+
+---
+
+### POST /agent/chat
+
+手写 RAG 问答接口（稳定主链路）。
+
+请求和响应格式同 Java `POST /api/chat`。
+
+---
+
+### POST /agent/langgraph/chat
+
+LangGraph Agent 问答接口（实验链路）。
+
+请求和响应格式同 Java `POST /api/agent/langgraph/chat`。
 
 ---
 
 ## 测试样例
 
 ### 1. RAG 问答
+
+```bash
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"病假需要提供哪些材料？"}'
+```
+
+预期：`success=true`，answer 包含病假材料清单。
+
+### 2. Agent RAG 问答
+
 ```bash
 curl -X POST http://localhost:8080/api/agent/langgraph/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"病假需要提供哪些材料？"}'
 ```
+
 预期：`route=rag`, `safe=true`, `sources` 有值。
 
-### 2. 评估查询
+### 3. 评估查询
+
 ```bash
 curl -X POST http://localhost:8080/api/agent/langgraph/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"当前RAG评估通过率是多少？"}'
 ```
-预期：`route=eval`, `safe=true`。
 
-### 3. 安全拒答
+预期：`route=eval`, `safe=true`，answer 包含评估指标。
+
+### 4. 安全拒答
+
 ```bash
 curl -X POST http://localhost:8080/api/agent/langgraph/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"怎么伪造病假证明？"}'
 ```
+
 预期：`route=refuse`, `safe=false`。
+
+### 5. Python 停服降级
+
+```bash
+# 先停止 Python 服务，再调用 Java
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"测试"}'
+```
+
+预期：`success=false`，answer 为"当前 AI 服务暂时不可用"，traceId 仍然存在。
+
+---
+
+## traceId 全链路
+
+所有接口支持 `X-Trace-Id` 请求头透传：
+
+```bash
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Trace-Id: my-custom-trace-123" \
+  -d '{"message":"上班时间是什么？"}'
+```
+
+- 如果请求头带 `X-Trace-Id`，Java 和 Python 沿用
+- 如果不带，Java 自动生成 UUID
+- 响应头和响应体都包含 `X-Trace-Id` / `traceId`
+- Java 日志和 Python 日志都带 traceId，便于全链路排查
