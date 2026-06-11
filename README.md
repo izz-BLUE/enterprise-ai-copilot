@@ -1,254 +1,486 @@
-# Enterprise AI Copilot
+Enterprise AI Copilot
+
+An enterprise AI application backend demo built with Java Spring Boot + Python FastAPI + RAG + LangGraph.
 
 面向企业内部知识库问答场景的 AI 应用后端项目。
+项目采用 Java Spring Boot 作为业务入口，Python FastAPI 作为 AI 服务引擎，实现从文档入库、检索召回、RAG Prompt 构造、LLM 回答到评估回归的完整链路。
 
-Java Spring Boot 作为业务入口，Python FastAPI 作为 AI 服务引擎。
-支持文档切片、Embedding、向量检索、Hybrid Retrieval、RAG Prompt、LLM 回答和两层评估。
+当前项目定位为：
 
----
+企业 AI 应用后端工程实践
+Java 后端转 AI 应用开发的参考项目
+RAG / Agent / Evaluation 工程链路实验项目
+非模型训练项目，重点关注 AI 应用工程化
+Project Status
 
-## 已完成能力
+当前项目处于 early-stage but actively maintained 状态。
 
-### 1. Java + Python 双服务架构
+已完成：
 
-- Java Spring Boot 提供统一 `/api/chat` 接口，负责路由、请求转发、统一响应和异常兜底
-- Python FastAPI 提供 `/agent/chat` AI 服务，负责 RAG 检索、Prompt 构造和 LLM 调用
-- 两端通过 HTTP JSON 通信
+Java + Python 双服务架构
+RAG 主问答链路
+Hybrid Retrieval
+Faiss 向量检索
+Keyword Retrieval
+RAG Evaluation
+LangChain RAG Chain 实验模块
+LangGraph Agent 实验模块
+Java 代理接口
+React 前端演示页面
 
-### 2. DeepSeek 大模型接入
+尚未生产化：
 
-- 通过 OpenAI SDK 兼容模式调用 DeepSeek
-- system prompt 与 user message 分离
-- 支持企业 AI 助手角色约束
-- 知识库无结果时拒答，减少幻觉
+用户权限体系
+文档上传管理
+多租户隔离
+审计日志
+Docker Compose 一键部署
+CI/CD 自动化质量门禁
+Architecture
+flowchart LR
+    U[User] --> F[React Frontend]
+    F --> J[Java Spring Boot Backend]
+    J --> P[Python FastAPI AI Service]
 
-### 3. 文档切片 (Chunking)
+    P --> R[Hybrid Retrieval]
+    R --> V[Faiss Vector Search]
+    R --> K[Keyword Retrieval]
 
-- 基于段落 + 字符长度的切片策略
-- 支持 chunk overlap
-- 短段落合并，避免碎片化
-- 标题与正文合并，避免标题孤岛
-- 输出 `chunks.json` 作为中间产物
+    V --> C[TopK Chunks]
+    K --> C
+    C --> RP[RAG Prompt]
+    RP --> L[LLM Provider]
+    L --> A[Answer + Sources]
+    A --> J
+    J --> F
 
-### 4. Embedding 与 Faiss 向量索引
+整体链路：
 
-- 使用 `BAAI/bge-small-zh-v1.5` 生成 512 维中文 Embedding
-- 使用 `faiss-cpu` 构建 `IndexFlatIP`
-- L2 normalize 后通过 inner product 近似 cosine similarity
-- 输出 `faiss.index` + `faiss_metadata.json`
+User
+  → React Frontend
+  → Java Spring Boot /api/chat
+  → Python FastAPI /agent/chat
+  → Hybrid Retrieval
+  → TopK Chunks
+  → RAG Prompt
+  → LLM
+  → Answer + Sources
+Core Features
+1. Java + Python Dual-Service Architecture
 
-### 5. Hybrid Retrieval
+Java Spring Boot 作为业务系统入口，负责：
 
-```
-Faiss Semantic Retrieval  +  Keyword Retrieval  →  Merge  →  Deduplicate  →  TopK
-```
+对外提供统一 API
+请求转发
+响应封装
+异常兜底
+与前端交互
 
-Faiss 负责语义召回，Keyword 检索负责精确关键词补充，去重后截取 TopK。
+Python FastAPI 作为 AI 服务引擎，负责：
 
-### 6. RAG Evaluation（两层评估）
+RAG 检索
+Prompt 构造
+LLM 调用
+Agent 编排
+Evaluation 工具执行
 
-| 层级 | 脚本 | 评估内容 | 输出 |
-|------|------|----------|------|
-| 检索评估 | `scripts/eval/eval_retrieval.py` | source_hit / keyword_hit / final_pass_rate | `reports/retrieval_eval_report.json` |
-| 生成评估 | `scripts/eval/eval_generation.py` | answer 关键词命中 / flaky 检测 / pass_rate | `reports/generation_eval_report.json` |
-| 回归检查 | `scripts/eval/compare_eval_reports.py` | baseline vs current 对比 | 控制台 + 退出码 |
-| 一键评估 | `scripts/eval/run_rag_eval.py` | 串联检索+生成+回归 | 控制台汇总 |
+两端通过 HTTP JSON 通信。
 
-- 检索评估不调用 LLM，零 token 消耗
-- 生成评估支持 retry 机制，自动标记 flaky case
-- 支持文本归一化（去空格、全角转半角），减少格式误判
-- JSON 报告 + baseline 对比，支持 CI 质量门禁
+2. RAG Main Pipeline
 
-### 7. 已验证的测试集
+稳定主链路接口：
 
-当前 8 个测试用例覆盖请假、年假、婚假、产假、病假材料、迟到早退处罚、旷工解除合同等场景。
+POST /api/chat
 
-### 8. LangChain RAG Chain（实验性模块）
+对应 Python 接口：
 
-`app/chains/langchain_rag_chain.py` 提供 `answer_with_langchain_rag()` 函数，使用 LangChain ChatPromptTemplate + ChatOpenAI 封装 RAG 问答链路。
+POST /agent/chat
 
-```
-python agent-python/scripts/experiments/langchain_rag_demo.py "病假需要提供哪些材料？"
-```
+主要流程：
 
-- 复用现有 `hybrid_retriever` 做检索，LangChain 负责 Prompt 模板和 LLM 调用
-- 当前 /agent/chat 主流程仍使用手写 RAG（`rag_service.py`），未替换
-- 此模块作为实验性可复用封装，用于对比手写实现和框架实现的差异
+用户问题
+  → Java /api/chat
+  → Python /agent/chat
+  → Hybrid Retrieval
+  → TopK Chunks
+  → RAG Prompt
+  → LLM Answer
+  → Java 统一响应
 
-### 9. LangGraph Agent（实验性模块）
+特点：
 
-`app/agents/langgraph_agent.py` 实现 safety → router → (rag | eval | refuse) 状态图。
+支持企业知识库问答
+支持无知识命中时拒答
+支持 sources 返回
+支持 traceId 追踪
+支持异常兜底
+3. Document Chunking
 
-- 集成 Safety Guard 输入安全检查（5 类风险规则）
-- 规则路由：自动区分 RAG 问答、评估查询、安全拒答
-- 暴露为 `POST /agent/langgraph/chat` 和 Java `POST /api/agent/langgraph/chat`
-- 与 `/agent/chat` **并行运行**，不替换原 RAG 主链路
+文档切片能力包括：
 
-### 10. Java 代理接口
+基于段落 + 字符长度的切片策略
+支持 chunk overlap
+短段落合并，避免碎片化
+标题与正文合并，避免标题孤岛
+输出 chunks.json 作为中间产物
 
-- `POST /api/chat` — 代理 Python `/agent/chat`（RAG 主链路）
-- `POST /api/agent/langgraph/chat` — 代理 Python `/agent/langgraph/chat`（Agent 链路）
-- Python 服务地址统一配置：`python.agent.base-url=http://localhost:8000`
+构建命令：
 
----
+cd agent-python
+uv run python scripts/build/build_chunks.py
+4. Embedding and Faiss Vector Index
 
-## 技术栈
+Embedding 使用：
 
-| 层 | 技术 |
-|---|------|
-| 业务后端 | Java 17, Spring Boot 3.x, RestTemplate, Maven |
-| AI 服务 | Python 3.11, FastAPI, Pydantic, Uvicorn |
-| 大模型 | DeepSeek V4 (OpenAI SDK compatible API) |
-| Embedding | BAAI/bge-small-zh-v1.5 (512-dim) |
-| 向量检索 | faiss-cpu, IndexFlatIP |
-| 关键词检索 | jieba 分词 + 关键词匹配 |
-| RAG 评估 | Python 脚本, JSON 报告 |
+BAAI/bge-small-zh-v1.5
 
----
+向量索引使用：
 
-## 项目结构
+faiss-cpu + IndexFlatIP
 
-```
+实现方式：
+
+生成 512 维中文 Embedding
+对向量做 L2 normalize
+使用 inner product 近似 cosine similarity
+输出 faiss.index 与 faiss_metadata.json
+
+构建命令：
+
+cd agent-python
+uv run python scripts/build/build_embeddings.py
+uv run python scripts/build/build_faiss_index.py
+5. Hybrid Retrieval
+
+检索链路：
+
+Faiss Semantic Retrieval
+        +
+Keyword Retrieval
+        ↓
+Merge
+        ↓
+Deduplicate
+        ↓
+TopK
+
+设计目的：
+
+Faiss 负责语义召回
+Keyword Retrieval 负责精确词补充
+Merge + Deduplicate 降低重复 chunk 干扰
+TopK 控制进入 Prompt 的上下文长度
+
+适合解决：
+
+用户问题和知识库表达不完全一致
+关键制度词必须精确命中
+单纯向量检索漏召回
+单纯关键词检索语义泛化不足
+6. RAG Evaluation
+
+项目内置两层评估：
+
+层级	脚本	评估内容	输出
+Retrieval Evaluation	scripts/eval/eval_retrieval.py	source_hit / keyword_hit / final_pass_rate	reports/retrieval_eval_report.json
+Generation Evaluation	scripts/eval/eval_generation.py	answer keyword hit / flaky detection / pass_rate	reports/generation_eval_report.json
+Regression Check	scripts/eval/compare_eval_reports.py	baseline vs current	console + exit code
+One-click Evaluation	scripts/eval/run_rag_eval.py	retrieval + generation + regression	console summary
+
+运行方式：
+
+cd agent-python
+
+# Run all evaluations
+uv run python scripts/eval/run_rag_eval.py
+
+# Update baseline after all cases pass
+uv run python scripts/eval/update_eval_baseline.py
+
+# Run evaluation with baseline comparison
+uv run python scripts/eval/run_rag_eval.py --with-baseline
+
+设计目标：
+
+Retrieval Evaluation 不调用 LLM，零 token 消耗
+Generation Evaluation 支持 retry，自动标记 flaky case
+支持文本归一化，减少格式误判
+支持 baseline 对比，为后续 CI 质量门禁做准备
+7. LangChain RAG Chain
+
+实验模块：
+
+app/chains/langchain_rag_chain.py
+
+提供函数：
+
+answer_with_langchain_rag()
+
+用途：
+
+使用 LangChain ChatPromptTemplate
+使用 OpenAI-compatible Chat Model
+复用现有 hybrid_retriever
+对比手写 RAG 与框架式 RAG 的差异
+
+运行示例：
+
+cd agent-python
+uv run python scripts/experiments/langchain_rag_demo.py "病假需要提供哪些材料？"
+
+说明：
+
+当前 /agent/chat 主流程仍使用手写 RAG 实现，LangChain 模块仅作为实验性封装。
+
+8. LangGraph Agent
+
+实验模块：
+
+app/agents/langgraph_agent.py
+
+实现状态图：
+
+safety → router → rag / eval / refuse
+
+能力：
+
+Safety Guard 输入安全检查
+规则路由
+RAG 问答
+Evaluation 查询
+安全拒答
+Tool 调用封装
+
+接口：
+
+POST /agent/langgraph/chat
+POST /api/agent/langgraph/chat
+
+说明：
+
+LangGraph Agent 与 RAG 主链路并行运行，不替换 /agent/chat 稳定接口。
+
+API Endpoints
+Java Backend
+Method	Path	Description
+GET	/api/health	Java service health check
+GET	/api/agent/health	Python agent health check through Java
+POST	/api/chat	Stable RAG chat API
+POST	/api/agent/langgraph/chat	Experimental LangGraph Agent API
+Python AI Service
+Method	Path	Description
+GET	/agent/health	Python service health check
+POST	/agent/chat	Stable RAG chat API
+POST	/agent/langgraph/chat	Experimental LangGraph Agent API
+API Example
+Stable RAG Chat
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\":\"病假需要提供哪些材料？\"}"
+
+Example response:
+
+{
+  "answer": "根据知识库，病假通常需要提供病假申请、医院诊断证明、病历或相关就医材料等。",
+  "model": "deepseek",
+  "traceId": "xxx",
+  "success": true
+}
+LangGraph Agent Chat
+curl -X POST http://localhost:8080/api/agent/langgraph/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\":\"当前RAG评估通过率是多少？\"}"
+Tech Stack
+Layer	Technology
+Business Backend	Java 17, Spring Boot 3.x, RestTemplate, Maven
+AI Service	Python 3.11, FastAPI, Pydantic, Uvicorn
+Frontend	React, Vite
+LLM Provider	DeepSeek / OpenAI-compatible API
+Embedding	BAAI/bge-small-zh-v1.5
+Vector Search	faiss-cpu, IndexFlatIP
+Keyword Search	jieba
+RAG Framework Experiment	LangChain
+Agent Framework Experiment	LangGraph
+Evaluation	Python scripts, JSON reports
+Project Structure
 enterprise-ai-copilot/
-├── backend-java/              # Java Spring Boot 业务系统
+├── backend-java/                  # Java Spring Boot business backend
 │   └── src/main/java/com/enterprise/
-├── agent-python/              # Python FastAPI AI 服务
+├── agent-python/                  # Python FastAPI AI service
 │   ├── app/
-│   │   ├── core/              # config, 日志
-│   │   ├── prompts/           # system prompt, RAG prompt 构造
-│   │   ├── retrieval/         # faiss_retriever, keyword_retriever, hybrid_retriever
-│   │   ├── schemas/           # ChatRequest, ChatResponse, AgentResponse
-│   │   ├── services/          # rag_service, llm_service
-│   │   ├── chains/            # langchain_rag_chain — LangChain RAG 封装
-│   │   ├── tools/             # rag_answer_tool, eval_report_tool
-│   │   ├── agents/            # langgraph_agent — LangGraph 状态图
-│   │   └── guards/            # safety_guard — 输入安全边界控制
-│   └── scripts/               # build/ 构建, eval/ 评估, experiments/ 实验
-├── frontend/                   # React 前端演示页面
+│   │   ├── core/                  # config, logging
+│   │   ├── prompts/               # system prompt, RAG prompt
+│   │   ├── retrieval/             # faiss, keyword, hybrid retriever
+│   │   ├── schemas/               # request / response schemas
+│   │   ├── services/              # rag_service, llm_service
+│   │   ├── chains/                # LangChain RAG chain
+│   │   ├── tools/                 # agent tools
+│   │   ├── agents/                # LangGraph agent
+│   │   └── guards/                # safety guard
+│   └── scripts/
+│       ├── build/                 # chunking, embedding, index build scripts
+│       ├── eval/                  # RAG evaluation scripts
+│       └── experiments/           # LangChain / LangGraph demos
+├── frontend/                      # React frontend demo
 ├── data/
-│   ├── hr/ bank/ it/          # 知识库源文档
-│   ├── processed/             # chunks.json, faiss.index, faiss_metadata.json
-│   └── eval/                  # rag_eval_cases.json, reports/
-└── docs/                      # 项目文档, 架构说明, 接口文档
-```
-
----
-
-## 快速启动
-
-### Python 服务
-
-```bash
+│   ├── hr/                        # HR knowledge base documents
+│   ├── bank/                      # Banking sample documents
+│   ├── it/                        # IT sample documents
+│   ├── processed/                 # chunks, faiss index, metadata
+│   └── eval/                      # evaluation cases and reports
+└── docs/                          # architecture, API docs, roadmap
+Quick Start
+1. Start Python AI Service
 cd agent-python
 uv sync
 uv run uvicorn app.main:app --reload --port 8000
-```
-
-### Java 服务
-
-```bash
+2. Start Java Backend
 cd backend-java
 ./mvnw spring-boot:run
-```
 
-### 前端
+Windows PowerShell:
 
-```bash
+cd backend-java
+.\mvnw.cmd spring-boot:run
+3. Start Frontend
 cd frontend
 npm install
 npm run dev
-```
 
-默认调用 Java 服务 `http://localhost:8080`，支持 LangGraph Agent 和普通 RAG 两种模式。
+Default service addresses:
 
-### 三端启动顺序
+Service	URL
+Python FastAPI	http://localhost:8000
+Java Spring Boot	http://localhost:8080
+React Frontend	http://localhost:5173
 
-```bash
-# 1. Python AI 服务
-cd agent-python && uv run uvicorn app.main:app --reload --port 8000
+Java calls Python through:
 
-# 2. Java 业务服务
-cd backend-java && ./mvnw spring-boot:run
-
-# 3. 前端演示页面
-cd frontend && npm run dev
-```
-
-Java 调用 Python 的地址配置在 `application.properties`：
-```properties
 python.agent.base-url=http://localhost:8000
-```
+Environment Variables
 
----
+Create .env under agent-python/:
 
-## 两条聊天链路
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=your_model_name
 
-| 特性 | `/api/chat` | `/api/agent/langgraph/chat` |
-|------|------------|---------------------------|
-| Python 接口 | `/agent/chat` | `/agent/langgraph/chat` |
-| 实现方式 | 手写 RAG（rag_service） | LangGraph Agent 状态图 |
-| Safety Guard | 无 | 有（5 类风险规则） |
-| 意图路由 | 无 | 有（rag / eval / refuse） |
-| Tool Calling | 无 | 有（rag_answer_tool + eval_report_tool） |
-| 稳定性 | 稳定主链路 | 实验链路 |
-| 接口文档 | [docs/api.md](docs/api.md) | [docs/api.md](docs/api.md) |
+Do not commit .env or any API keys to GitHub.
 
-**`/api/chat` 是稳定 RAG 主链路，`/api/agent/langgraph/chat` 是 Agent 实验链路。采用并行接口便于灰度验证。**
+Recommended:
 
----
+.env
+.venv/
+target/
+node_modules/
+data/processed/*.index
 
-## 链路说明
+should be ignored by .gitignore.
 
-### 离线构建
-
-```bash
+Build Knowledge Base
 cd agent-python
+
+# 1. Build chunks
 uv run python scripts/build/build_chunks.py
+
+# 2. Build embeddings
 uv run python scripts/build/build_embeddings.py
+
+# 3. Build Faiss index
 uv run python scripts/build/build_faiss_index.py
-```
 
-### 在线问答
+Generated artifacts:
 
-```
-用户问题 → Java /api/chat → Python /agent/chat
-         → Hybrid Retrieval → TopK Chunks → RAG Prompt
-         → DeepSeek → Answer → Java → 用户
-```
-
-### 评估
-
-```bash
+data/processed/chunks.json
+data/processed/faiss.index
+data/processed/faiss_metadata.json
+Run Evaluation
 cd agent-python
 
-# 一键运行全部评估
+# Run retrieval + generation evaluation
 uv run python scripts/eval/run_rag_eval.py
 
-# 初始化 baseline（需先确保当前报告全部通过）
+# Update baseline
 uv run python scripts/eval/update_eval_baseline.py
 
-# 评估 + 质量门禁（对比 baseline）
+# Run with baseline regression check
 uv run python scripts/eval/run_rag_eval.py --with-baseline
 
-# 实验脚本
-uv run python scripts/experiments/langgraph_agent_demo.py "病假需要提供哪些材料？"
-uv run python scripts/experiments/tool_calling_demo.py "当前RAG评估通过率是多少？"
-```
+Current evaluation cases cover scenarios such as:
 
----
+leave application
+annual leave
+marriage leave
+maternity leave
+sick leave materials
+lateness and early leave
+absenteeism
+labor contract termination
+Stable RAG vs Experimental Agent
+Feature	/api/chat	/api/agent/langgraph/chat
+Python API	/agent/chat	/agent/langgraph/chat
+Implementation	Hand-written RAG	LangGraph Agent
+Safety Guard	No	Yes
+Intent Routing	No	Yes
+Tool Calling	No	Rule-based tools
+Stability	Stable main pipeline	Experimental
+Use Case	Knowledge QA	Agent workflow exploration
 
-## 后续规划
+/api/chat is the stable RAG main pipeline.
+/api/agent/langgraph/chat is an experimental Agent pipeline for workflow exploration.
 
-以下功能尚未实现，仅作为后续扩展方向：
+Roadmap
 
-- BM25 检索 / RRF 排名融合
-- Cross Encoder Re-rank
-- Query Rewrite
-- 多轮对话上下文管理
-- LLM 自动 Tool Calling（当前为规则路由）
-- Qdrant / Milvus 向量数据库
-- 文档上传与知识库管理
-- 用户权限控制
-- 审计日志
-- Docker Compose 一键部署
-- CI RAG 回归测试
+Planned features:
+
+BM25 retrieval
+RRF ranking fusion
+Cross Encoder Re-rank
+Query Rewrite
+Multi-turn conversation memory
+LLM-based Tool Calling
+Qdrant / Milvus vector database
+Document upload and knowledge base management
+User authentication and permission control
+Audit logs
+Docker Compose deployment
+CI-based RAG regression testing
+More evaluation cases
+Better frontend demo
+Security Notes
+
+This project involves:
+
+API keys
+user input
+RAG context construction
+LLM prompt injection risk
+third-party model API calls
+
+Security considerations:
+
+Do not commit .env
+Do not expose API keys in frontend code
+Validate user input before retrieval and tool execution
+Keep dependencies updated
+Add authentication before production usage
+Treat RAG and Agent outputs as untrusted unless verified
+Why This Project Exists
+
+Many traditional Java backend developers want to move into AI application development, but most examples only show isolated LLM API calls.
+
+This project focuses on the engineering layer between business systems and LLMs:
+
+How Java backend integrates with Python AI services
+How RAG is built as a complete backend workflow
+How retrieval and generation are evaluated separately
+How Agent workflows can be introduced without replacing stable APIs
+How an AI feature can be packaged like a maintainable backend system
+
+The goal is not to train models, but to build production-oriented AI application backend capabilities.
+
+License
+
+This project is currently for learning, portfolio, and open-source reference purposes.
+
+A formal open-source license will be added later.
