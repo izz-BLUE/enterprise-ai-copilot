@@ -34,7 +34,8 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 - 多租户隔离
 - 审计日志
 - Docker Compose 一键部署
-- CI/CD 自动化质量门禁
+
+**CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
 ## Architecture
 

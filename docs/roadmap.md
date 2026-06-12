@@ -76,7 +76,8 @@
 - [ ] Qdrant / Milvus 替代 FAISS（支持增量更新、分布式）
 - [ ] 用户权限与认证（JWT / API Key）
 - [ ] 审计日志
-- [ ] CI RAG 回归测试（GitHub Actions）
+- [x] CI 基础验证（GitHub Actions：Java compile + Python retrieval eval + Frontend build）
+- [ ] CI RAG 回归测试（generation eval + baseline comparison）
 - [ ] 可观测性（RAG 延迟 P99、token 消耗、评估趋势）
 - [ ] 多模型配置（不同场景用不同模型）
 - [ ] 更完整的 Agent 工具体系（工单查询、请假申请等写操作）
