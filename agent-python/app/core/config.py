@@ -16,7 +16,7 @@ DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL')
 DEEPSEEK_TEMPERATURE = float(os.getenv('DEEPSEEK_TEMPERATURE', '0'))
 
 if not DEEPSEEK_API_KEY:
-    raise RuntimeError('环境变量 DEEPSEEK_API_KEY 未配置，请在 .env 文件中设置')
+    logger.warning('环境变量 DEEPSEEK_API_KEY 未配置，LLM 调用将不可用（retrieval eval 仍可运行）')
 
 # Paths (project root = enterprise-ai-copilot/)
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))          # app/core/
