@@ -198,8 +198,12 @@ def main():
     parser = argparse.ArgumentParser(description='RAG 生成评估')
     parser.add_argument('--top-k', type=int, default=3,
                         help='TopK 值（默认 3）')
+    parser.add_argument('--retrieval-mode', type=str, default='hybrid',
+                        choices=['vector', 'hybrid'],
+                        help='检索模式：vector（Faiss+keyword）或 hybrid（Faiss+BM25+RRF）')
     args = parser.parse_args()
     top_k = args.top_k
+    retrieval_mode = args.retrieval_mode
 
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -216,8 +220,8 @@ def main():
 
     # ── 延迟导入 ──
     from app.services.rag_service import process_chat
-    # 包装 process_chat，注入 top_k
-    _chat = lambda q: process_chat(q, top_k=top_k)
+    # 包装 process_chat，注入 top_k 和 retrieval_mode
+    _chat = lambda q: process_chat(q, top_k=top_k, retrieval_mode=retrieval_mode)
 
     # ── 表头 ──
     HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>4}  {:>4}  {:38}  {}'
