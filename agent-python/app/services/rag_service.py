@@ -7,13 +7,14 @@ from app.schemas.chat_schema import ChatResponse
 from app.services.llm_service import call_llm
 
 
-def process_chat(message: str, trace_id: str = '', top_k: int = 3) -> ChatResponse:
+def process_chat(message: str, trace_id: str = '', top_k: int = 3,
+                 retrieval_mode: str = 'hybrid') -> ChatResponse:
     if not trace_id:
         trace_id = str(uuid4())
 
     try:
         # 1. 检索
-        chunks = retrieve(message, top_k=top_k)
+        chunks = retrieve(message, top_k=top_k, mode=retrieval_mode)
         logger.info('[%s] 用户问题: %s | 命中 chunk: %d', trace_id, message, len(chunks))
         for c in chunks:
             logger.info('[%s]   - %s [%s] %s', trace_id, c['id'], c['domain'], c['source_file'])

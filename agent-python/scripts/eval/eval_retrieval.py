@@ -71,8 +71,12 @@ def main():
     parser = argparse.ArgumentParser(description='RAG 检索评估')
     parser.add_argument('--top-k', type=int, default=TOP_K,
                         help=f'TopK 值（默认 {TOP_K}）')
+    parser.add_argument('--retrieval-mode', type=str, default='hybrid',
+                        choices=['vector', 'hybrid'],
+                        help='检索模式：vector（Faiss+keyword）或 hybrid（Faiss+BM25+RRF）')
     args = parser.parse_args()
     top_k = args.top_k
+    retrieval_mode = args.retrieval_mode
 
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -105,8 +109,8 @@ def main():
         expected_keywords: list[str] = case.get('expected_keywords', [])
         answerable = case.get('answerable', True)
 
-        # 调用 hybrid retriever
-        topk = retrieve(question, top_k=top_k)
+        # 调用检索器
+        topk = retrieve(question, top_k=top_k, mode=retrieval_mode)
 
         # 提取实际 source_file（去重）
         actual_sources = sorted({r['source_file'] for r in topk})
