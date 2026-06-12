@@ -1,3 +1,4 @@
+# Enterprise AI Copilot - CI Pipeline
 name: CI
 
 on:
