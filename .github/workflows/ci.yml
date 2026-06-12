@@ -21,6 +21,10 @@ jobs:
           distribution: "temurin"
           cache: maven
 
+      - name: Make Maven wrapper executable
+        working-directory: backend-java
+        run: chmod +x ./mvnw
+
       - name: Compile
         working-directory: backend-java
         run: ./mvnw compile -q
