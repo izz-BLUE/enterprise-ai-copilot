@@ -25,5 +25,9 @@ CHUNKS_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'chunks.json')
 FAISS_INDEX_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss.index')
 FAISS_META_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss_metadata.json')
 
+# Cross Encoder Re-ranker
+RERANK_MODEL = os.getenv('RERANK_MODEL', 'BAAI/bge-reranker-base')
+RERANK_CANDIDATE_K = int(os.getenv('RERANK_CANDIDATE_K', '10'))
+
 # Constants
 TOP_K = 3

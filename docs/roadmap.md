@@ -20,6 +20,9 @@
 - [x] FAISS 向量索引构建与检索
 - [x] 关键词检索（jieba 分词 + n-gram 匹配）
 - [x] Hybrid Retrieval（Faiss + Keyword 合并去重 TopK）
+- [x] BM25 检索（字符级 n-gram，无外部依赖）
+- [x] RRF（Reciprocal Rank Fusion）多路检索融合
+- [x] Cross Encoder Re-rank（hybrid_rerank 实验模式）
 - [x] RAG Prompt 构造（知识库内容 + 严格规则）
 - [x] DeepSeek LLM 调用（OpenAI SDK 兼容）
 - [x] 稳定 RAG 接口 `/api/chat`
@@ -62,9 +65,6 @@
 
 ## 中期计划（Planned）
 
-- [ ] BM25 检索（替代或补充当前关键词检索）
-- [ ] RRF（Reciprocal Rank Fusion）多路检索融合
-- [ ] Cross Encoder Re-rank（精排 TopK 结果）
 - [ ] Query Rewrite（口语化问题规范化）
 - [ ] 多轮对话上下文管理
 - [ ] 文档上传与知识库管理接口

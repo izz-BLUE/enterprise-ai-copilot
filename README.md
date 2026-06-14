@@ -20,7 +20,8 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 
 - Java + Python 双服务架构
 - RAG 主问答链路
-- Hybrid Retrieval（Faiss 向量检索 + Keyword 关键词检索）
+- Hybrid Retrieval（Faiss + BM25 + RRF 融合，支持 vector / hybrid / hybrid_rerank 三种模式）
+- Cross Encoder Re-rank（hybrid_rerank 实验模式，BAAI/bge-reranker-base 精排）
 - RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比）
 - LangChain RAG Chain 实验模块
 - LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
@@ -173,25 +174,29 @@ uv run python scripts/build/build_faiss_index.py
 
 ### 5. Hybrid Retrieval
 
-**检索链路：**
+支持三种检索模式：
 
+**vector 模式：**
 ```
-Faiss Semantic Retrieval
-        +
-Keyword Retrieval
-        ↓
-Merge
-        ↓
-Deduplicate
-        ↓
-TopK
+Faiss Semantic Retrieval + Keyword Retrieval → Merge → Deduplicate → TopK
+```
+
+**hybrid 模式（默认）：**
+```
+Faiss Semantic Retrieval + BM25 Retrieval → RRF 融合 → TopK
+```
+
+**hybrid_rerank 模式（实验）：**
+```
+Faiss + BM25 → RRF → Top10 候选 → Cross Encoder 精排 → TopK
 ```
 
 **设计目的：**
 
 - Faiss 负责语义召回
-- Keyword Retrieval 负责精确词补充
-- Merge + Deduplicate 降低重复 chunk 干扰
+- BM25 负责关键词精确匹配
+- RRF 融合多路排序，不需要分数归一化
+- Cross Encoder 精排提升 TopK 内排序质量
 - TopK 控制进入 Prompt 的上下文长度
 
 **适合解决：**
@@ -354,7 +359,8 @@ curl -X POST http://localhost:8080/api/agent/langgraph/chat \
 | LLM Provider | DeepSeek / OpenAI-compatible API |
 | Embedding | `BAAI/bge-small-zh-v1.5` |
 | Vector Search | faiss-cpu, IndexFlatIP |
-| Keyword Search | jieba |
+| Keyword Search | BM25 (custom), n-gram |
+| Re-ranker | sentence-transformers CrossEncoder |
 | RAG Framework Experiment | LangChain |
 | Agent Framework Experiment | LangGraph |
 | Evaluation | Python scripts, JSON reports |
@@ -502,6 +508,7 @@ Current evaluation cases cover scenarios such as:
 - IT support (VPN), onboarding
 - **No-answer negative samples** (7 cases): questions with no knowledge base answer, verifying the system refuses to fabricate
 - **TopK comparison**: evaluation across TopK=3/5/8 to balance recall quality and cost
+- **Cross Encoder Re-rank**: hybrid_rerank mode with BAAI/bge-reranker-base for precision reranking
 
 ## Stable RAG vs Experimental Agent
 
@@ -522,9 +529,6 @@ Current evaluation cases cover scenarios such as:
 
 **Planned features:**
 
-- BM25 retrieval
-- RRF ranking fusion
-- Cross Encoder Re-rank
 - Query Rewrite
 - Multi-turn conversation memory
 - LLM-based Tool Calling
