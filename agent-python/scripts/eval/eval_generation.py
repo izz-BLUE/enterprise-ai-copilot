@@ -201,9 +201,13 @@ def main():
     parser.add_argument('--retrieval-mode', type=str, default='hybrid',
                         choices=['vector', 'hybrid', 'hybrid_rerank'],
                         help='检索模式：vector / hybrid / hybrid_rerank')
+    parser.add_argument('--rewrite-mode', type=str, default='none',
+                        choices=['none', 'rule'],
+                        help='查询重写模式：none / rule')
     args = parser.parse_args()
     top_k = args.top_k
     retrieval_mode = args.retrieval_mode
+    rewrite_mode = args.rewrite_mode
 
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -216,12 +220,16 @@ def main():
     answerable_cases = [c for c in cases if c.get('answerable', True)]
     no_answer_cases = [c for c in cases if not c.get('answerable', True)]
 
-    print(f'加载 {len(cases)} 个测试用例 (answerable={len(answerable_cases)}, no_answer={len(no_answer_cases)}, top_k={top_k})\n')
+    print(f'加载 {len(cases)} 个测试用例 '
+          f'(answerable={len(answerable_cases)}, '
+          f'no_answer={len(no_answer_cases)}, top_k={top_k})\n')
 
     # ── 延迟导入 ──
     from app.services.rag_service import process_chat
-    # 包装 process_chat，注入 top_k 和 retrieval_mode
-    _chat = lambda q: process_chat(q, top_k=top_k, retrieval_mode=retrieval_mode)
+    # 包装 process_chat，注入 top_k、retrieval_mode 和 rewrite_mode
+    def _chat(q):
+        return process_chat(q, top_k=top_k, retrieval_mode=retrieval_mode,
+                            rewrite_mode=rewrite_mode)
 
     # ── 表头 ──
     HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>4}  {:>4}  {:38}  {}'
@@ -327,7 +335,8 @@ def main():
             else:
                 kw_tag = '+REF' if final_r['refusal_hit'] else '-REF'
             type_tag = '否'
-            detail_str = ','.join(final_r.get('matched_refusal_keywords', [])) if final_r.get('matched_refusal_keywords') else '-'
+            matched = final_r.get('matched_refusal_keywords', [])
+            detail_str = ','.join(matched) if matched else '-'
 
         display_q = _truncate(question, 36)
         print(ROW_FMT.format(case_id, status, kw_tag, str(attempts), type_tag, display_q, detail_str))
@@ -362,17 +371,17 @@ def main():
     print('  生成评估结果汇总')
     print('=' * 60)
     print(f'    总用例数:                {total}')
-    print(f'    ---')
+    print('    ---')
     print(f'    answerable 用例数:       {ab_total}')
     print(f'    answerable 通过:         {ab_passed}')
     print(f'    answerable 失败:         {ab_failed}')
     print(f'    answerable_pass_rate:    {ab_pass_rate:.1f}%')
-    print(f'    ---')
+    print('    ---')
     print(f'    no-answer 用例数:        {na_total}')
     print(f'    no-answer 通过(拒答):    {na_passed}')
     print(f'    no-answer 失败(编造):    {na_failed}')
     print(f'    no_answer_pass_rate:     {na_pass_rate:.1f}%')
-    print(f'    ---')
+    print('    ---')
     print(f'    overall_pass_rate:       {overall_pass_rate:.1f}%')
     print(f'    stable_pass_rate(首次):  {stable_pass_rate:.1f}%')
     if flaky_ids:

@@ -8,10 +8,12 @@ langgraph_agent.py —— LangGraph Agent 核心模块
 import json
 from typing import TypedDict
 
-from app.guards.safety_guard import check_user_query_safety
-from app.tools.rag_tools import rag_answer_tool, eval_report_tool
+from langgraph.graph import END, START, StateGraph
 
-from langgraph.graph import StateGraph, START, END
+from app.core.config import REWRITE_MODE, logger
+from app.guards.safety_guard import check_user_query_safety
+from app.retrieval.query_rewriter import rewrite_query
+from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
 EVAL_KEYWORDS = ['评估', '通过率', 'pass_rate', '命中率', 'baseline', '回归', 'flaky']
 
@@ -54,7 +56,18 @@ def router_node(state: AgentState) -> dict:
 
 def rag_node(state: AgentState) -> dict:
     question = state["question"]
-    result_str = rag_answer_tool.invoke({"question": question})
+
+    # Query Rewrite（只改写检索用 query，不改 original_query）
+    rewrite_result = rewrite_query(question, mode=REWRITE_MODE)
+    retrieval_query = rewrite_result['rewritten_query']
+    if rewrite_result['rewrite_applied']:
+        logger.info('LangGraph Query rewrite: "%s" → "%s" (reason: %s)',
+                    question, retrieval_query, rewrite_result['rewrite_reason'])
+
+    # 用 rewritten_query 检索，但传给 tool 的仍是 original_query
+    # tool 内部的 LangChain RAG chain 会用 question 做检索和 prompt
+    # 这里我们直接用 rewritten_query 调用 tool，让检索更准
+    result_str = rag_answer_tool.invoke({"question": retrieval_query})
     try:
         parsed = json.loads(result_str)
     except json.JSONDecodeError:
@@ -77,9 +90,18 @@ def eval_node(state: AgentState) -> dict:
     gen = parsed.get("generation", {})
     summary_parts = []
     if ret:
-        summary_parts.append(f'检索评估: {ret.get("passed")}/{ret.get("total")} 通过, final_pass_rate={ret.get("final_pass_rate")}')
+        rp = ret.get("final_pass_rate")
+        summary_parts.append(
+            f'检索评估: {ret.get("passed")}/{ret.get("total")} 通过, '
+            f'final_pass_rate={rp}'
+        )
     if gen:
-        summary_parts.append(f'生成评估: {gen.get("passed")}/{gen.get("total")} 通过, pass_rate={gen.get("pass_rate")}, stable_pass_rate={gen.get("stable_pass_rate")}, flaky={gen.get("flaky_count")}')
+        summary_parts.append(
+            f'生成评估: {gen.get("passed")}/{gen.get("total")} 通过, '
+            f'pass_rate={gen.get("pass_rate")}, '
+            f'stable_pass_rate={gen.get("stable_pass_rate")}, '
+            f'flaky={gen.get("flaky_count")}'
+        )
 
     return {
         "answer": "；".join(summary_parts) if summary_parts else str(parsed),

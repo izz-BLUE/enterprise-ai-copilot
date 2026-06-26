@@ -29,5 +29,8 @@ FAISS_META_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss_metadat
 RERANK_MODEL = os.getenv('RERANK_MODEL', 'BAAI/bge-reranker-base')
 RERANK_CANDIDATE_K = int(os.getenv('RERANK_CANDIDATE_K', '10'))
 
+# Query Rewrite
+REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
+
 # Constants
 TOP_K = 3
