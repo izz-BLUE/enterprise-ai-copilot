@@ -531,7 +531,8 @@ Current evaluation cases cover scenarios such as:
 - sick leave materials, lateness and early leave, absenteeism
 - labor contract termination, overtime, attendance
 - IT support (VPN), onboarding
-- **No-answer negative samples** (7 cases): questions with no knowledge base answer, verifying the system refuses to fabricate
+- **No-answer negative samples** (10 cases): questions with no knowledge base answer, verifying the system refuses to fabricate
+- **Colloquial query rewrite** (13 cases):口语化问题验证 Query Rewrite 检索改善
 - **TopK comparison**: evaluation across TopK=3/5/8 to balance recall quality and cost
 - **Cross Encoder Re-rank**: hybrid_rerank mode with BAAI/bge-reranker-base for precision reranking
 

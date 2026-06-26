@@ -198,5 +198,109 @@
     "expected_keywords": [],
     "expected_answer_keywords": [],
     "answerable": false
+  },
+  {
+    "id": "colloquial_001",
+    "question": "几点上班？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["9:30", "13:30", "18:30"],
+    "expected_answer_keywords": ["9:30", "18:30"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_002",
+    "question": "请病假要啥？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["病历本", "缴费清单", "病假证明"],
+    "expected_answer_keywords": ["病历本", "缴费清单"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_003",
+    "question": "年假咋请？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["5 天", "10 天", "15 天"],
+    "expected_answer_keywords": ["5天", "10天", "15天"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_004",
+    "question": "VPN 怎么弄？",
+    "expected_sources": ["vpn_guide.md"],
+    "expected_keywords": ["VPN", "下载"],
+    "expected_answer_keywords": ["VPN", "下载"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_005",
+    "question": "入职要交啥？",
+    "expected_sources": ["onboarding.md"],
+    "expected_keywords": ["入职信息", "工牌"],
+    "expected_answer_keywords": ["入职", "工牌"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_006",
+    "question": "请假谁来批？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["直接主管", "部门"],
+    "expected_answer_keywords": ["直接主管"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_007",
+    "question": "病假要交哪些东西？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["病历本", "缴费清单", "病假证明"],
+    "expected_answer_keywords": ["病历本", "缴费清单"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_008",
+    "question": "下班几点？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["18:30"],
+    "expected_answer_keywords": ["18:30"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_009",
+    "question": "迟到罚多少钱？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["罚款", "200"],
+    "expected_answer_keywords": ["罚款", "200"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_010",
+    "question": "上班几点到几点？",
+    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_keywords": ["9:30", "13:30", "18:30"],
+    "expected_answer_keywords": ["9:30", "18:30"],
+    "answerable": true
+  },
+  {
+    "id": "colloquial_none_001",
+    "question": "公司买房给补贴不？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "colloquial_none_002",
+    "question": "年终奖保底几个月？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
+  },
+  {
+    "id": "colloquial_none_003",
+    "question": "能长期在家办公不？",
+    "expected_sources": [],
+    "expected_keywords": [],
+    "expected_answer_keywords": [],
+    "answerable": false
   }
 ]
