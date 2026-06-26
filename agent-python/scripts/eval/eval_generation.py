@@ -199,8 +199,8 @@ def main():
     parser.add_argument('--top-k', type=int, default=3,
                         help='TopK 值（默认 3）')
     parser.add_argument('--retrieval-mode', type=str, default='hybrid',
-                        choices=['vector', 'hybrid'],
-                        help='检索模式：vector（Faiss+keyword）或 hybrid（Faiss+BM25+RRF）')
+                        choices=['vector', 'hybrid', 'hybrid_rerank'],
+                        help='检索模式：vector / hybrid / hybrid_rerank')
     args = parser.parse_args()
     top_k = args.top_k
     retrieval_mode = args.retrieval_mode
