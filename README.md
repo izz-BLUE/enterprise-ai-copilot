@@ -22,7 +22,8 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 - RAG 主问答链路
 - Hybrid Retrieval（Faiss + BM25 + RRF 融合，支持 vector / hybrid / hybrid_rerank 三种模式）
 - Cross Encoder Re-rank（hybrid_rerank 实验模式，BAAI/bge-reranker-base 精排）
-- RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比）
+- Query Rewrite（rule 规则匹配实验模式，检索前口语化改写）
+- RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比 + Query Rewrite 对比）
 - LangChain RAG Chain 实验模块
 - LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
 - Java 代理接口（traceId 全链路透传）
@@ -205,6 +206,30 @@ Faiss + BM25 → RRF → Top10 候选 → Cross Encoder 精排 → TopK
 - 关键制度词必须精确命中
 - 单纯向量检索漏召回
 - 单纯关键词检索语义泛化不足
+
+### 6. Query Rewrite
+
+在检索前对用户口语化问题做轻量改写，提升检索召回率。
+
+**支持模式：**
+
+- `rewrite_mode=none`：不做查询重写，保持原逻辑
+- `rewrite_mode=rule`：规则匹配重写，不调用 LLM
+
+**链路位置：**
+
+```
+original_query → query_rewriter → rewritten_query → retrieval → context
+                                                          ↓
+                                              prompt 使用 original_query
+```
+
+**设计要点：**
+
+- Query Rewrite 只改写检索用 query，不改变最终 prompt 中的用户问题
+- 规则版覆盖企业制度常见口语表达（病假材料、工作时间、VPN、年假等）
+- 无匹配规则时返回原问题，不影响检索
+- 实验模式，默认不启用
 
 ### 6. RAG Evaluation
 

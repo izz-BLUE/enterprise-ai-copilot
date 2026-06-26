@@ -23,6 +23,7 @@
 - [x] BM25 检索（字符级 n-gram，无外部依赖）
 - [x] RRF（Reciprocal Rank Fusion）多路检索融合
 - [x] Cross Encoder Re-rank（hybrid_rerank 实验模式）
+- [x] Query Rewrite（rule 规则匹配实验模式）
 - [x] RAG Prompt 构造（知识库内容 + 严格规则）
 - [x] DeepSeek LLM 调用（OpenAI SDK 兼容）
 - [x] 稳定 RAG 接口 `/api/chat`
@@ -44,6 +45,7 @@
 - [x] Baseline 管理（手动更新，回归检测）
 - [x] 一键评估脚本 `run_rag_eval.py`
 - [x] TopK 对比评估 `compare_topk_eval.py`
+- [x] Query Rewrite 对比评估 `compare_query_rewrite.py`
 - [x] 25 个 eval case（18 answerable + 7 no-answer 负样本）
 - [x] 中文数字归一化（"三天" ↔ "3天"）
 
@@ -65,7 +67,6 @@
 
 ## 中期计划（Planned）
 
-- [ ] Query Rewrite（口语化问题规范化）
 - [ ] 多轮对话上下文管理
 - [ ] 文档上传与知识库管理接口
 - [ ] Docker Compose 一键部署

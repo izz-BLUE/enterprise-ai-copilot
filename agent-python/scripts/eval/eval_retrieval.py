@@ -74,9 +74,13 @@ def main():
     parser.add_argument('--retrieval-mode', type=str, default='hybrid',
                         choices=['vector', 'hybrid', 'hybrid_rerank'],
                         help='检索模式：vector / hybrid / hybrid_rerank')
+    parser.add_argument('--rewrite-mode', type=str, default='none',
+                        choices=['none', 'rule'],
+                        help='查询重写模式：none / rule')
     args = parser.parse_args()
     top_k = args.top_k
     retrieval_mode = args.retrieval_mode
+    rewrite_mode = args.rewrite_mode
 
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -94,6 +98,7 @@ def main():
 
     # ── 导入检索器（延迟导入，避免前置检查失败时因缺少依赖而崩溃） ──
     from app.retrieval.hybrid_retriever import retrieve
+    from app.retrieval.query_rewriter import rewrite_query
 
     # ── 表头 ──
     HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:>4}  {:38}  {}'
@@ -109,8 +114,10 @@ def main():
         expected_keywords: list[str] = case.get('expected_keywords', [])
         answerable = case.get('answerable', True)
 
-        # 调用检索器
-        topk = retrieve(question, top_k=top_k, mode=retrieval_mode)
+        # 调用检索器（可选 query rewrite）
+        rewrite_result = rewrite_query(question, mode=rewrite_mode)
+        retrieval_query = rewrite_result['rewritten_query']
+        topk = retrieve(retrieval_query, top_k=top_k, mode=retrieval_mode)
 
         # 提取实际 source_file（去重）
         actual_sources = sorted({r['source_file'] for r in topk})
@@ -134,6 +141,9 @@ def main():
             results.append({
                 'id': case_id,
                 'question': question,
+                'retrieval_query': retrieval_query,
+                'rewrite_applied': rewrite_result['rewrite_applied'],
+                'rewrite_reason': rewrite_result['rewrite_reason'],
                 'answerable': True,
                 'passed': passed,
                 'source_hit': source_hit,
@@ -153,6 +163,9 @@ def main():
             results.append({
                 'id': case_id,
                 'question': question,
+                'retrieval_query': retrieval_query,
+                'rewrite_applied': rewrite_result['rewrite_applied'],
+                'rewrite_reason': rewrite_result['rewrite_reason'],
                 'answerable': False,
                 'passed': True,  # no-answer case 在 retrieval 层不判 fail
                 'source_hit': False,
