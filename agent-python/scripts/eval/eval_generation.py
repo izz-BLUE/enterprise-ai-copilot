@@ -84,6 +84,43 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def _check_keyword_groups(content: str,
+                          keyword_groups: list[list[str]]) -> tuple[bool, list[list[str]]]:
+    """检查 keyword groups（组内 OR，组间 AND）。
+
+    每个 group 至少命中一个词才算该组通过。
+    所有 group 都通过才算整体通过。
+
+    返回 (全部通过?, [未通过的 group 及其候选词])
+    """
+    if not keyword_groups:
+        return True, []
+
+    norm_content = normalize_text(content)
+    missing_groups = []
+    for group in keyword_groups:
+        group_hit = False
+        for kw in group:
+            if normalize_text(kw) in norm_content:
+                group_hit = True
+                break
+        if not group_hit:
+            missing_groups.append(group)
+    return len(missing_groups) == 0, missing_groups
+
+
+def _classify_failure(keyword_groups_defined: bool, keywords_pass: bool,
+                      groups_pass: bool, flaky: bool) -> str:
+    """根据评估结果分类失败原因。"""
+    if keywords_pass or groups_pass:
+        return 'passed'
+    if flaky:
+        return 'llm_flaky'
+    if keyword_groups_defined and not groups_pass:
+        return 'keyword_too_strict'
+    return 'generation_incomplete'
+
+
 def _check_keywords(content: str, expected_keywords: list[str]) -> tuple[bool, list[str], list[str]]:
     """检查所有 expected_keywords 是否出现在 content 中（归一化后比较）。
 
@@ -127,39 +164,80 @@ def _truncate(text: str, max_len: int = 80) -> str:
 
 
 def _evaluate_answerable(process_chat, question: str,
-                         expected_answer_keywords: list[str]) -> dict:
-    """对 answerable case 执行一次评估调用。"""
+                         expected_answer_keywords: list[str],
+                         keyword_groups: list[list[str]] | None = None) -> dict:
+    """对 answerable case 执行一次评估调用。
+
+    评估逻辑：
+    - expected_answer_keywords: 所有关键词必须命中（AND）
+    - keyword_groups: 组内 OR，组间 AND
+    - 两者独立检查，任一通过即通过（向后兼容）
+    """
     response = process_chat(question)
 
     if not response.success:
         return {
             'passed': False,
             'keyword_hit': False,
+            'groups_hit': False,
             'raw_missing_keywords': [],
             'norm_missing_keywords': [],
+            'missing_keyword_groups': [],
+            'failure_type': 'generation_incomplete',
             'answer_preview': 'LLM 调用失败',
             'success': False,
         }
 
     answer = response.answer
 
-    if not expected_answer_keywords:
+    has_keywords = bool(expected_answer_keywords)
+    has_groups = bool(keyword_groups)
+
+    # 无任何检查条件 → 直接通过
+    if not has_keywords and not has_groups:
         return {
             'passed': True,
             'keyword_hit': True,
+            'groups_hit': True,
             'raw_missing_keywords': [],
             'norm_missing_keywords': [],
+            'missing_keyword_groups': [],
+            'failure_type': 'passed',
             'answer_preview': _truncate(answer),
             'success': True,
         }
 
-    keyword_hit, raw_missing, norm_missing = _check_keywords(
-        answer, expected_answer_keywords)
+    # 检查 expected_answer_keywords（AND）
+    keywords_pass = True
+    raw_missing = []
+    norm_missing = []
+    if has_keywords:
+        keywords_pass, raw_missing, norm_missing = _check_keywords(
+            answer, expected_answer_keywords)
+
+    # 检查 keyword_groups（组内 OR，组间 AND）
+    groups_pass = True
+    missing_groups = []
+    if has_groups:
+        groups_pass, missing_groups = _check_keyword_groups(
+            answer, keyword_groups)
+
+    # 任一通过即通过
+    passed = keywords_pass or groups_pass
+
+    failure_type = 'passed' if passed else (
+        'keyword_too_strict' if has_groups and not groups_pass
+        else 'generation_incomplete'
+    )
+
     return {
-        'passed': keyword_hit,
-        'keyword_hit': keyword_hit,
+        'passed': passed,
+        'keyword_hit': keywords_pass,
+        'groups_hit': groups_pass,
         'raw_missing_keywords': raw_missing,
         'norm_missing_keywords': norm_missing,
+        'missing_keyword_groups': missing_groups,
+        'failure_type': failure_type,
         'answer_preview': _truncate(answer),
         'success': True,
     }
@@ -194,6 +272,9 @@ def _evaluate_no_answer(process_chat, question: str) -> dict:
 
 
 def main():
+    # ── Windows GBK 编码兼容 ──
+    sys.stdout.reconfigure(encoding='utf-8')
+
     # ── 解析命令行参数 ──
     parser = argparse.ArgumentParser(description='RAG 生成评估')
     parser.add_argument('--top-k', type=int, default=3,
@@ -247,7 +328,9 @@ def main():
 
         if answerable:
             # ── answerable case：原有逻辑 ──
-            r1 = _evaluate_answerable(_chat, question, expected_answer_keywords)
+            keyword_groups = case.get('expected_answer_keyword_groups', [])
+            r1 = _evaluate_answerable(_chat, question,
+                                      expected_answer_keywords, keyword_groups)
             first_passed = r1['passed']
 
             if first_passed or not r1['success']:
@@ -256,7 +339,8 @@ def main():
                 final_passed = first_passed
                 final_r = r1
             else:
-                r2 = _evaluate_answerable(_chat, question, expected_answer_keywords)
+                r2 = _evaluate_answerable(_chat, question,
+                                          expected_answer_keywords, keyword_groups)
                 attempts = 2
                 final_passed = r2['passed']
                 flaky = r2['passed']
@@ -265,31 +349,41 @@ def main():
             if flaky:
                 flaky_ids.append(case_id)
 
+            # 分类失败原因
+            has_groups = bool(keyword_groups)
+            failure_type = _classify_failure(
+                has_groups, final_r.get('keyword_hit', False),
+                final_r.get('groups_hit', False), flaky)
+
             results.append({
                 'id': case_id,
                 'question': question,
                 'answerable': True,
                 'passed': final_passed,
                 'keyword_hit': final_r['keyword_hit'],
+                'groups_hit': final_r.get('groups_hit', False),
                 'raw_missing_keywords': final_r.get('raw_missing_keywords', []),
                 'norm_missing_keywords': final_r.get('norm_missing_keywords', []),
+                'missing_keyword_groups': final_r.get('missing_keyword_groups', []),
                 'expected_answer_keywords': expected_answer_keywords,
+                'expected_answer_keyword_groups': keyword_groups,
                 'answer_preview': final_r['answer_preview'],
                 'success': final_r['success'],
                 'attempts': attempts,
                 'flaky': flaky,
                 'first_passed': first_passed,
+                'failure_type': failure_type,
             })
 
             status = 'PASS' if final_passed else 'FAIL'
             if flaky:
                 kw_tag = '-FLK'
-            elif final_r['success'] and not expected_answer_keywords:
+            elif final_r['success'] and not expected_answer_keywords and not keyword_groups:
                 kw_tag = '-SKIP'
             elif not final_r['success']:
                 kw_tag = '-ERR'
             else:
-                kw_tag = '-OK' if final_r['keyword_hit'] else '-KW'
+                kw_tag = '-OK' if final_passed else '-KW'
             type_tag = '是'
             detail_str = ', '.join(final_r.get('norm_missing_keywords', [])) if not final_passed else '-'
 
@@ -325,6 +419,7 @@ def main():
                 'attempts': attempts,
                 'flaky': flaky,
                 'first_passed': first_passed,
+                'failure_type': 'no_answer_leakage' if not final_passed else 'passed',
             })
 
             status = 'PASS' if final_passed else 'FAIL'
@@ -389,6 +484,13 @@ def main():
         print(f'    flaky 数量:              {flaky_count}')
     print(f'    LLM 调用失败:            {llm_fail_count}')
 
+    # ── 先保存报告（防止后续 print 崩溃丢失结果） ──
+    _save_report(results, total, ab_total, na_total,
+                 ab_passed, ab_failed, ab_pass_rate,
+                 na_passed, na_failed, na_pass_rate,
+                 total_passed, total_failed, overall_pass_rate,
+                 llm_fail_count, flaky_count, stable_pass_rate)
+
     # ── 失败用例详情 ──
     if total_failed > 0:
         print()
@@ -398,9 +500,11 @@ def main():
         for r in results:
             if r['passed']:
                 continue
+            ft = r.get('failure_type', 'unknown')
             print(f'\n  ID:                       {r["id"]}')
             print(f'  问题:                     {r["question"]}')
             print(f'  answerable:               {r["answerable"]}')
+            print(f'  failure_type:             {ft}')
             print(f'  LLM 成功:                 {r["success"]}')
             print(f'  尝试次数:                 {r.get("attempts", 1)}')
             if r['answerable']:
@@ -411,16 +515,26 @@ def main():
                     print(f'  原始缺失关键词:           {raw_missing}')
                 if norm_missing:
                     print(f'  归一化后缺失关键词:       {norm_missing}')
+                missing_groups = r.get('missing_keyword_groups', [])
+                if missing_groups:
+                    print(f'  未通过 keyword groups:     {missing_groups}')
             else:
                 print(f'  拒答关键词命中:           {r.get("matched_refusal_keywords", [])}')
             print(f'  回答预览:                 {r["answer_preview"]}')
 
+    # ── failure_type 分布 ──
+    ft_counter: dict[str, int] = {}
+    for r in results:
+        ft = r.get('failure_type', 'unknown')
+        ft_counter[ft] = ft_counter.get(ft, 0) + 1
+    print()
+    print('=' * 60)
+    print('  failure_type 分布')
+    print('=' * 60)
+    for ft, count in sorted(ft_counter.items(), key=lambda x: -x[1]):
+        print(f'    {ft:<25} {count}')
+
     # ── 退出码 ──
-    _save_report(results, total, ab_total, na_total,
-                 ab_passed, ab_failed, ab_pass_rate,
-                 na_passed, na_failed, na_pass_rate,
-                 total_passed, total_failed, overall_pass_rate,
-                 llm_fail_count, flaky_count, stable_pass_rate)
     sys.exit(0 if total_failed == 0 else 1)
 
 
@@ -446,14 +560,25 @@ def _save_report(results: list[dict], total: int,
             'flaky': r.get('flaky', False),
             'first_passed': r.get('first_passed', r['passed']),
             'answer_preview': r['answer_preview'],
+            'failure_type': r.get('failure_type', 'unknown'),
         }
         if r['answerable']:
             entry['expected_answer_keywords'] = r.get('expected_answer_keywords', [])
             entry['raw_missing_keywords'] = r.get('raw_missing_keywords', [])
             entry['norm_missing_keywords'] = r.get('norm_missing_keywords', [])
+            if r.get('expected_answer_keyword_groups'):
+                entry['expected_answer_keyword_groups'] = r['expected_answer_keyword_groups']
+            if r.get('missing_keyword_groups'):
+                entry['missing_keyword_groups'] = r['missing_keyword_groups']
         else:
             entry['matched_refusal_keywords'] = r.get('matched_refusal_keywords', [])
         slim_cases.append(entry)
+
+    # failure_type 分布
+    ft_counter: dict[str, int] = {}
+    for r in results:
+        ft = r.get('failure_type', 'unknown')
+        ft_counter[ft] = ft_counter.get(ft, 0) + 1
 
     report = {
         'eval_type': 'generation',
@@ -474,6 +599,7 @@ def _save_report(results: list[dict], total: int,
         'llm_failed': llm_fail_count,
         'pass_rate': round(overall_pass_rate / 100, 4),
         'stable_pass_rate': round(stable_pass_rate / 100, 4),
+        'failure_type_distribution': ft_counter,
         'cases': slim_cases,
     }
 

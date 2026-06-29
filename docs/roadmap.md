@@ -40,7 +40,7 @@
 ### Evaluation 体系
 
 - [x] Retrieval Evaluation（source_hit + keyword_hit，零 token 消耗）
-- [x] Generation Evaluation（answer 关键词匹配，调用 LLM）
+- [x] Generation Evaluation（answer 关键词匹配 + keyword groups 同义词组 + failure_type 分类，调用 LLM）
 - [x] Flaky case 识别（retry 机制，区分随机波动和稳定失败）
 - [x] Baseline 管理（手动更新，回归检测）
 - [x] 一键评估脚本 `run_rag_eval.py`

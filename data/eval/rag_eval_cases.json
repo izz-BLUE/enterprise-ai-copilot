@@ -245,6 +245,9 @@
     "expected_sources": ["leave_policy_real_sample.md"],
     "expected_keywords": ["直接主管", "部门"],
     "expected_answer_keywords": ["直接主管"],
+    "expected_answer_keyword_groups": [
+      ["直接主管", "上级主管", "直属主管", "主管领导", "直属上级", "直属领导", "上级领导", "部门领导"]
+    ],
     "answerable": true
   },
   {
