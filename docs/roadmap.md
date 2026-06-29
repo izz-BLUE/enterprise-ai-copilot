@@ -46,7 +46,7 @@
 - [x] 一键评估脚本 `run_rag_eval.py`
 - [x] TopK 对比评估 `compare_topk_eval.py`
 - [x] Query Rewrite 对比评估 `compare_query_rewrite.py`
-- [x] 25 个 eval case（18 answerable + 7 no-answer 负样本）
+- [x] 38 个 eval case（28 answerable + 10 no-answer 负样本，含 13 个口语化 Query Rewrite case）
 - [x] 中文数字归一化（"三天" ↔ "3天"）
 
 ### 异常兜底
