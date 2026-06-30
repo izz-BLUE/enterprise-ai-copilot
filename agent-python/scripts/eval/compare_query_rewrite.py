@@ -75,6 +75,7 @@ def _extract_generation_metrics(report: dict) -> dict:
         'pass_rate': report.get('pass_rate', 0),
         'flaky_count': report.get('flaky_count', 0),
         'llm_failed': report.get('llm_failed', 0),
+        'failure_type_distribution': report.get('failure_type_distribution', {}),
     }
 
 

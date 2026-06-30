@@ -238,7 +238,7 @@ original_query → query_rewriter → rewritten_query → retrieval → context
 | 层级 | 脚本 | 评估内容 | 输出 |
 |------|------|---------|------|
 | Retrieval Evaluation | `scripts/eval/eval_retrieval.py` | source_hit / keyword_hit / final_pass_rate | `reports/retrieval_eval_report.json` |
-| Generation Evaluation | `scripts/eval/eval_generation.py` | answer keyword hit / flaky detection / pass_rate | `reports/generation_eval_report.json` |
+| Generation Evaluation | `scripts/eval/eval_generation.py` | answer keyword hit / keyword groups / failure_type / flaky detection / pass_rate | `reports/generation_eval_report.json` |
 | Regression Check | `scripts/eval/compare_eval_reports.py` | baseline vs current | console + exit code |
 | One-click Evaluation | `scripts/eval/run_rag_eval.py` | retrieval + generation + regression | console summary |
 
