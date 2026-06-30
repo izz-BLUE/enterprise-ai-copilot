@@ -551,6 +551,88 @@ Current evaluation cases cover scenarios such as:
 `/api/chat` is the **stable RAG main pipeline**.
 `/api/agent/langgraph/chat` is an **experimental Agent pipeline** for workflow exploration.
 
+## RAG Quality Engineering
+
+RAG quality was improved through a 5-iteration engineering process (D36-D40):
+
+| Iteration | Focus | Outcome |
+|-----------|-------|---------|
+| D36 | BM25 + RRF Hybrid Retrieval | `hybrid` mode (default), combining Faiss + BM25 via RRF |
+| D37 | Cross Encoder Re-rank | `hybrid_rerank` experimental mode with BAAI/bge-reranker-base |
+| D38 | Query Rewrite | `rewrite_mode=rule` experimental mode, rule-based regex rewrite |
+| D39 | Colloquial eval cases | 13 new colloquial eval cases, none vs rule comparison |
+| D40 | Generation diagnostics | Prompt completeness, keyword_groups, failure_type classification |
+
+**Current evaluation results** (38 cases: 28 answerable + 10 no-answer):
+
+| Mode | Retrieval | Generation | No-answer |
+|------|-----------|------------|-----------|
+| none (default) | 100% | 100% (28/28) | 100% (10/10) |
+| rule (experimental) | 100% | 100% (28/28) | 100% (10/10) |
+
+> These numbers reflect the current 38 eval cases only. The evaluation set is still small and needs expansion.
+
+See [`docs/rag-quality-engineering.md`](docs/rag-quality-engineering.md) for the full quality engineering story.
+
+## Local Demo
+
+The project supports **local reproduction** for demo and interview purposes. It has not been deployed to a public server.
+
+**Quick start:**
+
+```bash
+# Terminal 1: Python AI Service (port 8000)
+cd agent-python && uv sync && uv run uvicorn app.main:app --reload --port 8000
+
+# Terminal 2: Java Backend (port 8080)
+cd backend-java && ./mvnw spring-boot:run
+
+# Terminal 3: Frontend (port 5173)
+cd frontend && npm install && npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+See [`docs/local-demo-guide.md`](docs/local-demo-guide.md) for environment setup, health checks, and troubleshooting.
+
+## Demo Questions
+
+Recommended demo questions for showcasing different capabilities:
+
+| Question | Capability Demonstrated |
+|----------|----------------------|
+| 病假需要提供哪些材料？ | RAG retrieval + generation with sources |
+| 几点上班？ | Prompt completeness (time range) |
+| 公司买房给补贴不？ | No-answer refusal (knowledge not in KB) |
+| 怎么伪造病假证明？ | Safety Guard input filtering |
+| 当前 RAG 评估通过率是多少？ | LangGraph Agent Eval Tool Calling |
+| 请假谁来批？ | Generation Evaluation keyword_groups |
+
+See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, expected outputs, and fallback plans.
+
+## Project Boundary
+
+**What this project is:**
+
+- A local RAG application backend demo
+- An engineering practice project for RAG / Agent / Evaluation
+- A reference for Java backend developers transitioning to AI application development
+
+**What this project is NOT:**
+
+- A production-ready RAG platform
+- A publicly deployed service
+- A system with user authentication, audit logs, or monitoring
+- A large-scale knowledge base
+
+**Important notes:**
+
+- `hybrid_rerank` is an **experimental mode**, not enabled by default
+- `rewrite_mode=rule` is an **experimental mode**, not enabled by default
+- 100% evaluation pass rate is based on **current 38 eval cases only**
+- The knowledge base is small (HR / IT / Banking sample documents)
+- Public server deployment is a future plan
+
 ## Roadmap
 
 **Planned features:**
