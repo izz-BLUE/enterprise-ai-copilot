@@ -9,10 +9,10 @@
 | Task ID | 问题 | 来源 | Owner | 分支 | 修复范围 | 验收标准 | 阻塞生产化 | 状态 |
 |---|---|---|---|---|---|---|---|---|
 | FIX-001 | CORS 配置过宽：`allowedOriginPatterns("*")` | Security P0-1 | A1 | fix/fullstack-phase3-batch2 | `WebConfig.java` + `application.properties` | 可配置白名单 `cors.allowed-origins` | ✅ 是 | ✅ |
-| FIX-002 | 无认证/授权机制 | Security P0-2 | A0 设计 + A1 实现 | feat/auth | Java Filter/Controller | 至少实现 API Key 认证，评估接口限角色 | ✅ 是 | ⬜ |
+| FIX-002 | 无认证/授权机制 | Security P0-2 | A0 设计 + A1 实现 | fix/java-admin-token-eval-control | Java Filter/Controller | `admin.token` 配置 + `X-Admin-Token` 校验 + `X-Allow-Eval` 传递 | ✅ 是 | ✅ |
 | FIX-003 | Python 服务可被直接访问（端口 8000 无控制） | Security P0-3 | A1 | fix/python-access | `application.properties` + 部署文档 | Python 仅允许 localhost 访问，或添加内部 API Key | ✅ 是 | ⬜ |
 | FIX-004 | Safety Guard 仅覆盖 Agent 链路，RAG 主链路无安全检查 | Security P0-4 | A2 | fix/safety-guard-rag | `rag_service.py` | RAG 主链路也应用 Safety Guard 检查 | ✅ 是 | ✅ |
-| FIX-005 | Evaluation 接口无访问限制，任何用户可查询评估报告 | Security P0-5 | A2 | fix/eval-access | `langgraph_agent.py` | 生产环境禁用 eval_node 或添加角色判断 | ✅ 是 | ⬜ |
+| FIX-005 | Evaluation 接口无访问限制，任何用户可查询评估报告 | Security P0-5 | A2 | fix/python-eval-route-control | `langgraph_agent.py` + `main.py` | Java 传 `X-Allow-Eval` + Python router_node 受控路由 | ✅ 是 | ✅ |
 
 ---
 
