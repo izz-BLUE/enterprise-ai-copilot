@@ -24,7 +24,7 @@ def main():
         sys.exit(1)
 
     question = sys.argv[1]
-    result = run_langgraph_agent(question)
+    result = run_langgraph_agent(question, allow_eval=True)
 
     print(f'用户问题: {result["question"]}')
     print(f'route:    {result["route"]}')

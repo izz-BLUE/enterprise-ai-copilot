@@ -27,6 +27,7 @@ class AgentState(TypedDict):
     sources: list
     reason: str
     category: str
+    allow_eval: bool
 
 
 def safety_node(state: AgentState) -> dict:
@@ -50,7 +51,14 @@ def router_node(state: AgentState) -> dict:
 
     question = state["question"]
     if any(kw in question.lower() for kw in EVAL_KEYWORDS):
-        return {"route": "eval"}
+        if state.get("allow_eval", False):
+            return {"route": "eval"}
+        return {
+            "route": "refuse",
+            "answer": "该问题涉及内部评估诊断能力，仅管理员可访问。",
+            "category": "access_control",
+            "reason": "",
+        }
     return {"route": "rag"}
 
 
@@ -141,11 +149,12 @@ def build_agent_graph():
     return graph.compile()
 
 
-def run_langgraph_agent(question: str) -> dict:
+def run_langgraph_agent(question: str, allow_eval: bool = False) -> dict:
     graph = build_agent_graph()
     initial: AgentState = {
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
         "reason": "", "category": "",
+        "allow_eval": allow_eval,
     }
     return dict(graph.invoke(initial))
