@@ -31,6 +31,12 @@ docs/面试总结.md
 docs/daily-log/
 docs/interview/ai-backend-interview-summary.md
 
+# eval reports (auto-generated)
+data/eval/reports/
+
+# frontend
+node_modules/
+
 # private raw data
 data/raw/
 
