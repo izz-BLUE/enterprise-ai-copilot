@@ -49,7 +49,7 @@
 |---|---|---|---|---|---|---|
 | FIX-001 | CORS 配置过宽 | Security | A1 | fix/fullstack-phase3-batch2 | ✅ | 可配置白名单 cors.allowed-origins |
 | FIX-002 | 无认证/授权机制（Header Token 模式） | Security | A1 | fix/java-admin-token-eval-control | ✅ | `admin.token` 配置 + `X-Admin-Token` 校验 + `X-Allow-Eval` 传递 |
-| FIX-003 | Python 服务可被直接访问 | Security | A1 | fix/python-access | ⬜ | Python 仅允许 localhost |
+| FIX-003 | Python 服务可被直接访问 | Security | A1 | fix/python-access | 🟡 部署准备说明已完成 | Python 仅允许 localhost（详见 `docs/deployment-readiness.md`） |
 | FIX-004 | Safety Guard 仅覆盖 Agent 链路 | Security | A2 | fix/safety-guard-rag | ✅ | RAG 链路也应用安全检查 |
 | FIX-005 | Evaluation 接口无访问限制 | Security | A1+A2 | fix/python-eval-route-control | ✅ | Java 传 `X-Allow-Eval` + Python router_node 受控路由 |
 

@@ -43,7 +43,7 @@
 | 无认证授权 | 🟢 已修复 | Batch 3-B：最小 Admin Token + Evaluation 访问限制（非完整用户体系） |
 | CORS 过宽 | 🟢 已修复 | Phase 3 Batch 2：改为可配置白名单 |
 | Safety Guard 未覆盖 RAG | 🟢 已修复 | Phase 3 Batch 1：RAG 链路已增加 Safety Guard 前置检查 |
-| Python 服务裸露 | 🔴 高 | 端口 8000 无访问控制 |
+| Python 服务裸露 | 🟡 部署准备完成 | 端口 8000 无访问控制，部署准备说明已完成，上线前必须实施访问控制（详见 `docs/deployment-readiness.md`） |
 | 无单元测试 | 🟡 中 | Java 和 Python 都缺 |
 | DTO 契约无强类型 | 🟡 中 | Java ↔ Python 手动对齐 |
 | 评估集规模小 | 🟡 中 | 38 个 case，覆盖有限 |
@@ -73,7 +73,8 @@
 5. ~~Phase 3 Batch 2 修复~~ ✅（FIX-001/013/014/017）
 6. ~~Phase 3 Batch 3-A 修复~~ ✅（FIX-015 异常收敛 + FIX-016 traceId 验证）
 7. ~~Phase 3 Batch 3-B 修复~~ ✅（FIX-002 Admin Token + FIX-005 Eval 访问限制）
-8. **下一步**：A3/A4 复验 或 FIX-003 Python 内部化 / FIX-018 sources 脱敏
+8. ~~FIX-003 部署准备说明~~ ✅（`docs/deployment-readiness.md` 已完成，FIX-003 标记为"部署前阻塞项，已完成部署准备说明"）
+9. **下一步**：FIX-018 sources 脱敏 / P2 优化
 9. 后续：P2 优化（FIX-020~025）
 
 > 详见 [phase-3-remediation-plan.md](phase-3-remediation-plan.md)

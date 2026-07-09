@@ -485,18 +485,23 @@ admin.token=
 
 ## Environment Variables
 
-Create `.env` under `agent-python/`:
+Create `.env` under `agent-python/`（可从 `.env.example` 复制）：
 
 ```env
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=your_model_name
+# 必填
+DEEPSEEK_API_KEY=your_api_key_here
 
 # 可选配置
-LLM_TIMEOUT=30                # LLM 调用超时（秒），默认 30
-MAX_MESSAGE_LENGTH=2000       # 输入消息最大长度，默认 2000
-REWRITE_MODE=none             # 查询重写：none / rule（实验）
+DEEPSEEK_BASE_URL=https://api.deepseek.com    # DeepSeek API 地址
+DEEPSEEK_MODEL=deepseek-chat                   # 模型名称
+DEEPSEEK_TEMPERATURE=0                         # LLM 温度参数，默认 0
+LLM_TIMEOUT=30                                 # LLM 调用超时（秒），默认 30
+MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
+REWRITE_MODE=none                              # 查询重写：none / rule（实验）
+HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
 ```
+
+> **注意：** 代码中使用的环境变量名是 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`。部分旧文档中记录的 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 与代码不一致，应以代码为准。
 
 **Do not commit `.env` or any API keys to GitHub.**
 
@@ -615,6 +620,20 @@ cd frontend && npm install && npm run dev
 Open http://localhost:5173 in your browser.
 
 See [`docs/local-demo-guide.md`](docs/local-demo-guide.md) for environment setup, health checks, and troubleshooting.
+
+### Deployment Readiness
+
+项目提供部署准备文档和本地启动脚本：
+
+```powershell
+# 一键启动（Windows PowerShell）
+.\start-local.ps1
+
+# 健康检查
+.\health-check.ps1
+```
+
+详见 [`docs/deployment-readiness.md`](docs/deployment-readiness.md)。
 
 ## Demo Questions
 
