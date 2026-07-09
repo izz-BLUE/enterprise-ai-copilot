@@ -90,7 +90,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             route='error',
             safe=True,
             category='error',
-            reason=str(e),
+            reason='',  # 不暴露异常细节，详情仅记日志
             sources=[],
             success=False,
             traceId=trace_id,
