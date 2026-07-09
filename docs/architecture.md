@@ -106,7 +106,10 @@ flowchart TD
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
 - **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python `/agent/langgraph/chat`，透传 traceId
 - **HealthController / AgentHealthController**：健康检查
-- **WebConfig**：CORS 配置，暴露 `X-Trace-Id` 响应头
+- **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
+- **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 30s）
+- **ChatRequest**：输入长度校验（`@Size(max=2000)`）
+- **GlobalExceptionHandler**：全局异常处理，统一错误响应
 
 ## Python AI Service 职责
 
@@ -129,7 +132,10 @@ flowchart TD
 ```
 POST /api/chat
   → Java ChatController（读取 traceId，透传 X-Trace-Id）
+    → @Size(max=2000) 输入长度校验
+    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 30s）
     → Python POST /agent/chat
+      → MAX_MESSAGE_LENGTH 兜底校验（默认 2000）
       → rag_service.process_chat()
         → safety_guard.check_user_query_safety()  # Phase 3: 规则版 Safety Guard 前置检查
         → query_rewriter.rewrite_query()           # 实验模式，none 时跳过
@@ -138,7 +144,7 @@ POST /api/chat
           └── bm25_retriever（字符级 n-gram BM25 检索）
         → RRF 融合排序（默认 hybrid 模式）→ TopK=3
         → build_rag_prompt()
-        → llm_service.call_llm()
+        → llm_service.call_llm()                   # LLM_TIMEOUT 超时控制（默认 30s）
           → DeepSeek API
         → ChatResponse（含 traceId）
 ```
@@ -270,9 +276,12 @@ Frontend: 展示 traceId 标签
 | 场景 | 处理 |
 |------|------|
 | Python 服务不可用 | Java 返回 `success=false`，traceId 仍然存在 |
+| Java → Python 超时 | RestTemplate 超时（3s 连接 / 30s 读取），Java 返回兜底响应 |
+| LLM 调用超时 | Python `llm_service` 捕获 `APITimeoutError`，返回 `success=false` |
 | LLM 调用失败 | Python rag_service 返回 `success=false`，日志记录异常 |
+| 输入过长 | Java `@Size(max=2000)` 拦截 + Python `MAX_MESSAGE_LENGTH` 兜底 |
 | 知识库无检索结果 | Prompt 兜底："当前知识库暂无相关信息，不要编造" |
-| 安全问题输入 | Safety Guard 拦截，返回 `safe=false, route=refuse` |
+| 安全问题输入 | Safety Guard 拦截，返回安全拒答文案 |
 | Agent 异常 | Python endpoint catch Exception，返回 `success=false` |
 
 ## Python 模块一览

@@ -36,9 +36,6 @@ DEEPSEEK_MODEL=deepseek-chat
 **可选配置：**
 
 ```env
-# 检索模式：vector（默认）/ hybrid / hybrid_rerank（实验模式）
-RETRIEVAL_MODE=vector
-
 # 查询重写：none（默认）/ rule（实验模式）
 REWRITE_MODE=none
 ```

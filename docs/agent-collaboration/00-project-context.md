@@ -38,7 +38,7 @@ Enterprise AI Copilot 是一个**本地可复现的 RAG 应用后端 Demo**，�
 
 | 功能 | 配置 | 说明 |
 |---|---|---|
-| Cross Encoder Re-rank | `RETRIEVAL_MODE=hybrid_rerank` | 当前评估集提升不显著 |
+| Cross Encoder Re-rank | `retrieval_mode=hybrid_rerank`（函数参数） | 当前评估集提升不显著 |
 | Rule-based Query Rewrite | `REWRITE_MODE=rule` | 规则有限，仅覆盖部分口语化表达 |
 | LangChain RAG Chain | 独立实验模块 | 不作为主链路 |
 

@@ -465,6 +465,11 @@ Java calls Python through:
 
 ```properties
 python.agent.base-url=http://localhost:8000
+# CORS 白名单（逗号分隔）
+cors.allowed-origins=http://localhost:5173,http://127.0.0.1:5173
+# Java → Python 超时（毫秒）
+python.agent.connect-timeout=3000
+python.agent.read-timeout=30000
 ```
 
 ## Environment Variables
@@ -475,6 +480,11 @@ Create `.env` under `agent-python/`:
 LLM_API_KEY=your_api_key_here
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=your_model_name
+
+# 可选配置
+LLM_TIMEOUT=30                # LLM 调用超时（秒），默认 30
+MAX_MESSAGE_LENGTH=2000       # 输入消息最大长度，默认 2000
+REWRITE_MODE=none             # 查询重写：none / rule（实验）
 ```
 
 **Do not commit `.env` or any API keys to GitHub.**

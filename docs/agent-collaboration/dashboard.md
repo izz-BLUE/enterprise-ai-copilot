@@ -8,8 +8,8 @@
 |---|---|---|
 | 项目定位 | 🟡 Demo 阶段 | 本地可复现，未部署公网 |
 | 协作框架 | 🟢 已建立 | Phase 1~3 审查完成 |
-| 代码质量 | 🟡 待加固 | Batch 1 已修复 4 项，剩余 4 P0 + 6 P1 待修复 |
-| 安全状态 | 🟡 部分修复 | Safety Guard 已覆盖 RAG 链路；认证/CORS/Python 裸露仍待处理 |
+| 代码质量 | 🟡 稳定性收敛中 | Batch 1+2 已修复 8 项，剩余 3 P0 + 3 P1 待修复 |
+| 安全状态 | 🟡 部分修复 | Safety Guard + CORS + 超时 + 输入校验已处理；认证/Python 裸露/Eval 权限仍待处理 |
 | Evaluation | 🟢 闭环 | 38 cases, 100% 通过率（基于当前 case 集） |
 | 文档 | 🟢 较完整 | 契约已对齐 |
 
@@ -17,9 +17,9 @@
 
 | 角色 | 状态 | 当前任务 | 分支 |
 |---|---|---|---|
-| 架构 Owner | 🟢 活跃 | Phase 3 Batch 1 文档同步 | main |
-| 全栈开发 (A1) | ✅ Batch 1 完成 | .gitignore + AgentHealthController 修复 | — |
-| AI/RAG 工程师 (A2) | ✅ Batch 1 完成 | Safety Guard 扩展到 RAG 链路 | — |
+| 架构 Owner | 🟢 活跃 | Phase 3 Batch 2 文档同步 | main |
+| 全栈开发 (A1) | ✅ Batch 2 完成 | CORS + timeout + input validation | — |
+| AI/RAG 工程师 (A2) | ✅ Batch 2 完成 | LLM timeout + input length guard | — |
 | QA (A3) | ✅ 已退出 | Smoke Test 完成 | — |
 | 安全 Review (A4) | ✅ 已退出 | 安全审查完成 | — |
 
@@ -30,8 +30,8 @@
 | Phase 1：协作框架 | 3 | 3 | 0 | 0 |
 | Phase 2：模块盘点 | 4 | 4 | 0 | 0 |
 | Phase 3：审查 | 3 | 3 | 0 | 0 |
-| Phase 3：P0 修复 | 5 | 1 | 0 | 4 |
-| Phase 3：P1 修复 | 9 | 3 | 0 | 6 |
+| Phase 3：P0 修复 | 5 | 2 | 0 | 3 |
+| Phase 3：P1 修复 | 9 | 6 | 0 | 3 |
 | Phase 3：P2 优化 | 6 | 0 | 0 | 6 |
 | Phase 3：单元测试 | 2 | 0 | 0 | 2 |
 | Phase 4：体验优化 | 5 | 0 | 0 | 5 |
@@ -41,7 +41,7 @@
 | 风险 | 等级 | 说明 |
 |---|---|---|
 | 无认证授权 | 🔴 高 | 生产化阻塞，所有接口裸奔 |
-| CORS 过宽 | 🔴 高 | 允许任意来源 |
+| CORS 过宽 | 🟢 已修复 | Phase 3 Batch 2：改为可配置白名单 |
 | Safety Guard 未覆盖 RAG | 🟢 已修复 | Phase 3 Batch 1：RAG 链路已增加 Safety Guard 前置检查 |
 | Python 服务裸露 | 🔴 高 | 端口 8000 无访问控制 |
 | 无单元测试 | 🟡 中 | Java 和 Python 都缺 |
@@ -69,7 +69,8 @@
 2. ~~Phase 2 模块盘点~~ ✅
 3. ~~Phase 3 审查（QA + Security）~~ ✅
 4. ~~Phase 3 Batch 1 修复~~ ✅（FIX-010/011/012 + FIX-004）
-5. **启动 Batch 2**：FIX-013~018（超时、脱敏、校验）— A1 + A2
-6. 后续：FIX-002 认证方案设计 — A0
+5. ~~Phase 3 Batch 2 修复~~ ✅（FIX-001/013/014/017）
+6. **启动 Batch 3**：FIX-002 认证授权 + FIX-003 Python 内部化 + FIX-005 Eval 权限 — A0 设计
+7. 后续：FIX-015/016/018 + P2 优化
 
 > 详见 [phase-3-remediation-plan.md](phase-3-remediation-plan.md)

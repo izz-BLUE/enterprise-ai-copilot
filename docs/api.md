@@ -72,6 +72,23 @@ Java 代理 Python 健康检查。
 }
 ```
 
+**超长输入响应**（message 超过 2000 字符）
+```json
+{
+  "answer": "输入内容过长，请精简后重试。",
+  "model": "deepseek-chat",
+  "traceId": "xxx",
+  "success": false
+}
+```
+
+> **Phase 3 Batch 2 说明：**
+> - Java 侧通过 `@Size(max=2000)` 校验输入长度，Python 侧通过 `MAX_MESSAGE_LENGTH` 兜底校验。
+> - Java 调 Python 配置了连接超时（3s）和读取超时（30s）。
+> - Python LLM 调用配置了超时（默认 30s），超时或连接失败会返回错误响应。
+> - CORS 已从 `*` 收敛为可配置白名单（`cors.allowed-origins`）。
+> - 以上不改变正常 RAG 响应结构。
+
 **适用场景**：企业制度、流程、IT 文档、HR 文档等知识库问答。
 
 ---

@@ -8,7 +8,7 @@
 
 | Task ID | 问题 | 来源 | Owner | 分支 | 修复范围 | 验收标准 | 阻塞生产化 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| FIX-001 | CORS 配置过宽：`allowedOriginPatterns("*")` | Security P0-1 | A1 | fix/cors-restrict | `WebConfig.java` | 生产配置限制为具体域名，开发配置可保留 `*` | ✅ 是 | ⬜ |
+| FIX-001 | CORS 配置过宽：`allowedOriginPatterns("*")` | Security P0-1 | A1 | fix/fullstack-phase3-batch2 | `WebConfig.java` + `application.properties` | 可配置白名单 `cors.allowed-origins` | ✅ 是 | ✅ |
 | FIX-002 | 无认证/授权机制 | Security P0-2 | A0 设计 + A1 实现 | feat/auth | Java Filter/Controller | 至少实现 API Key 认证，评估接口限角色 | ✅ 是 | ⬜ |
 | FIX-003 | Python 服务可被直接访问（端口 8000 无控制） | Security P0-3 | A1 | fix/python-access | `application.properties` + 部署文档 | Python 仅允许 localhost 访问，或添加内部 API Key | ✅ 是 | ⬜ |
 | FIX-004 | Safety Guard 仅覆盖 Agent 链路，RAG 主链路无安全检查 | Security P0-4 | A2 | fix/safety-guard-rag | `rag_service.py` | RAG 主链路也应用 Safety Guard 检查 | ✅ 是 | ✅ |
@@ -25,11 +25,11 @@
 | FIX-010 | `.gitignore` 未覆盖 `data/eval/reports/` | QA P1-001 | A1 | fix/gitignore | `.gitignore` | eval reports 不出现在 `git status` | ❌ | ✅ |
 | FIX-011 | `.gitignore` 未覆盖 `node_modules/` | QA P1-002 | A1 | fix/gitignore | `.gitignore` | node_modules 不出现在 `git status` | ❌ | ✅ |
 | FIX-012 | `AgentHealthController` 硬编码 `http://localhost:8000` | QA P1-004, Security P2-4 | A1 | fix/health-config | `AgentHealthController.java` | 使用 `python.agent.base-url` 配置 | ❌ | ✅ |
-| FIX-013 | RestTemplate 无超时配置 | QA P2-003, Security P1-4 | A1 | fix/resttemplate-timeout | `RestClientConfig.java` | 连接超时 3-5s，读取超时 30-60s | ❌ | ⬜ |
-| FIX-014 | LLM 调用无重试/超时配置 | QA P2-004 | A2 | fix/llm-timeout | `llm_service.py` | 添加 timeout 参数，可选 retry | ❌ | ⬜ |
+| FIX-013 | RestTemplate 无超时配置 | QA P2-003, Security P1-4 | A1 | fix/fullstack-phase3-batch2 | `RestClientConfig.java` + `application.properties` | 连接 3s，读取 30s，可配置 | ❌ | ✅ |
+| FIX-014 | LLM 调用无重试/超时配置 | QA P2-004 | A2 | fix/ai-phase3-batch2 | `llm_service.py` + `config.py` | LLM_TIMEOUT 默认 30s，超时返回错误 | ❌ | ✅ |
 | FIX-015 | 异常信息暴露到响应（`reason=str(e)`） | Security P1-2 | A1 + A2 | fix/error-sanitize | `main.py` + Java Controller | 前端仅显示通用错误，详情记日志 | ❌ | ⬜ |
 | FIX-016 | traceId 可被伪造，未验证格式 | Security P1-5 | A1 | fix/traceid-validate | `TraceIdFilter.java` | 验证 UUID 格式，拒绝非法输入 | ❌ | ⬜ |
-| FIX-017 | 无请求大小限制，message 字段无长度校验 | Security P1-6 | A1 | fix/request-size | `ChatRequest.java` + Python Schema | message 最大 1000 字符 | ❌ | ⬜ |
+| FIX-017 | 无请求大小限制，message 字段无长度校验 | Security P1-6 | A1 + A2 | fix/fullstack-phase3-batch2 + fix/ai-phase3-batch2 | `ChatRequest.java` + `main.py` | Java @Size(max=2000) + Python MAX_MESSAGE_LENGTH 兜底 | ❌ | ✅ |
 | FIX-018 | sources 字段暴露内部文件名 | Security P1-7 | A2 | fix/sources-mask | `rag_service.py` | sources 仅展示文档标题或脱敏后的名称 | ❌ | ⬜ |
 
 ---
