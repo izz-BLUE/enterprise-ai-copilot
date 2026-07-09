@@ -150,7 +150,7 @@ Java 代理 Python 健康检查。
 | route | string | 路由结果：`rag` / `eval` / `refuse` / `error` |
 | safe | bool | 安全守卫是否通过 |
 | category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `error` |
-| reason | string | 拒答原因（安全问题时） |
+| reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功 |
 | traceId | string | 请求追踪 ID |
@@ -245,17 +245,18 @@ curl -X POST http://localhost:8080/api/chat \
 
 ## traceId 全链路
 
-所有接口支持 `X-Trace-Id` 请求头透传：
+> **Phase 3 Batch 3-A 变更：** 外部请求传入的 `X-Trace-Id` 不再被信任。Java 入口（`TraceIdFilter`）统一生成服务端 traceId，格式为 UUID v4。客户端传入的非法格式（含控制字符、超长、非 UUID）会被丢弃并重新生成。Java → Python 通过 `X-Trace-Id` 请求头透传服务端生成的 traceId。
+
+所有接口支持 `X-Trace-Id` 响应头返回：
 
 ```bash
 curl -X POST http://localhost:8080/api/chat \
   -H "Content-Type: application/json" \
-  -H "X-Trace-Id: my-custom-trace-123" \
   -d '{"message":"上班时间是什么？"}'
 ```
 
-- 如果请求头带 `X-Trace-Id`，Java 和 Python 沿用
-- 如果不带，Java 自动生成 UUID
+- Java 入口统一生成 UUID 格式的 traceId，不信任客户端传入值
+- Java → Python 通过 `X-Trace-Id` 请求头透传
 - 响应头和响应体都包含 `X-Trace-Id` / `traceId`
 - Java 日志和 Python 日志都带 traceId，便于全链路排查
 

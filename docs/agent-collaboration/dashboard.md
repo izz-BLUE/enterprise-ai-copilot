@@ -8,8 +8,8 @@
 |---|---|---|
 | 项目定位 | 🟡 Demo 阶段 | 本地可复现，未部署公网 |
 | 协作框架 | 🟢 已建立 | Phase 1~3 审查完成 |
-| 代码质量 | 🟡 稳定性收敛中 | Batch 1+2 已修复 8 项，剩余 3 P0 + 3 P1 待修复 |
-| 安全状态 | 🟡 部分修复 | Safety Guard + CORS + 超时 + 输入校验已处理；认证/Eval 权限/traceId 验证/异常收敛 Batch 3 设计完成待实现；Python 裸露仍待处理 |
+| 代码质量 | 🟡 稳定性收敛中 | Batch 1+2 已修复 8 项，Batch 3-A 已修复 2 项（FIX-015/016） |
+| 安全状态 | 🟡 部分修复 | Safety Guard + CORS + 超时 + 输入校验 + traceId 验证 + 异常收敛已处理；认证/Eval 权限待实现（Batch 3-B）；Python 裸露仍待处理 |
 | Evaluation | 🟢 闭环 | 38 cases, 100% 通过率（基于当前 case 集） |
 | 文档 | 🟢 较完整 | 契约已对齐 |
 
@@ -17,9 +17,9 @@
 
 | 角色 | 状态 | 当前任务 | 分支 |
 |---|---|---|---|
-| 架构 Owner | 🟢 活跃 | Phase 3 Batch 3 权限设计 | main（仅文档） |
-| 全栈开发 (A1) | ✅ Batch 2 完成 | CORS + timeout + input validation | — |
-| AI/RAG 工程师 (A2) | ✅ Batch 2 完成 | LLM timeout + input length guard | — |
+| 架构 Owner | 🟢 活跃 | Phase 3 Batch 3-A 文档同步 | main（仅文档） |
+| 全栈开发 (A1) | ✅ Batch 3-A 完成 | traceId 验证 + Java 异常收敛 | — |
+| AI/RAG 工程师 (A2) | ✅ Batch 3-A 完成 | Python 异常收敛 | — |
 | QA (A3) | ✅ 已退出 | Smoke Test 完成 | — |
 | 安全 Review (A4) | ✅ 已退出 | 安全审查完成 | — |
 
@@ -31,7 +31,7 @@
 | Phase 2：模块盘点 | 4 | 4 | 0 | 0 |
 | Phase 3：审查 | 3 | 3 | 0 | 0 |
 | Phase 3：P0 修复 | 5 | 2 | 0 | 3 |
-| Phase 3：P1 修复 | 9 | 6 | 0 | 3 |
+| Phase 3：P1 修复 | 9 | 8 | 0 | 1 |
 | Phase 3：P2 优化 | 6 | 0 | 0 | 6 |
 | Phase 3：单元测试 | 2 | 0 | 0 | 2 |
 | Phase 4：体验优化 | 5 | 0 | 0 | 5 |
@@ -71,12 +71,10 @@
 3. ~~Phase 3 审查（QA + Security）~~ ✅
 4. ~~Phase 3 Batch 1 修复~~ ✅（FIX-010/011/012 + FIX-004）
 5. ~~Phase 3 Batch 2 修复~~ ✅（FIX-001/013/014/017）
-6. **Batch 3 设计完成**：[phase-3-batch3-access-control-design.md](phase-3-batch3-access-control-design.md)
-   - FIX-002：Header Token 认证（A1 实现）
-   - FIX-005：Eval 访问限制（A1+A2 实现）
-   - FIX-015：异常信息收敛（A1+A2 实现）
-   - FIX-016：traceId 格式验证（A1 实现）
-7. **启动 Batch 3 实现**：分支 `feat/batch3-access-control`
+6. ~~Phase 3 Batch 3-A 修复~~ ✅（FIX-015 异常收敛 + FIX-016 traceId 验证）
+7. **启动 Batch 3-B**：FIX-002 Admin Token 认证 + FIX-005 Evaluation 访问限制
+   - FIX-002：Header Token 认证（A1 实现）— 生产化阻塞项
+   - FIX-005：Eval 访问限制（A1+A2 实现）— 生产化阻塞项
 8. 后续：FIX-003 Python 内部化 + FIX-018 sources 脱敏 + P2 优化
 
 > 详见 [phase-3-remediation-plan.md](phase-3-remediation-plan.md)

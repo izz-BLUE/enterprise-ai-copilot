@@ -259,17 +259,22 @@ original_query → query_rewriter → rewritten_query → retrieval
 
 ## traceId 全链路透传
 
+> **Phase 3 Batch 3-A 变更：** Java 入口统一生成服务端 traceId，不再信任客户端传入的 `X-Trace-Id`。
+
 ```
-Frontend: crypto.randomUUID() 生成
-  → Header: X-Trace-Id
-Java TraceIdFilter: 读取 → MDC + request.setAttribute + 响应头
-  → Header: X-Trace-Id（透传给 Python）
+Frontend: 发送请求（X-Trace-Id 可选，不被信任）
+  ↓
+Java TraceIdFilter: 忽略客户端 X-Trace-Id，统一生成 UUID
+  → MDC + request.setAttribute + 响应头 X-Trace-Id
+  ↓
+Java → Python: X-Trace-Id（服务端生成，透传）
+  ↓
 Python middleware: 读取 → request.state.trace_id + 响应头
   → JSON: { "traceId": "..." }
 Frontend: 展示 traceId 标签
 ```
 
-任何一环缺失 traceId 都会自动生成兜底。
+客户端传入的非法 traceId（含控制字符、超长、非 UUID 格式）会被丢弃，Java 重新生成。
 
 ## 异常兜底设计
 
@@ -283,6 +288,8 @@ Frontend: 展示 traceId 标签
 | 知识库无检索结果 | Prompt 兜底："当前知识库暂无相关信息，不要编造" |
 | 安全问题输入 | Safety Guard 拦截，返回安全拒答文案 |
 | Agent 异常 | Python endpoint catch Exception，返回 `success=false` |
+
+> **Phase 3 Batch 3-A 变更：** 异常响应中的 `reason` 字段不再暴露底层异常详情（如 `e.getMessage()` / `str(e)`）。用户看到稳定通用文案，服务端日志保留完整异常堆栈和 traceId，用户通过 traceId 反馈问题，服务端通过日志排查。
 
 ## Python 模块一览
 
