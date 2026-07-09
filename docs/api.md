@@ -149,11 +149,33 @@ Java 代理 Python 健康检查。
 | answer | string | 回答内容 |
 | route | string | 路由结果：`rag` / `eval` / `refuse` / `error` |
 | safe | bool | 安全守卫是否通过 |
-| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `error` |
+| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `error` |
 | reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功 |
 | traceId | string | 请求追踪 ID |
+
+**权限行为（Phase 3 Batch 3-B）：**
+
+- 普通 RAG 问答和 Safety Guard 拒答不受权限影响
+- Evaluation 查询需要管理员权限：`admin.token` 非空时，请求头 `X-Admin-Token` 必须匹配才允许 eval 路由
+- `admin.token` 为空时（Demo 模式），所有用户均可访问 Evaluation
+- `X-Admin-Token` 由调用方发送给 Java 后端，不应由前端 role 代替（权限判断在 Java 后端完成）
+- `X-Allow-Eval` 是 Java → Python 内部 header，表示 Java 已完成权限判断，**不是认证凭证**，Python 不应将其当作独立安全边界
+
+**无权限 Evaluation 响应**（`admin.token` 非空且未提供正确的 `X-Admin-Token`）
+```json
+{
+  "answer": "该问题涉及内部评估诊断能力，仅管理员可访问。",
+  "route": "refuse",
+  "safe": true,
+  "category": "access_control",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "xxx"
+}
+```
 
 **适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
 

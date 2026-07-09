@@ -333,8 +333,8 @@ except Exception as e:
 
 | Task ID | 问题 | Owner | 分支 | 修改范围 | 验收标准 | 阻塞生产化 | 状态 |
 |---|---|---|---|---|---|---|---|
-| FIX-002 | 无认证/授权机制 | A1 | feat/batch3-access-control | Java: `application.properties`, `LangGraphAgentController.java`, `WebConfig.java` | `admin.token` 配置项；token 为空时跳过检查；token 已配置时校验 `X-Admin-Token` | ✅ 是 | ⬜ 待实现 |
-| FIX-005 | Evaluation 接口无访问限制 | A1 + A2 | feat/batch3-access-control | Java: `LangGraphAgentController.java`；Python: `main.py`, `langgraph_agent.py` | Java 传递 `X-Allow-Eval` header；Python router_node 读取该 header 决定是否路由到 eval_node | ✅ 是 | ⬜ 待实现 |
+| FIX-002 | 无认证/授权机制 | A1 | feat/batch3-access-control | Java: `application.properties`, `LangGraphAgentController.java`, `WebConfig.java` | `admin.token` 配置项；token 为空时跳过检查；token 已配置时校验 `X-Admin-Token` | ✅ 是 | ✅ 已实现 |
+| FIX-005 | Evaluation 接口无访问限制 | A1 + A2 | feat/batch3-access-control | Java: `LangGraphAgentController.java`；Python: `main.py`, `langgraph_agent.py` | Java 传递 `X-Allow-Eval` header；Python router_node 读取该 header 决定是否路由到 eval_node | ✅ 是 | ✅ 已实现 |
 | FIX-016 | traceId 可被伪造 | A1 | feat/batch3-access-control | Java: `TraceIdFilter.java` | Java 入口统一生成 UUID，不信任客户端传入 | ❌ 否 | ✅ 已实现 |
 | FIX-015 | 异常信息暴露到响应 | A1 + A2 | feat/batch3-access-control | Java: `LangGraphAgentController.java`；Python: `main.py` | 异常响应不包含 `e.getMessage()` 或 `str(e)`；详情仅记日志 | ❌ 否 | ✅ 已实现 |
 

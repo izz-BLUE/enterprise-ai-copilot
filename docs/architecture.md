@@ -104,7 +104,7 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python `/agent/langgraph/chat`，透传 traceId
+- **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python `/agent/langgraph/chat`，透传 traceId；根据 `admin.token` / `X-Admin-Token` 判断管理员权限，通过 `X-Allow-Eval` header 传递给 Python
 - **HealthController / AgentHealthController**：健康检查
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 30s）
@@ -179,6 +179,8 @@ POST /api/agent/langgraph/chat
 ```
 
 **特点**：LangGraph 状态图编排，规则路由，Safety Guard + Tools + 多分支。
+
+> **权限链路（Phase 3 Batch 3-B）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。`X-Allow-Eval` 是内部传递信号，不是认证凭证。Python 服务直接暴露时攻击者可伪造该 header，属于 FIX-003 范围，尚未解决。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
 ## 离线知识库构建流程
 

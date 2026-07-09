@@ -470,7 +470,18 @@ cors.allowed-origins=http://localhost:5173,http://127.0.0.1:5173
 # Java → Python 超时（毫秒）
 python.agent.connect-timeout=3000
 python.agent.read-timeout=30000
+# 管理员 Token（为空时为 Demo 模式，Evaluation 对所有用户可用）
+admin.token=
 ```
+
+**admin.token 说明：**
+
+- 默认为空，属于本地 Demo 便捷模式
+- 为空时 Evaluation 查询对所有用户可用，不影响本地演示和开发调试
+- `admin.token` 非空时，只有请求头 `X-Admin-Token` 匹配才允许访问 Evaluation 路由
+- 普通 RAG 问答和 Safety Guard 不受 `admin.token` 影响
+- 生产化部署必须配置 `admin.token`，或替换为正式认证体系
+- 当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整用户权限体系
 
 ## Environment Variables
 
