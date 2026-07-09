@@ -29,20 +29,41 @@ public class LangGraphAgentController {
     @Value("${python.agent.base-url}")
     private String agentBaseUrl;
 
+    @Value("${admin.token:}")
+    private String adminToken;
+
     public LangGraphAgentController(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
+    }
+
+    /**
+     * 判断本次请求是否允许 eval 路由。
+     *
+     * 规则：
+     * - admin.token 为空 → Demo 模式，允许 eval（不代表真实管理员认证）
+     * - admin.token 非空且 X-Admin-Token 匹配 → 允许 eval
+     * - admin.token 非空且 X-Admin-Token 缺失/不匹配 → 不允许 eval
+     */
+    private boolean isEvalAllowed(HttpServletRequest request) {
+        if (adminToken == null || adminToken.isBlank()) {
+            return true; // Demo 模式，零配置允许 eval
+        }
+        String requestToken = request.getHeader("X-Admin-Token");
+        return adminToken.equals(requestToken);
     }
 
     @PostMapping("/api/agent/langgraph/chat")
     public AgentChatResponse langgraphChat(@Valid @RequestBody ChatRequest request,
                                            HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
-        log.info("[{}] 收到 LangGraph Agent 请求: {}", traceId, request.message());
+        boolean allowEval = isEvalAllowed(httpRequest);
+        log.info("[{}] 收到 LangGraph Agent 请求: {}, allowEval={}", traceId, request.message(), allowEval);
 
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Trace-Id", traceId);
+            headers.set("X-Allow-Eval", String.valueOf(allowEval));
             HttpEntity<ChatRequest> httpEntity = new HttpEntity<>(request, headers);
 
             String url = agentBaseUrl + "/agent/langgraph/chat";
