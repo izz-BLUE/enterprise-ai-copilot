@@ -43,7 +43,17 @@ RETRIEVAL_MODE=vector
 REWRITE_MODE=none
 ```
 
+**可选配置：**
+
+```env
+# HuggingFace 离线模式（国内网络环境必须，模型已在本地缓存）
+HF_HUB_OFFLINE=1
+```
+
 **注意：**
+
+- 如果无法访问 HuggingFace（国内网络），必须设置 `HF_HUB_OFFLINE=1`
+- 模型需要提前下载到本地缓存（`~/.cache/huggingface/hub/`）
 
 - 不要将 `.env` 提交到 Git
 - 不要在前端代码或文档中暴露 API Key
