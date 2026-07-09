@@ -50,16 +50,16 @@
 | FIX-001 | CORS 配置过宽 | Security | A1 | fix/cors-restrict | ⬜ | 生产配置限制为具体域名 |
 | FIX-002 | 无认证/授权机制 | Security | A0+A1 | feat/auth | ⬜ | 至少 API Key 认证 |
 | FIX-003 | Python 服务可被直接访问 | Security | A1 | fix/python-access | ⬜ | Python 仅允许 localhost |
-| FIX-004 | Safety Guard 仅覆盖 Agent 链路 | Security | A2 | fix/safety-guard-rag | ⬜ | RAG 链路也应用安全检查 |
+| FIX-004 | Safety Guard 仅覆盖 Agent 链路 | Security | A2 | fix/safety-guard-rag | ✅ | RAG 链路也应用安全检查 |
 | FIX-005 | Evaluation 接口无访问限制 | Security | A2 | fix/eval-access | ⬜ | 生产禁用或限角色 |
 
 ### P1 修复任务（开发前必须处理）
 
 | ID | 问题 | 来源 | Owner | 分支 | 状态 | 验收标准 |
 |---|---|---|---|---|---|---|
-| FIX-010 | .gitignore 未覆盖 eval reports | QA | A1 | fix/gitignore | ⬜ | eval reports 不出现在 git status |
-| FIX-011 | .gitignore 未覆盖 node_modules | QA | A1 | fix/gitignore | ⬜ | node_modules 不出现在 git status |
-| FIX-012 | AgentHealthController 硬编码地址 | QA+Security | A1 | fix/health-config | ⬜ | 使用 python.agent.base-url |
+| FIX-010 | .gitignore 未覆盖 eval reports | QA | A1 | fix/fullstack-phase3-batch1 | ✅ | eval reports 不出现在 git status |
+| FIX-011 | .gitignore 未覆盖 node_modules | QA | A1 | fix/fullstack-phase3-batch1 | ✅ | node_modules 不出现在 git status |
+| FIX-012 | AgentHealthController 硬编码地址 | QA+Security | A1 | fix/fullstack-phase3-batch1 | ✅ | 使用 python.agent.base-url |
 | FIX-013 | RestTemplate 无超时配置 | QA+Security | A1 | fix/resttemplate-timeout | ⬜ | 连接 3-5s，读取 30-60s |
 | FIX-014 | LLM 调用无重试/超时 | QA | A2 | fix/llm-timeout | ⬜ | 添加 timeout 参数 |
 | FIX-015 | 异常信息暴露到响应 | Security | A1+A2 | fix/error-sanitize | ⬜ | 前端仅显示通用错误 |

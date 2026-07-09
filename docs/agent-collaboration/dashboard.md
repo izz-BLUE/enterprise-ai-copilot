@@ -8,8 +8,8 @@
 |---|---|---|
 | 项目定位 | 🟡 Demo 阶段 | 本地可复现，未部署公网 |
 | 协作框架 | 🟢 已建立 | Phase 1~3 审查完成 |
-| 代码质量 | 🟡 待加固 | 5 个 P0 + 9 个 P1 待修复 |
-| 安全状态 | 🔴 有阻塞项 | 认证/CORS/Safety Guard 待处理 |
+| 代码质量 | 🟡 待加固 | Batch 1 已修复 4 项，剩余 4 P0 + 6 P1 待修复 |
+| 安全状态 | 🟡 部分修复 | Safety Guard 已覆盖 RAG 链路；认证/CORS/Python 裸露仍待处理 |
 | Evaluation | 🟢 闭环 | 38 cases, 100% 通过率（基于当前 case 集） |
 | 文档 | 🟢 较完整 | 契约已对齐 |
 
@@ -17,9 +17,9 @@
 
 | 角色 | 状态 | 当前任务 | 分支 |
 |---|---|---|---|
-| 架构 Owner | 🟢 活跃 | Phase 3 修复计划制定 | main |
-| 全栈开发 (A1) | ✅ 已退出 | 盘点 + 审查完成 | — |
-| AI/RAG 工程师 (A2) | ✅ 已退出 | 盘点 + 审查完成 | — |
+| 架构 Owner | 🟢 活跃 | Phase 3 Batch 1 文档同步 | main |
+| 全栈开发 (A1) | ✅ Batch 1 完成 | .gitignore + AgentHealthController 修复 | — |
+| AI/RAG 工程师 (A2) | ✅ Batch 1 完成 | Safety Guard 扩展到 RAG 链路 | — |
 | QA (A3) | ✅ 已退出 | Smoke Test 完成 | — |
 | 安全 Review (A4) | ✅ 已退出 | 安全审查完成 | — |
 
@@ -30,8 +30,8 @@
 | Phase 1：协作框架 | 3 | 3 | 0 | 0 |
 | Phase 2：模块盘点 | 4 | 4 | 0 | 0 |
 | Phase 3：审查 | 3 | 3 | 0 | 0 |
-| Phase 3：P0 修复 | 5 | 0 | 0 | 5 |
-| Phase 3：P1 修复 | 9 | 0 | 0 | 9 |
+| Phase 3：P0 修复 | 5 | 1 | 0 | 4 |
+| Phase 3：P1 修复 | 9 | 3 | 0 | 6 |
 | Phase 3：P2 优化 | 6 | 0 | 0 | 6 |
 | Phase 3：单元测试 | 2 | 0 | 0 | 2 |
 | Phase 4：体验优化 | 5 | 0 | 0 | 5 |
@@ -42,7 +42,7 @@
 |---|---|---|
 | 无认证授权 | 🔴 高 | 生产化阻塞，所有接口裸奔 |
 | CORS 过宽 | 🔴 高 | 允许任意来源 |
-| Safety Guard 未覆盖 RAG | 🔴 高 | RAG 链路可绕过安全检查 |
+| Safety Guard 未覆盖 RAG | 🟢 已修复 | Phase 3 Batch 1：RAG 链路已增加 Safety Guard 前置检查 |
 | Python 服务裸露 | 🔴 高 | 端口 8000 无访问控制 |
 | 无单元测试 | 🟡 中 | Java 和 Python 都缺 |
 | DTO 契约无强类型 | 🟡 中 | Java ↔ Python 手动对齐 |
@@ -68,8 +68,8 @@
 1. ~~Phase 1 协作文档~~ ✅
 2. ~~Phase 2 模块盘点~~ ✅
 3. ~~Phase 3 审查（QA + Security）~~ ✅
-4. **启动 P1 修复**：FIX-010/011 (.gitignore) + FIX-012 (硬编码) — A1
-5. **启动 P0 修复**：FIX-004 (Safety Guard 扩展) — A2
+4. ~~Phase 3 Batch 1 修复~~ ✅（FIX-010/011/012 + FIX-004）
+5. **启动 Batch 2**：FIX-013~018（超时、脱敏、校验）— A1 + A2
 6. 后续：FIX-002 认证方案设计 — A0
 
 > 详见 [phase-3-remediation-plan.md](phase-3-remediation-plan.md)

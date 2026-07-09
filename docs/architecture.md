@@ -131,7 +131,8 @@ POST /api/chat
   → Java ChatController（读取 traceId，透传 X-Trace-Id）
     → Python POST /agent/chat
       → rag_service.process_chat()
-        → query_rewriter.rewrite_query()     # 实验模式，none 时跳过
+        → safety_guard.check_user_query_safety()  # Phase 3: 规则版 Safety Guard 前置检查
+        → query_rewriter.rewrite_query()           # 实验模式，none 时跳过
         → hybrid_retriever.retrieve()
           ├── faiss_retriever（BGE embedding 语义检索）
           └── bm25_retriever（字符级 n-gram BM25 检索）
@@ -142,7 +143,9 @@ POST /api/chat
         → ChatResponse（含 traceId）
 ```
 
-**特点**：手写全链路，不依赖 LangChain/LangGraph，稳定可靠。
+**特点**：手写全链路，不依赖 LangChain/LangGraph，稳定可靠。Phase 3 新增 Safety Guard 前置检查，高风险问题直接拒答不进入检索。
+
+> **注意：** Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
 
 ### 链路二：/api/agent/langgraph/chat（Agent 实验链路）
 

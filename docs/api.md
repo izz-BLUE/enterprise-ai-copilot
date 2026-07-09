@@ -36,6 +36,8 @@ Java 代理 Python 健康检查。
 
 **稳定 RAG 主链路。** Java 代理 Python `/agent/chat`。
 
+> **安全说明（Phase 3 Batch 1）：** RAG 主链路现在会先经过 Safety Guard 前置检查。高风险问题（如伪造、违法、攻击等）会被直接拦截并返回安全拒答文案，不会进入检索和 LLM 调用。安全拒答时 `success=true`，表示系统成功处理并拒绝了高风险请求。当前 Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
+
 **请求**
 ```json
 {"message": "病假需要提供哪些材料？"}
