@@ -27,8 +27,8 @@
 | FIX-012 | `AgentHealthController` 硬编码 `http://localhost:8000` | QA P1-004, Security P2-4 | A1 | fix/health-config | `AgentHealthController.java` | 使用 `python.agent.base-url` 配置 | ❌ | ✅ |
 | FIX-013 | RestTemplate 无超时配置 | QA P2-003, Security P1-4 | A1 | fix/fullstack-phase3-batch2 | `RestClientConfig.java` + `application.properties` | 连接 3s，读取 30s，可配置 | ❌ | ✅ |
 | FIX-014 | LLM 调用无重试/超时配置 | QA P2-004 | A2 | fix/ai-phase3-batch2 | `llm_service.py` + `config.py` | LLM_TIMEOUT 默认 30s，超时返回错误 | ❌ | ✅ |
-| FIX-015 | 异常信息暴露到响应（`reason=str(e)`） | Security P1-2 | A1 + A2 | fix/error-sanitize | `main.py` + Java Controller | 前端仅显示通用错误，详情记日志 | ❌ | ⬜ |
-| FIX-016 | traceId 可被伪造，未验证格式 | Security P1-5 | A1 | fix/traceid-validate | `TraceIdFilter.java` | 验证 UUID 格式，拒绝非法输入 | ❌ | ⬜ |
+| FIX-015 | 异常信息暴露到响应（`reason=str(e)`） | Security P1-2 | A1 + A2 | fix/error-sanitize | `main.py` + Java Controller | 前端仅显示通用错误，详情记日志 | ❌ | ✅ |
+| FIX-016 | traceId 可被伪造，未验证格式 | Security P1-5 | A1 | fix/traceid-validate | `TraceIdFilter.java` | Java 入口统一生成 UUID，不信任客户端传入 | ❌ | ✅ |
 | FIX-017 | 无请求大小限制，message 字段无长度校验 | Security P1-6 | A1 + A2 | fix/fullstack-phase3-batch2 + fix/ai-phase3-batch2 | `ChatRequest.java` + `main.py` | Java @Size(max=2000) + Python MAX_MESSAGE_LENGTH 兜底 | ❌ | ✅ |
 | FIX-018 | sources 字段暴露内部文件名 | Security P1-7 | A2 | fix/sources-mask | `rag_service.py` | sources 仅展示文档标题或脱敏后的名称 | ❌ | ⬜ |
 
