@@ -25,26 +25,20 @@ Enterprise AI Copilot 当前为**本地可复现的 RAG 应用后端 Demo**，�
 
 ## 环境变量配置
 
-在 `agent-python/` 目录下创建 `.env` 文件：
+在 `agent-python/` 目录下创建 `.env` 文件（可从 `.env.example` 复制）：
 
 ```env
+# 必填
 DEEPSEEK_API_KEY=your_api_key_here
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
-```
 
-**可选配置：**
-
-```env
-# 查询重写：none（默认）/ rule（实验模式）
-REWRITE_MODE=none
-```
-
-**可选配置：**
-
-```env
-# HuggingFace 离线模式（国内网络环境必须，模型已在本地缓存）
-HF_HUB_OFFLINE=1
+# 可选配置
+DEEPSEEK_BASE_URL=https://api.deepseek.com    # DeepSeek API 地址
+DEEPSEEK_MODEL=deepseek-chat                   # 模型名称
+DEEPSEEK_TEMPERATURE=0                         # LLM 温度参数，默认 0
+LLM_TIMEOUT=30                                 # LLM 调用超时（秒），默认 30
+MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
+REWRITE_MODE=none                              # 查询重写：none / rule（实验模式）
+HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络环境必须）
 ```
 
 **注意：**
@@ -190,3 +184,9 @@ Generation 评估需要 API Key（会调用 LLM）。
 - [ ] 准备好截图 / 录屏作为兜底方案
 
 **如果现场服务失败，切换到截图 / 录屏演示（见 `demo-script.md`）。**
+
+## 相关文档
+
+- [`docs/deployment-readiness.md`](deployment-readiness.md) — 部署准备指南，包含环境变量清单、健康检查命令、FIX-003 边界说明
+- [`README.md`](../README.md) — 项目全貌和 Quick Start
+- [`docs/api.md`](api.md) — 接口文档
