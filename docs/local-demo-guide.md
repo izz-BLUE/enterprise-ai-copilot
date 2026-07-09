@@ -109,7 +109,7 @@ npm run dev
 curl http://localhost:8000/agent/health
 ```
 
-预期响应：`{"status": "ok", "agent_ready": true}`
+预期响应：`{"service": "agent-python", "status": "UP"}`
 
 ### Java Backend
 
@@ -117,7 +117,7 @@ curl http://localhost:8000/agent/health
 curl http://localhost:8080/api/health
 ```
 
-预期响应：包含 `status: "ok"` 的 JSON
+预期响应：`{"service": "backend-java", "status": "UP"}`
 
 ### Python Agent 通过 Java 代理
 
@@ -125,7 +125,7 @@ curl http://localhost:8080/api/health
 curl http://localhost:8080/api/agent/health
 ```
 
-预期响应：`{"status": "ok", "agent_ready": true}`
+预期响应：`{"service": "agent-python", "status": "UP"}`
 
 ## RAG 问答测试
 

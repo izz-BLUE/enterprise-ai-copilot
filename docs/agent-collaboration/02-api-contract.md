@@ -19,14 +19,13 @@
 ```json
 {
   "answer": "根据知识库...",
-  "model": "deepseek",
+  "model": "deepseek-chat",
   "traceId": "xxx",
-  "success": true,
-  "sources": [
-    {"document": "leave_policy.md", "chunk_id": "..."}
-  ]
+  "success": true
 }
 ```
+
+> 注：`/api/chat` 响应不包含 `sources` 字段。RAG 引用来源仅在 Agent 链路返回。
 
 **Owner:** 全栈开发（Java）+ AI/RAG 工程师（Python）
 
@@ -43,15 +42,44 @@
 }
 ```
 
-**Response:**
+**Response（RAG 问答）:**
 ```json
 {
-  "answer": "...",
-  "model": "deepseek",
-  "traceId": "xxx",
-  "success": true
+  "answer": "根据知识库...",
+  "route": "rag",
+  "safe": true,
+  "category": "normal",
+  "reason": "",
+  "sources": ["hr_leave_policy_real_sample_010"],
+  "success": true,
+  "traceId": "xxx"
 }
 ```
+
+**Response（安全拒答）:**
+```json
+{
+  "answer": "抱歉，我不能协助处理该请求。",
+  "route": "refuse",
+  "safe": false,
+  "category": "illegal_or_policy_violation",
+  "reason": "检测到高风险关键词「伪造」",
+  "sources": [],
+  "success": true,
+  "traceId": "xxx"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| answer | string | 回答内容 |
+| route | string | 路由结果：`rag` / `eval` / `refuse` / `error` |
+| safe | bool | 安全守卫是否通过 |
+| category | string | 安全分类 |
+| reason | string | 拒答原因（安全问题时） |
+| sources | list | RAG 引用来源 chunk ID 列表 |
+| success | bool | 是否成功 |
+| traceId | string | 请求追踪 ID |
 
 **Owner:** AI/RAG 工程师
 
@@ -61,7 +89,7 @@
 
 Java 服务健康检查。
 
-**Response:** `{"status": "ok"}`
+**Response:** `{"service": "backend-java", "status": "UP"}`
 
 ---
 
@@ -69,7 +97,7 @@ Java 服务健康检查。
 
 Python 服务健康检查（Java 代理）。
 
-**Response:** `{"status": "ok", "agent_ready": true}`
+**Response:** `{"service": "agent-python", "status": "UP"}`
 
 ---
 
@@ -80,19 +108,19 @@ Python 服务健康检查（Java 代理）。
 **Request:**
 ```json
 {
-  "message": "...",
-  "trace_id": "xxx"
+  "message": "病假需要提供哪些材料？"
 }
 ```
+
+> traceId 通过 `X-Trace-Id` 请求头透传，不在 body 中。
 
 **Response:**
 ```json
 {
-  "answer": "...",
-  "model": "deepseek",
-  "trace_id": "xxx",
-  "success": true,
-  "sources": [...]
+  "answer": "根据知识库...",
+  "model": "deepseek-chat",
+  "traceId": "xxx",
+  "success": true
 }
 ```
 
@@ -100,13 +128,15 @@ Python 服务健康检查（Java 代理）。
 
 ### POST /agent/langgraph/chat
 
-**Request/Response:** 同上格式。
+**Request:** 同 `/agent/chat`（`{"message": "..."}` + `X-Trace-Id` header）
+
+**Response:** 同对外接口 `/api/agent/langgraph/chat` 格式。
 
 ---
 
 ### GET /agent/health
 
-**Response:** `{"status": "ok", "agent_ready": true}`
+**Response:** `{"service": "agent-python", "status": "UP"}`
 
 ---
 

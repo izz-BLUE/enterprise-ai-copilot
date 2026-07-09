@@ -26,10 +26,10 @@
 
 | ID | 任务 | Owner | 分支 | 状态 | 验收标准 |
 |---|---|---|---|---|---|
-| TASK-010 | 盘点 Java 后端接口和 DTO | 全栈开发 | — | ⬜ | 输出盘点文档，列出 Java ↔ Python 契约差异 |
-| TASK-011 | 盘点前端页面能力和不足 | 全栈开发 | — | ⬜ | 输出盘点文档，列出功能缺口 |
-| TASK-012 | 盘点 Python AI 各模块状态 | AI/RAG 工程师 | — | ⬜ | 输出盘点文档，列出各模块状态和风险 |
-| TASK-013 | 盘点 Evaluation 体系 | AI/RAG 工程师 | — | ⬜ | 输出盘点文档，列出 case 覆盖范围和局限 |
+| TASK-010 | 盘点 Java 后端接口和 DTO | 全栈开发 | audit/fullstack-inventory | ✅ | 输出盘点文档，列出 Java ↔ Python 契约差异 |
+| TASK-011 | 盘点前端页面能力和不足 | 全栈开发 | audit/fullstack-inventory | ✅ | 输出盘点文档，列出功能缺口 |
+| TASK-012 | 盘点 Python AI 各模块状态 | AI/RAG 工程师 | audit/ai-rag-inventory | ✅ | 输出盘点文档，列出各模块状态和风险 |
+| TASK-013 | 盘点 Evaluation 体系 | AI/RAG 工程师 | audit/ai-rag-inventory | ✅ | 输出盘点文档，列出 case 覆盖范围和局限 |
 
 ---
 
@@ -67,10 +67,10 @@
 
 ## 当前优先级
 
-**第一阶段（当前）：** Phase 1（协作文档） → 由架构 Owner 完成
+**第一阶段：** Phase 1（协作文档） → ✅ 已完成
 
-**第二阶段：** Phase 2（模块盘点） → 各 Owner 并行启动
+**第二阶段：** Phase 2（模块盘点） → ✅ 已完成，A1 + A2 盘点报告已合并
 
-**第三阶段：** Phase 3（质量加固） → 盘点完成后启动
+**第三阶段（当前）：** Phase 3（质量加固） → 可启动
 
 **第四阶段：** Phase 4（体验优化） → 可选，根据需要启动
