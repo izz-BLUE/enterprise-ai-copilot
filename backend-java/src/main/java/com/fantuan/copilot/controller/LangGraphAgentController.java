@@ -57,20 +57,20 @@ public class LangGraphAgentController {
         } catch (HttpClientErrorException e) {
             log.error("[{}] Python 返回 HTTP 4xx: status={}, body={}",
                     traceId, e.getStatusCode(), e.getResponseBodyAsString(), e);
-            return fallback("Python LangGraph Agent 返回客户端错误: " + e.getMessage(), traceId);
+            return fallback(traceId);
         } catch (Exception e) {
             log.error("[{}] 调用 Python 发生未知异常", traceId, e);
-            return fallback("Python Agent 服务调用失败: " + e.getMessage(), traceId);
+            return fallback(traceId);
         }
     }
 
-    private AgentChatResponse fallback(String reason, String traceId) {
+    private AgentChatResponse fallback(String traceId) {
         return new AgentChatResponse(
                 "当前 Agent 服务暂时不可用，请稍后重试。",
                 "error",
                 true,
                 "error",
-                reason,
+                "",  // reason 不暴露异常细节
                 List.of(),
                 false,
                 traceId);
