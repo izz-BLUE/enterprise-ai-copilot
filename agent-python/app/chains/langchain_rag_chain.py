@@ -89,7 +89,6 @@ def answer_with_langchain_rag(question: str, top_k: int = 3) -> dict:
             "model": DEEPSEEK_MODEL,
             "success": False,
             "sources": [],
-            "error": str(e),
         }
 
     # 4. 组装返回
