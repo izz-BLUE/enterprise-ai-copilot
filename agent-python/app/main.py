@@ -3,10 +3,10 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
+from app.core.config import DEEPSEEK_MODEL, MAX_MESSAGE_LENGTH, logger
 from app.schemas.chat_schema import AgentResponse, ChatRequest, ChatResponse
 from app.services.rag_service import process_chat
 from app.agents.langgraph_agent import run_langgraph_agent
-from app.core.config import logger
 
 app = FastAPI(title='Agent Python Service')
 
@@ -29,17 +29,48 @@ def health():
     return {'service': 'agent-python', 'status': 'UP'}
 
 
+def _validate_message_length(message: str, trace_id: str) -> bool:
+    """检查消息长度是否超限。超限时返回 True。"""
+    return len(message) > MAX_MESSAGE_LENGTH
+
+
 @app.post('/agent/chat')
 def chat(request: ChatRequest, req: Request) -> ChatResponse:
     trace_id = req.state.trace_id
-    logger.info('[%s] 收到普通 RAG 请求: %s', trace_id, request.message)
+    logger.info('[%s] 收到普通 RAG 请求 (len=%d)', trace_id, len(request.message))
+
+    if _validate_message_length(request.message, trace_id):
+        logger.warning('[%s] 输入过长 (len=%d > %d)', trace_id,
+                       len(request.message), MAX_MESSAGE_LENGTH)
+        return ChatResponse(
+            answer='输入内容过长，请精简后重试。',
+            model=DEEPSEEK_MODEL,
+            traceId=trace_id,
+            success=False,
+        )
+
     return process_chat(request.message, trace_id=trace_id)
 
 
 @app.post('/agent/langgraph/chat')
 def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
     trace_id = req.state.trace_id
-    logger.info('[%s] 收到 LangGraph Agent 请求: %s', trace_id, request.message)
+    logger.info('[%s] 收到 LangGraph Agent 请求 (len=%d)', trace_id, len(request.message))
+
+    if _validate_message_length(request.message, trace_id):
+        logger.warning('[%s] 输入过长 (len=%d > %d)', trace_id,
+                       len(request.message), MAX_MESSAGE_LENGTH)
+        return AgentResponse(
+            answer='输入内容过长，请精简后重试。',
+            route='error',
+            safe=True,
+            category='input_error',
+            reason='',
+            sources=[],
+            success=False,
+            traceId=trace_id,
+        )
+
     try:
         result = run_langgraph_agent(request.message)
         return AgentResponse(
