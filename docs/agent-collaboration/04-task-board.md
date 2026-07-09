@@ -35,13 +35,55 @@
 
 ## Phase 3：质量加固（各 Owner 并行）
 
+### 审查任务（已完成）
+
 | ID | 任务 | Owner | 分支 | 状态 | 验收标准 |
 |---|---|---|---|---|---|
-| TASK-020 | 制定 Smoke Test 清单 | QA | — | ⬜ | 三端启动 + 核心功能验证清单 |
-| TASK-021 | 执行 Smoke Test | QA | — | ⬜ | 清单全部通过 |
-| TASK-022 | 安全审查（API Key + Safety Guard） | 安全 Review | — | ⬜ | 输出审查报告，列出风险和建议 |
-| TASK-023 | 补充 Java 单元测试 | 全栈开发 | test/java-unit | ⬜ | Controller 核心逻辑覆盖 |
-| TASK-024 | 补充 Python 单元测试 | AI/RAG 工程师 | test/python-unit | ⬜ | Retrieval + Service 核心逻辑覆盖 |
+| TASK-020 | 制定 Smoke Test 清单 | QA (A3) | audit/qa-smoke | ✅ | 三端启动 + 核心功能验证清单 |
+| TASK-021 | 执行 Smoke Test | QA (A3) | audit/qa-smoke | ✅ | 清单全部通过 |
+| TASK-022 | 安全审查（API Key + Safety Guard） | 安全 Review (A4) | audit/security-review | ✅ | 输出审查报告，列出风险和建议 |
+
+### P0 修复任务（生产化阻塞项）
+
+| ID | 问题 | 来源 | Owner | 分支 | 状态 | 验收标准 |
+|---|---|---|---|---|---|---|
+| FIX-001 | CORS 配置过宽 | Security | A1 | fix/cors-restrict | ⬜ | 生产配置限制为具体域名 |
+| FIX-002 | 无认证/授权机制 | Security | A0+A1 | feat/auth | ⬜ | 至少 API Key 认证 |
+| FIX-003 | Python 服务可被直接访问 | Security | A1 | fix/python-access | ⬜ | Python 仅允许 localhost |
+| FIX-004 | Safety Guard 仅覆盖 Agent 链路 | Security | A2 | fix/safety-guard-rag | ⬜ | RAG 链路也应用安全检查 |
+| FIX-005 | Evaluation 接口无访问限制 | Security | A2 | fix/eval-access | ⬜ | 生产禁用或限角色 |
+
+### P1 修复任务（开发前必须处理）
+
+| ID | 问题 | 来源 | Owner | 分支 | 状态 | 验收标准 |
+|---|---|---|---|---|---|---|
+| FIX-010 | .gitignore 未覆盖 eval reports | QA | A1 | fix/gitignore | ⬜ | eval reports 不出现在 git status |
+| FIX-011 | .gitignore 未覆盖 node_modules | QA | A1 | fix/gitignore | ⬜ | node_modules 不出现在 git status |
+| FIX-012 | AgentHealthController 硬编码地址 | QA+Security | A1 | fix/health-config | ⬜ | 使用 python.agent.base-url |
+| FIX-013 | RestTemplate 无超时配置 | QA+Security | A1 | fix/resttemplate-timeout | ⬜ | 连接 3-5s，读取 30-60s |
+| FIX-014 | LLM 调用无重试/超时 | QA | A2 | fix/llm-timeout | ⬜ | 添加 timeout 参数 |
+| FIX-015 | 异常信息暴露到响应 | Security | A1+A2 | fix/error-sanitize | ⬜ | 前端仅显示通用错误 |
+| FIX-016 | traceId 可被伪造 | Security | A1 | fix/traceid-validate | ⬜ | 验证 UUID 格式 |
+| FIX-017 | 无请求大小限制 | Security | A1 | fix/request-size | ⬜ | message 最大 1000 字符 |
+| FIX-018 | sources 暴露内部文件名 | Security | A2 | fix/sources-mask | ⬜ | sources 脱敏 |
+
+### P2 修复任务（后续优化）
+
+| ID | 问题 | 来源 | Owner | 分支 | 状态 | 验收标准 |
+|---|---|---|---|---|---|---|
+| FIX-020 | Safety Guard 仅关键词匹配 | Security+QA | A2 | enhance/safety-guard | ⬜ | 补充变体关键词 |
+| FIX-021 | 日志打印完整用户问题 | Security | A1+A2 | fix/log-sanitize | ⬜ | 仅打印前 20 字符 |
+| FIX-022 | 两个 RAG Prompt 模板不一致 | QA | A2 | fix/prompt-align | ⬜ | 主链路和 Agent Prompt 一致 |
+| FIX-023 | RAG Prompt 缺少 Injection 防护 | Security | A2 | fix/prompt-injection | ⬜ | 添加防注入规则 |
+| FIX-024 | 无请求频率限制 | Security | A1 | feat/rate-limit | ⬜ | 添加限流 |
+| FIX-025 | 日志格式未区分环境 | Security | A1+A2 | fix/log-format | ⬜ | 生产 JSON 格式日志 |
+
+### 单元测试任务
+
+| ID | 任务 | Owner | 分支 | 状态 | 验收标准 |
+|---|---|---|---|---|---|
+| TASK-023 | 补充 Java 单元测试 | A1 | test/java-unit | ⬜ | Controller 核心逻辑覆盖 |
+| TASK-024 | 补充 Python 单元测试 | A2 | test/python-unit | ⬜ | Retrieval + Service 核心逻辑覆盖 |
 
 ---
 
