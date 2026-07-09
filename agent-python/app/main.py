@@ -71,8 +71,10 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             traceId=trace_id,
         )
 
+    allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
+
     try:
-        result = run_langgraph_agent(request.message)
+        result = run_langgraph_agent(request.message, allow_eval=allow_eval)
         return AgentResponse(
             answer=result.get('answer', ''),
             route=result.get('route', ''),
