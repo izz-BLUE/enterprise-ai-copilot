@@ -17,8 +17,8 @@
 | ID | 任务 | Owner | 分支 | 状态 | 验收标准 |
 |---|---|---|---|---|---|
 | TASK-001 | 建立协作文档框架 | 架构 Owner | main（仅文档） | ✅ | 9 个协作文档全部创建 |
-| TASK-002 | 修正 architecture.md 描述 | 架构 Owner | fix/arch-doc-jieba | ⬜ | jieba → BM25 描述修正 |
-| TASK-003 | 补充 api.md 缺失字段 | AI/RAG 工程师 | docs/api-field-sync | ⬜ | keyword_groups、failure_type 字段说明 |
+| TASK-002 | 修正 architecture.md 描述 | 架构 Owner | main（仅文档） | ✅ | jieba → BM25 描述修正 |
+| TASK-003 | 补充 api.md 缺失字段 | 架构 Owner | main（仅文档） | ✅ | keyword_groups、failure_type 字段说明 |
 
 ---
 

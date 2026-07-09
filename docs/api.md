@@ -58,6 +58,8 @@ Java 代理 Python 健康检查。
 | traceId | string | 请求追踪 ID（全链路一致） |
 | success | bool | 是否成功 |
 
+> 注：当前版本 `/api/chat` 响应中不包含 `sources` 字段。RAG 引用来源仅在 Agent 链路（`/api/agent/langgraph/chat`）的 `sources` 字段返回。
+
 **异常响应**（Python 不可用时）
 ```json
 {
@@ -237,3 +239,56 @@ curl -X POST http://localhost:8080/api/chat \
 - 如果不带，Java 自动生成 UUID
 - 响应头和响应体都包含 `X-Trace-Id` / `traceId`
 - Java 日志和 Python 日志都带 traceId，便于全链路排查
+
+---
+
+## 评估用例字段说明
+
+评估用例文件：`data/eval/rag_eval_cases.json`
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string | 用例唯一标识，如 `leave_001` |
+| question | string | 用户问题 |
+| expected_sources | list[string] | 预期命中的文档来源文件名 |
+| expected_keywords | list[string] | 检索结果应包含的关键词（Retrieval Eval 用） |
+| expected_answer_keywords | list[string] | LLM 回答应包含的关键词（Generation Eval 用） |
+| expected_answer_keyword_groups | list[list[string]] | 同义词组，组内 OR、组间 AND（可选） |
+| answerable | bool | `true` = 有答案，`false` = 无答案负样本 |
+
+### keyword_groups 同义词组机制
+
+`expected_answer_keyword_groups` 用于支持合理同义表达：
+
+```json
+{
+  "expected_answer_keyword_groups": [
+    ["直接主管", "上级主管", "直属主管", "主管领导", "直属上级", "直属领导", "上级领导", "部门领导"]
+  ]
+}
+```
+
+- 组内关键词：OR 关系（命中任意一个即可）
+- 组间：AND 关系（每组都必须命中至少一个）
+- 兼容 `expected_answer_keyword_groups` 和 `expected_answer_keywords` 共存
+
+### failure_type 分类
+
+Generation Eval 结果中的 `failure_type` 字段：
+
+| 值 | 说明 |
+|---|---|
+| `passed` | 通过 |
+| `keyword_too_strict` | 关键词过严，模型回答合理但未命中预期词 |
+| `generation_incomplete` | 模型没答全，遗漏关键信息 |
+| `llm_flaky` | LLM 输出波动，retry 后通过 |
+| `no_answer_leakage` | 无答案场景模型泄漏了编造内容 |
+
+### 检索模式参数
+
+| 参数 | 可选值 | 默认 | 说明 |
+|---|---|---|---|
+| `retrieval_mode` | `vector` / `hybrid` / `hybrid_rerank` | `hybrid` | 检索模式 |
+| `rewrite_mode` | `none` / `rule` | `none` | 查询重写模式 |
+
+> `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用。

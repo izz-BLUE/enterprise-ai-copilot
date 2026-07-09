@@ -114,7 +114,12 @@ flowchart TD
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
 - **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/refuse）
 - **safety_guard**：基于关键词的输入安全检查（5 类风险）
-- **hybrid_retriever**：Faiss 语义检索 + 关键词检索，合并去重取 TopK
+- **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
+  - `vector`：Faiss 语义检索 + keyword 检索合并去重
+  - `hybrid`（默认）：Faiss + BM25 + RRF 融合排序
+  - `hybrid_rerank`（实验）：Hybrid 候选召回 + Cross Encoder 精排
+- **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
+- **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
 
 ## 两条聊天链路
@@ -126,13 +131,14 @@ POST /api/chat
   → Java ChatController（读取 traceId，透传 X-Trace-Id）
     → Python POST /agent/chat
       → rag_service.process_chat()
+        → query_rewriter.rewrite_query()     # 实验模式，none 时跳过
         → hybrid_retriever.retrieve()
           ├── faiss_retriever（BGE embedding 语义检索）
-          └── keyword_retriever（jieba 分词关键词检索）
-        → Merge + Dedup + TopK=3
+          └── bm25_retriever（字符级 n-gram BM25 检索）
+        → RRF 融合排序（默认 hybrid 模式）→ TopK=3
         → build_rag_prompt()
         → llm_service.call_llm()
-          → DeepSeek V4
+          → DeepSeek API
         → ChatResponse（含 traceId）
 ```
 
@@ -179,15 +185,44 @@ data/hr/*.md, data/it/*.md, data/bank/*.md
 
 ## Hybrid Retrieval 设计
 
+支持三种检索模式：
+
+**hybrid 模式（默认）：**
 ```
 用户问题
-  ├─→ Faiss Semantic Retrieval（向量余弦相似度，能搜到语义相近的 chunk）
-  └─→ Keyword Retrieval（jieba 分词 + n-gram 关键词匹配，确保精确词不被稀释）
+  ├─→ Faiss Semantic Retrieval（向量余弦相似度）
+  └─→ BM25 Retrieval（字符级 n-gram，无外部依赖，对中文友好）
        ↓
-  按 chunk id 合并，Faiss 优先在前
+  RRF（Reciprocal Rank Fusion）融合排序
        ↓
-  去重 → 截取 TopK=3 → 传给 LLM
+  TopK=3 → 传给 LLM
 ```
+
+**vector 模式：**
+```
+用户问题
+  ├─→ Faiss Semantic Retrieval
+  └─→ Keyword Retrieval（简单关键词匹配）
+       ↓
+  按 chunk id 合并去重 → TopK=3
+```
+
+**hybrid_rerank 模式（实验）：**
+```
+用户问题
+  → Hybrid Retrieval → Top10 候选
+  → Cross Encoder 精排（BAAI/bge-reranker-base）
+  → TopK=3
+```
+
+**Query Rewrite（实验模式）：**
+```
+original_query → query_rewriter → rewritten_query → retrieval
+                                                  ↓
+                                    prompt 使用 original_query
+```
+
+> `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用。
 
 ## Evaluation 架构
 
@@ -242,7 +277,7 @@ Frontend: 展示 traceId 标签
 ```
 agent-python/app/
 ├── core/          # config.py — 环境变量、路径、常量
-├── retrieval/     # faiss_retriever, keyword_retriever, hybrid_retriever
+├── retrieval/     # faiss_retriever, keyword_retriever, bm25_retriever, hybrid_retriever, query_rewriter, cross_encoder_reranker
 ├── services/      # rag_service.py, llm_service.py
 ├── prompts/       # system_prompt.py, build_rag_prompt()
 ├── schemas/       # ChatRequest, ChatResponse, AgentResponse
