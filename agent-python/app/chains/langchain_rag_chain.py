@@ -7,7 +7,8 @@ langchain_rag_chain.py —— LangChain RAG Chain 封装
 """
 
 from app.core.config import (
-    DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL, DEEPSEEK_TEMPERATURE,
+    DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL,
+    DEEPSEEK_TEMPERATURE, LLM_TIMEOUT,
 )
 from app.retrieval.hybrid_retriever import retrieve
 
@@ -75,6 +76,7 @@ def answer_with_langchain_rag(question: str, top_k: int = 3) -> dict:
         base_url=DEEPSEEK_BASE_URL,
         model=DEEPSEEK_MODEL,
         temperature=DEEPSEEK_TEMPERATURE,
+        timeout=LLM_TIMEOUT,
     )
 
     chain = prompt | llm

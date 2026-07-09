@@ -32,5 +32,11 @@ RERANK_CANDIDATE_K = int(os.getenv('RERANK_CANDIDATE_K', '10'))
 # Query Rewrite
 REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
 
+# LLM Timeout (seconds)
+LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
+
+# Input Validation
+MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
+
 # Constants
 TOP_K = 3
