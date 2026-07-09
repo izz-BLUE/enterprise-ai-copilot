@@ -48,10 +48,10 @@
 | ID | 问题 | 来源 | Owner | 分支 | 状态 | 验收标准 |
 |---|---|---|---|---|---|---|
 | FIX-001 | CORS 配置过宽 | Security | A1 | fix/fullstack-phase3-batch2 | ✅ | 可配置白名单 cors.allowed-origins |
-| FIX-002 | 无认证/授权机制 | Security | A0+A1 | feat/auth | ⬜ | 至少 API Key 认证 |
+| FIX-002 | 无认证/授权机制（Header Token 模式） | Security | A1 | feat/batch3-access-control | ⬜ | `admin.token` 配置 + `X-Admin-Token` 校验 + `X-Allow-Eval` 传递 |
 | FIX-003 | Python 服务可被直接访问 | Security | A1 | fix/python-access | ⬜ | Python 仅允许 localhost |
 | FIX-004 | Safety Guard 仅覆盖 Agent 链路 | Security | A2 | fix/safety-guard-rag | ✅ | RAG 链路也应用安全检查 |
-| FIX-005 | Evaluation 接口无访问限制 | Security | A2 | fix/eval-access | ⬜ | 生产禁用或限角色 |
+| FIX-005 | Evaluation 接口无访问限制 | Security | A1+A2 | feat/batch3-access-control | ⬜ | Java 传 `X-Allow-Eval` + Python router_node 受控路由 |
 
 ### P1 修复任务（开发前必须处理）
 
@@ -62,8 +62,8 @@
 | FIX-012 | AgentHealthController 硬编码地址 | QA+Security | A1 | fix/fullstack-phase3-batch1 | ✅ | 使用 python.agent.base-url |
 | FIX-013 | RestTemplate 无超时配置 | QA+Security | A1 | fix/fullstack-phase3-batch2 | ✅ | 连接 3s，读取 30s，可配置 |
 | FIX-014 | LLM 调用无重试/超时 | QA | A2 | fix/ai-phase3-batch2 | ✅ | LLM_TIMEOUT 默认 30s，超时返回错误 |
-| FIX-015 | 异常信息暴露到响应 | Security | A1+A2 | fix/error-sanitize | ⬜ | 前端仅显示通用错误 |
-| FIX-016 | traceId 可被伪造 | Security | A1 | fix/traceid-validate | ⬜ | 验证 UUID 格式 |
+| FIX-015 | 异常信息暴露到响应 | Security | A1+A2 | feat/batch3-access-control | ⬜ | `reason` 字段不暴露 `e.getMessage()` / `str(e)` |
+| FIX-016 | traceId 可被伪造 | Security | A1 | feat/batch3-access-control | ⬜ | UUID 格式验证，非法输入丢弃重新生成 |
 | FIX-017 | 无请求大小限制 | Security | A1+A2 | fix/fullstack-phase3-batch2 + fix/ai-phase3-batch2 | ✅ | Java @Size(max=2000) + Python MAX_MESSAGE_LENGTH 兜底 |
 | FIX-018 | sources 暴露内部文件名 | Security | A2 | fix/sources-mask | ⬜ | sources 脱敏 |
 

@@ -9,7 +9,7 @@
 | 项目定位 | 🟡 Demo 阶段 | 本地可复现，未部署公网 |
 | 协作框架 | 🟢 已建立 | Phase 1~3 审查完成 |
 | 代码质量 | 🟡 稳定性收敛中 | Batch 1+2 已修复 8 项，剩余 3 P0 + 3 P1 待修复 |
-| 安全状态 | 🟡 部分修复 | Safety Guard + CORS + 超时 + 输入校验已处理；认证/Python 裸露/Eval 权限仍待处理 |
+| 安全状态 | 🟡 部分修复 | Safety Guard + CORS + 超时 + 输入校验已处理；认证/Eval 权限/traceId 验证/异常收敛 Batch 3 设计完成待实现；Python 裸露仍待处理 |
 | Evaluation | 🟢 闭环 | 38 cases, 100% 通过率（基于当前 case 集） |
 | 文档 | 🟢 较完整 | 契约已对齐 |
 
@@ -17,7 +17,7 @@
 
 | 角色 | 状态 | 当前任务 | 分支 |
 |---|---|---|---|
-| 架构 Owner | 🟢 活跃 | Phase 3 Batch 2 文档同步 | main |
+| 架构 Owner | 🟢 活跃 | Phase 3 Batch 3 权限设计 | main（仅文档） |
 | 全栈开发 (A1) | ✅ Batch 2 完成 | CORS + timeout + input validation | — |
 | AI/RAG 工程师 (A2) | ✅ Batch 2 完成 | LLM timeout + input length guard | — |
 | QA (A3) | ✅ 已退出 | Smoke Test 完成 | — |
@@ -40,7 +40,7 @@
 
 | 风险 | 等级 | 说明 |
 |---|---|---|
-| 无认证授权 | 🔴 高 | 生产化阻塞，所有接口裸奔 |
+| 无认证授权 | 🟡 设计完成 | Batch 3 方案：Header Token 模式，待实现 |
 | CORS 过宽 | 🟢 已修复 | Phase 3 Batch 2：改为可配置白名单 |
 | Safety Guard 未覆盖 RAG | 🟢 已修复 | Phase 3 Batch 1：RAG 链路已增加 Safety Guard 前置检查 |
 | Python 服务裸露 | 🔴 高 | 端口 8000 无访问控制 |
@@ -61,6 +61,7 @@
 | 交接模板 | [05-session-handoff-template.md](05-session-handoff-template.md) | 会话结束时用 |
 | 不可修改清单 | [06-do-not-touch.md](06-do-not-touch.md) | 开发前必读 |
 | 发布检查 | [07-release-checklist.md](07-release-checklist.md) | 合并前必读 |
+| Batch 3 权限设计 | [phase-3-batch3-access-control-design.md](phase-3-batch3-access-control-design.md) | 权限方案 + 任务拆分 |
 | 旧会话交接 | [handoff/legacy-dev-session-handoff.md](handoff/legacy-dev-session-handoff.md) | 了解历史 |
 
 ## 下一步
@@ -70,7 +71,12 @@
 3. ~~Phase 3 审查（QA + Security）~~ ✅
 4. ~~Phase 3 Batch 1 修复~~ ✅（FIX-010/011/012 + FIX-004）
 5. ~~Phase 3 Batch 2 修复~~ ✅（FIX-001/013/014/017）
-6. **启动 Batch 3**：FIX-002 认证授权 + FIX-003 Python 内部化 + FIX-005 Eval 权限 — A0 设计
-7. 后续：FIX-015/016/018 + P2 优化
+6. **Batch 3 设计完成**：[phase-3-batch3-access-control-design.md](phase-3-batch3-access-control-design.md)
+   - FIX-002：Header Token 认证（A1 实现）
+   - FIX-005：Eval 访问限制（A1+A2 实现）
+   - FIX-015：异常信息收敛（A1+A2 实现）
+   - FIX-016：traceId 格式验证（A1 实现）
+7. **启动 Batch 3 实现**：分支 `feat/batch3-access-control`
+8. 后续：FIX-003 Python 内部化 + FIX-018 sources 脱敏 + P2 优化
 
 > 详见 [phase-3-remediation-plan.md](phase-3-remediation-plan.md)
