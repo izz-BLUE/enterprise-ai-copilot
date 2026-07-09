@@ -4,6 +4,7 @@ import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -33,7 +34,7 @@ public class LangGraphAgentController {
     }
 
     @PostMapping("/api/agent/langgraph/chat")
-    public AgentChatResponse langgraphChat(@RequestBody ChatRequest request,
+    public AgentChatResponse langgraphChat(@Valid @RequestBody ChatRequest request,
                                            HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
         log.info("[{}] 收到 LangGraph Agent 请求: {}", traceId, request.message());

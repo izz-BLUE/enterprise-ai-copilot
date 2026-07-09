@@ -3,6 +3,7 @@ package com.fantuan.copilot.controller;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.ChatResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -31,7 +32,7 @@ public class ChatController {
     }
 
     @PostMapping("/api/chat")
-    public ChatResponse chat(@RequestBody ChatRequest request,
+    public ChatResponse chat(@Valid @RequestBody ChatRequest request,
                              HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
         log.info("[{}] 收到普通 RAG 请求: {}", traceId, request.message());
