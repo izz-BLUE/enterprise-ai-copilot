@@ -39,6 +39,17 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 
 **CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
+## Interview Materials
+
+面试讲解材料，包含项目介绍、Demo 脚本、架构讲解和常见追问 Q&A：
+
+| 文档 | 说明 |
+|------|------|
+| [Project Introduction](docs/interview/project-introduction.md) | 30 秒 / 1 分钟 / 3 分钟项目介绍版本 |
+| [Demo Script](docs/interview/demo-script.md) | 10 分钟面试 Demo 路线（含操作、预期、话术） |
+| [Architecture Walkthrough](docs/interview/architecture-walkthrough.md) | 5 分钟架构讲解稿 |
+| [FAQ & Deep Dive](docs/interview/faq-and-deep-dive.md) | 20 个面试官追问 Q&A |
+
 ## Architecture
 
 ```mermaid
