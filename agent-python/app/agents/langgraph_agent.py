@@ -28,6 +28,7 @@ class AgentState(TypedDict):
     reason: str
     category: str
     allow_eval: bool
+    trace_id: str
 
 
 def safety_node(state: AgentState) -> dict:
@@ -69,13 +70,17 @@ def rag_node(state: AgentState) -> dict:
     rewrite_result = rewrite_query(question, mode=REWRITE_MODE)
     retrieval_query = rewrite_result['rewritten_query']
     if rewrite_result['rewrite_applied']:
-        logger.info('LangGraph Query rewrite: "%s" → "%s" (reason: %s)',
-                    question, retrieval_query, rewrite_result['rewrite_reason'])
+        logger.info('[%s] LangGraph query rewrite applied reason=%s',
+                    state.get('trace_id', '-'), rewrite_result['rewrite_reason'])
 
     # 用 rewritten_query 检索，但传给 tool 的仍是 original_query
     # tool 内部的 LangChain RAG chain 会用 question 做检索和 prompt
     # 这里我们直接用 rewritten_query 调用 tool，让检索更准
-    result_str = rag_answer_tool.invoke({"question": retrieval_query})
+    result_str = rag_answer_tool.invoke({
+        "question": retrieval_query,
+        "original_question": question,
+        "trace_id": state.get('trace_id', ''),
+    })
     try:
         parsed = json.loads(result_str)
     except json.JSONDecodeError:
@@ -149,12 +154,15 @@ def build_agent_graph():
     return graph.compile()
 
 
-def run_langgraph_agent(question: str, allow_eval: bool = False) -> dict:
+def run_langgraph_agent(
+    question: str, allow_eval: bool = False, trace_id: str = '',
+) -> dict:
     graph = build_agent_graph()
     initial: AgentState = {
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
         "reason": "", "category": "",
         "allow_eval": allow_eval,
+        "trace_id": trace_id,
     }
     return dict(graph.invoke(initial))

@@ -9,6 +9,7 @@ Hybrid Retriever — 支持 vector / hybrid / hybrid_rerank 三种模式。
 from app.core.config import RERANK_CANDIDATE_K, logger
 from app.retrieval import faiss_retriever, keyword_retriever, bm25_retriever
 from app.retrieval import cross_encoder_reranker
+from app.retrieval.retrieval_gate import CandidateSignals
 
 # RRF 常数
 RRF_K = 60
@@ -67,10 +68,21 @@ def retrieve_vector(query: str, top_k: int = 3) -> list[dict]:
 
 def retrieve_hybrid(query: str, top_k: int = 3, candidate_k: int = 10) -> list[dict]:
     """Hybrid 模式：Faiss + BM25 + RRF 融合排序。"""
-    faiss_results = faiss_retriever.retrieve(query, candidate_k)
-    bm25_results = bm25_retriever.retrieve(query, candidate_k)
+    final, _signals = retrieve_hybrid_with_signals(query, top_k, candidate_k)
+    return final
+
+
+def retrieve_hybrid_with_signals(
+    query: str, top_k: int = 3, candidate_k: int = 10,
+) -> tuple[list[dict], list[CandidateSignals]]:
+    """Hybrid 检索，同时返回按 chunk_id 合并的原始检索信号。"""
+    faiss_scored = faiss_retriever.retrieve_with_scores(query, candidate_k)
+    bm25_scored = bm25_retriever.retrieve_with_scores(query, candidate_k)
+    faiss_results = [chunk for chunk, _score in faiss_scored]
+    bm25_results = [chunk for chunk, _score in bm25_scored]
 
     final = _rrf_fusion(faiss_results, bm25_results, top_k=top_k)
+    signals = _merge_candidate_signals(faiss_scored, bm25_scored)
 
     logger.info(
         'Hybrid检索(RRF): faiss=%d, bm25=%d, fused=%d, ids=%s',
@@ -78,7 +90,32 @@ def retrieve_hybrid(query: str, top_k: int = 3, candidate_k: int = 10) -> list[d
         len(final),
         [c['id'] for c in final],
     )
-    return final
+    return final, signals
+
+
+def _merge_candidate_signals(
+    faiss_scored: list[tuple[dict, float]],
+    bm25_scored: list[tuple[dict, float]],
+) -> list[CandidateSignals]:
+    """按同一 chunk_id 合并信号，绝不跨候选拼接分数。"""
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+
+    for rank, (chunk, score) in enumerate(faiss_scored, 1):
+        chunk_id = chunk['id']
+        if chunk_id not in merged:
+            merged[chunk_id] = {'chunk_id': chunk_id}
+            order.append(chunk_id)
+        merged[chunk_id].update(vector_score=score, vector_rank=rank)
+
+    for rank, (chunk, score) in enumerate(bm25_scored, 1):
+        chunk_id = chunk['id']
+        if chunk_id not in merged:
+            merged[chunk_id] = {'chunk_id': chunk_id}
+            order.append(chunk_id)
+        merged[chunk_id].update(bm25_score=score, bm25_rank=rank)
+
+    return [CandidateSignals(**merged[chunk_id]) for chunk_id in order]
 
 
 def retrieve_hybrid_rerank(query: str, top_k: int = 3,
@@ -127,3 +164,13 @@ def retrieve(query: str, top_k: int = 3, mode: str = 'hybrid') -> list[dict]:
         return retrieve_hybrid(query, top_k)
     else:
         return retrieve_hybrid_rerank(query, top_k)
+
+
+def retrieve_with_signals(
+    query: str, top_k: int = 3, mode: str = 'hybrid', candidate_k: int = 10,
+) -> tuple[list[dict], list[CandidateSignals]]:
+    """供生成链路使用的共享 scored retrieval 入口。"""
+    if mode != 'hybrid':
+        chunks = retrieve(query, top_k=top_k, mode=mode)
+        return chunks, []
+    return retrieve_hybrid_with_signals(query, top_k=top_k, candidate_k=candidate_k)

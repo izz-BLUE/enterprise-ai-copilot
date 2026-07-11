@@ -69,6 +69,11 @@ def retrieve(query: str, top_k: int = 3) -> list[dict]:
     返回的每个 dict 包含:
         id, domain, source_file, chunk_index, content
     """
+    return [chunk for chunk, _score in retrieve_with_scores(query, top_k)]
+
+
+def retrieve_with_scores(query: str, top_k: int = 3) -> list[tuple[dict, float]]:
+    """使用 Faiss 检索并保留 cosine similarity 原始分数。"""
     if not _available:
         logger.warning('Faiss 检索不可用，返回空结果')
         return []
@@ -83,23 +88,23 @@ def retrieve(query: str, top_k: int = 3) -> list[dict]:
     faiss.normalize_L2(query_emb)
 
     # 3. 检索
-    distances, indices = _index.search(query_emb, top_k)
+    similarities, indices = _index.search(query_emb, top_k)
 
     # 4. 组装结果（保持与 keyword_retriever 相同的 dict 结构）
     results = []
     for i in range(top_k):
         idx = indices[0][i]
-        score = float(distances[0][i])
+        score = float(similarities[0][i])
         if score < 0.01:
             continue
         chunk = _metadata[idx]
-        results.append({
+        results.append(({
             'id': chunk['id'],
             'domain': chunk['domain'],
             'source_file': chunk['source_file'],
             'chunk_index': chunk['chunk_index'],
             'content': chunk['content'],
-        })
+        }, score))
 
     return results
 

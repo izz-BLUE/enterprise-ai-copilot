@@ -1,9 +1,39 @@
 import logging
 import os
+from collections.abc import Mapping
 
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+
+
+def _load_rag_gate_settings(environ: Mapping[str, str]) -> tuple[str, float, float, float]:
+    """加载并校验实验性检索 Gate 配置；仅允许 off / shadow。"""
+    mode = environ.get('RAG_GATE_MODE', 'off').strip().lower()
+    if mode not in {'off', 'shadow', 'enforce'}:
+        raise ValueError(
+            f'RAG_GATE_MODE={mode!r} 非法，允许值为 off|shadow|enforce'
+        )
+    if mode == 'enforce':
+        raise ValueError('RAG_GATE_MODE=enforce 尚未开放；精简 V1 仅允许 off 或 shadow')
+
+    try:
+        vector_strong = float(environ.get('RAG_VECTOR_STRONG_THRESHOLD', '0.65'))
+        vector_weak = float(environ.get('RAG_VECTOR_WEAK_THRESHOLD', '0.61'))
+        bm25_weak = float(environ.get('RAG_BM25_WEAK_THRESHOLD', '2.10'))
+    except ValueError as exc:
+        raise ValueError(f'RAG 门控阈值必须是数字: {exc}') from exc
+
+    if not 0.0 <= vector_weak <= 1.0:
+        raise ValueError('RAG_VECTOR_WEAK_THRESHOLD 必须处于 [0, 1]')
+    if not 0.0 <= vector_strong <= 1.0:
+        raise ValueError('RAG_VECTOR_STRONG_THRESHOLD 必须处于 [0, 1]')
+    if vector_strong < vector_weak:
+        raise ValueError('RAG_VECTOR_STRONG_THRESHOLD 必须大于或等于 RAG_VECTOR_WEAK_THRESHOLD')
+    if not 0.0 <= bm25_weak <= 1000.0:
+        raise ValueError('RAG_BM25_WEAK_THRESHOLD 必须处于 [0, 1000]')
+
+    return mode, vector_strong, vector_weak, bm25_weak
 
 # Logger
 logger = logging.getLogger('agent')
@@ -37,6 +67,16 @@ LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
 
 # Input Validation
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
+
+# Experimental retrieval relevance gate (off by default; enforce is prohibited).
+# These thresholds only reproduce the first Shadow experiment and are not
+# validated deployment parameters. See docs/rag-retrieval-gate-experiment.md.
+(
+    RAG_GATE_MODE,
+    RAG_VECTOR_STRONG_THRESHOLD,
+    RAG_VECTOR_WEAK_THRESHOLD,
+    RAG_BM25_WEAK_THRESHOLD,
+) = _load_rag_gate_settings(os.environ)
 
 # Constants
 TOP_K = 3
