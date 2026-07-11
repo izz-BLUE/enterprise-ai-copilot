@@ -1,0 +1,62 @@
+{
+  "split_version": "v1-fixed-before-scoring",
+  "selection_basis": "按稳定 ID 与人工类别分层预先固定，不依据检索分数；Holdout 仅允许评估一次。",
+  "calibration": {
+    "answerable_ids": [
+      "val_a_001",
+      "val_a_003",
+      "val_a_004",
+      "val_a_006",
+      "val_a_008",
+      "val_a_010",
+      "val_a_012",
+      "val_a_013",
+      "val_a_015",
+      "val_a_016",
+      "val_a_017",
+      "val_a_019"
+    ],
+    "no_answer_ids": [
+      "val_n_001",
+      "val_n_003",
+      "val_n_004",
+      "val_n_006",
+      "val_n_009",
+      "val_n_011",
+      "val_n_013",
+      "val_n_015",
+      "val_n_016",
+      "val_n_019",
+      "val_n_020"
+    ]
+  },
+  "holdout": {
+    "answerable_ids": [
+      "val_a_002",
+      "val_a_005",
+      "val_a_007",
+      "val_a_009",
+      "val_a_011",
+      "val_a_014",
+      "val_a_018",
+      "val_n_007"
+    ],
+    "no_answer_ids": [
+      "val_n_002",
+      "val_n_005",
+      "val_n_008",
+      "val_n_010",
+      "val_n_012",
+      "val_n_014",
+      "val_n_017",
+      "val_n_018"
+    ]
+  },
+  "excluded_needs_review_ids": [
+    "val_a_020",
+    "val_r_001",
+    "val_r_002",
+    "val_r_003",
+    "val_r_004"
+  ]
+}
