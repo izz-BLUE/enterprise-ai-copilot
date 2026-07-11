@@ -1,16 +1,49 @@
+@import './design-tokens.css';
+
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  background: #f3f4f6;
-  color: #111;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
   line-height: 1.5;
+  overflow: hidden;
 }
 
 #root {
   min-height: 100vh;
-  padding: 40px 16px;
+}
+
+/* ── 滚动条美化 ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ── 选中文本 ── */
+::selection {
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--color-text);
 }
