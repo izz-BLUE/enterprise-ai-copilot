@@ -7,13 +7,14 @@ agent-python/.env
 agent-python/.venv/
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 
 # claude
 .claude/
 
 # logs
 *.log
+*.err
 
 # java
 target/
