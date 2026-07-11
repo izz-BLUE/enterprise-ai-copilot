@@ -1,0 +1,53 @@
+{
+  "purpose": "独立门控验证候选集；不得覆盖原 38 条 baseline，首次使用前需人工复核。",
+  "answerable": [
+    {"id": "val_a_001", "question": "咱们早上最晚几点到？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 标准工时"},
+    {"id": "val_a_002", "question": "晚上六点半算下班吗？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 标准工时"},
+    {"id": "val_a_003", "question": "病假超一天得交啥凭证？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 门诊病假"},
+    {"id": "val_a_004", "question": "请三天假得提早几个工作日？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 请假申请"},
+    {"id": "val_a_005", "question": "结婚休假要拿结昏证吗？", "category": "typo", "evidence": "hr/leave_policy_real_sample.md: 请假资料表"},
+    {"id": "val_a_006", "question": "VPN 客户端在哪下？", "category": "short", "evidence": "it/vpn_guide.md"},
+    {"id": "val_a_007", "question": "虚拟专网怎么登录？", "category": "synonym", "evidence": "it/vpn_guide.md"},
+    {"id": "val_a_008", "question": "新同事第一天要领啥设备？", "category": "colloquial", "evidence": "hr/onboarding.md"},
+    {"id": "val_a_009", "question": "入职培训在流程里吗？", "category": "short", "evidence": "hr/onboarding.md"},
+    {"id": "val_a_010", "question": "迟到三回会扣多少？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 迟到早退"},
+    {"id": "val_a_011", "question": "加班到十点能报车费不？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 加班规定"},
+    {"id": "val_a_012", "question": "满二十年工龄有几天年休？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 年休假"},
+    {"id": "val_a_013", "question": "宝宝一岁前每天能哺乳多久？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 哺乳假"},
+    {"id": "val_a_014", "question": "直系亲属去世能请几天？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 丧假"},
+    {"id": "val_a_015", "question": "产检假能攒到一起休吗？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 生育假"},
+    {"id": "val_a_016", "question": "一年病休十五个工作日影响啥？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 门诊病假"},
+    {"id": "val_a_017", "question": "年假最晚能拖到第二年几月？", "category": "colloquial", "evidence": "hr/leave_policy_real_sample.md: 年休假"},
+    {"id": "val_a_018", "question": "病假一个月以内工资按几成？", "category": "synonym", "evidence": "hr/leave_policy_real_sample.md: 假期工资"},
+    {"id": "val_a_019", "question": "没走请假手续会按什么处理？", "category": "paraphrase", "evidence": "hr/leave_policy_real_sample.md: 请假规定"},
+    {"id": "val_n_007", "question": "婚假可以拆成两次休吗？", "category": "domain_overlap", "evidence": "制度明确婚假应在登记日起一年内一次性休完", "expected_chunk_id": "hr_leave_policy_real_sample_012"}
+  ],
+  "no_answer": [
+    {"id": "val_n_001", "question": "年假没休完能折算多少钱？", "category": "domain_overlap", "evidence": "知识库未给出通用年假折现标准"},
+    {"id": "val_n_002", "question": "VPN 能同时登录几台设备？", "category": "domain_overlap", "evidence": "vpn_guide.md 未说明设备数"},
+    {"id": "val_n_003", "question": "VPN 忘记密码找谁重置？", "category": "domain_overlap", "evidence": "vpn_guide.md 未说明重置流程"},
+    {"id": "val_n_004", "question": "入职电脑是什么品牌？", "category": "domain_overlap", "evidence": "onboarding.md 未说明品牌"},
+    {"id": "val_n_005", "question": "工牌丢了补办要交多少钱？", "category": "domain_overlap", "evidence": "onboarding.md 未说明补办费用"},
+    {"id": "val_n_006", "question": "迟到能用年假抵扣吗？", "category": "domain_overlap", "evidence": "知识库未说明抵扣规则"},
+    {"id": "val_n_008", "question": "病假证明可以用线上问诊截图吗？", "category": "domain_overlap", "evidence": "知识库未认可线上截图"},
+    {"id": "val_n_009", "question": "加班打车报销上限是多少钱？", "category": "domain_overlap", "evidence": "知识库未说明金额上限"},
+    {"id": "val_n_010", "question": "午休期间外出需要审批吗？", "category": "domain_overlap", "evidence": "知识库未明确午休外出审批"},
+    {"id": "val_n_011", "question": "产假期间绩效奖金怎么发？", "category": "domain_overlap", "evidence": "知识库未说明绩效奖金"},
+    {"id": "val_n_012", "question": "哺乳假能换成现金补贴吗？", "category": "domain_overlap", "evidence": "知识库未说明现金置换"},
+    {"id": "val_n_013", "question": "丧假跨省能多给两天路程假吗？", "category": "domain_overlap", "evidence": "知识库未规定路程假"},
+    {"id": "val_n_014", "question": "试用期员工有几天带薪病假？", "category": "domain_overlap", "evidence": "知识库未按试用期给出标准"},
+    {"id": "val_n_015", "question": "年假审批一般多久能批完？", "category": "domain_overlap", "evidence": "知识库未给审批时限"},
+    {"id": "val_n_016", "question": "请假撤销后额度多久恢复？", "category": "domain_overlap", "evidence": "知识库未说明系统恢复时间"},
+    {"id": "val_n_017", "question": "VPN 海外节点有几个？", "category": "short", "evidence": "vpn_guide.md 未说明节点"},
+    {"id": "val_n_018", "question": "OA 手机端怎么补签考勤？", "category": "abbreviation", "evidence": "知识库未说明 OA 补签操作"},
+    {"id": "val_n_019", "question": "新员工试用期薪资哪天发？", "category": "domain_overlap", "evidence": "onboarding.md 未说明薪资发放"},
+    {"id": "val_n_020", "question": "部门团建可以报销多少预算？", "category": "short", "evidence": "知识库无团建预算制度"}
+  ],
+  "needs_review": [
+    {"id": "val_a_020", "question": "两天以上的假谁审批？", "category": "cross_document_conflict", "review_reason": "HR 与 Bank 文档对三天请假审批存在口径冲突"},
+    {"id": "val_r_001", "question": "请三天病假要提前多久并准备什么材料？", "category": "partially_answerable_composite", "review_reason": "两个子问题均可能回答，需确定门控 label 是否按整体可回答定义"},
+    {"id": "val_r_002", "question": "VPN 怎么安装，忘记密码又该找谁？", "category": "partially_answerable_composite", "review_reason": "安装可回答，密码重置不可回答"},
+    {"id": "val_r_003", "question": "入职要领电脑，电脑配置是什么？", "category": "partially_answerable_composite", "review_reason": "领取电脑可回答，配置不可回答"},
+    {"id": "val_r_004", "question": "年假有几天，没休完能不能折现？", "category": "partially_answerable_composite", "review_reason": "天数可回答，折现规则缺失"}
+  ]
+}
