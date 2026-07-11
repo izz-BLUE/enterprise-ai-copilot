@@ -57,9 +57,18 @@ jobs:
         working-directory: agent-python
         run: uv sync
 
-      - name: Run retrieval evaluation
+      - name: Run baseline retrieval quality gate
         working-directory: agent-python
-        run: uv run python scripts/eval/eval_retrieval.py
+        run: >
+          uv run python scripts/eval/eval_retrieval.py
+          --rewrite-mode none
+          --min-source-hit-rate 100
+          --min-keyword-hit-rate 95
+          --min-final-pass-rate 95
+
+      - name: Run rule rewrite retrieval evaluation
+        working-directory: agent-python
+        run: uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule
 
   frontend-check:
     name: Frontend Build

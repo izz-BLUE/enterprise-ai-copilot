@@ -77,10 +77,27 @@ def main():
     parser.add_argument('--rewrite-mode', type=str, default='none',
                         choices=['none', 'rule'],
                         help='查询重写模式：none / rule')
+    parser.add_argument('--min-source-hit-rate', type=float, default=100.0,
+                        help='source_hit_rate 最低阈值（百分比，默认 100.0）')
+    parser.add_argument('--min-keyword-hit-rate', type=float, default=100.0,
+                        help='keyword_hit_rate 最低阈值（百分比，默认 100.0）')
+    parser.add_argument('--min-final-pass-rate', type=float, default=100.0,
+                        help='final_pass_rate 最低阈值（百分比，默认 100.0）')
     args = parser.parse_args()
     top_k = args.top_k
     retrieval_mode = args.retrieval_mode
     rewrite_mode = args.rewrite_mode
+    min_source_hit_rate = args.min_source_hit_rate
+    min_keyword_hit_rate = args.min_keyword_hit_rate
+    min_final_pass_rate = args.min_final_pass_rate
+
+    # ── 验证阈值参数 ──
+    for name, value in [('min-source-hit-rate', min_source_hit_rate),
+                        ('min-keyword-hit-rate', min_keyword_hit_rate),
+                        ('min-final-pass-rate', min_final_pass_rate)]:
+        if not (0.0 <= value <= 100.0):
+            print(f'错误: --{name} 必须在 0～100 之间，当前值: {value}')
+            sys.exit(1)
 
     # ── 前置检查 ──
     if not _check_prerequisites():
@@ -215,6 +232,30 @@ def main():
     print(f'    keyword_hit_rate:      {keyword_hit_rate:.1f}%')
     print(f'    final_pass_rate:       {final_pass_rate:.1f}%')
 
+    # ── 阈值配置 ──
+    print()
+    print('=' * 60)
+    print('  质量门禁阈值')
+    print('=' * 60)
+    print(f'    min_source_hit_rate:   {min_source_hit_rate:.1f}%')
+    print(f'    min_keyword_hit_rate:  {min_keyword_hit_rate:.1f}%')
+    print(f'    min_final_pass_rate:   {min_final_pass_rate:.1f}%')
+
+    # ── 阈值判定 ──
+    source_pass = source_hit_rate >= min_source_hit_rate
+    keyword_pass = keyword_hit_rate >= min_keyword_hit_rate
+    final_pass = final_pass_rate >= min_final_pass_rate
+    threshold_passed = source_pass and keyword_pass and final_pass
+
+    print()
+    print('=' * 60)
+    print('  门禁判定结果')
+    print('=' * 60)
+    print(f'    source_hit_rate:       {"PASS" if source_pass else "FAIL"} ({source_hit_rate:.1f}% >= {min_source_hit_rate:.1f}%)')
+    print(f'    keyword_hit_rate:      {"PASS" if keyword_pass else "FAIL"} ({keyword_hit_rate:.1f}% >= {min_keyword_hit_rate:.1f}%)')
+    print(f'    final_pass_rate:       {"PASS" if final_pass else "FAIL"} ({final_pass_rate:.1f}% >= {min_final_pass_rate:.1f}%)')
+    print(f'    threshold_passed:      {"PASS" if threshold_passed else "FAIL"}')
+
     # ── 失败用例详情 ──
     if failed_count > 0:
         print()
@@ -234,18 +275,23 @@ def main():
             print(f'  实际来源:         {r["actual_sources"]}')
             print(f'  TopK chunk IDs:   {r["top_chunk_ids"]}')
 
-    # ── 退出码 ──
+    # ── 退出码（基于阈值判定）──
     _save_report(results, total, ab_total, na_total,
                  passed_count, failed_count,
-                 source_hit_rate, keyword_hit_rate, final_pass_rate, top_k)
-    sys.exit(0 if failed_count == 0 else 1)
+                 source_hit_rate, keyword_hit_rate, final_pass_rate,
+                 min_source_hit_rate, min_keyword_hit_rate, min_final_pass_rate,
+                 threshold_passed, top_k)
+    sys.exit(0 if threshold_passed else 1)
 
 
 def _save_report(results: list[dict], total: int,
                  ab_total: int, na_total: int,
                  passed_count: int, failed_count: int,
                  source_hit_rate: float, keyword_hit_rate: float,
-                 final_pass_rate: float, top_k: int = TOP_K) -> None:
+                 final_pass_rate: float,
+                 min_source_hit_rate: float, min_keyword_hit_rate: float,
+                 min_final_pass_rate: float, threshold_passed: bool,
+                 top_k: int = TOP_K) -> None:
     """将评估结果写入 JSON 报告文件。"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
@@ -261,6 +307,12 @@ def _save_report(results: list[dict], total: int,
         'source_hit_rate': round(source_hit_rate / 100, 4),
         'keyword_hit_rate': round(keyword_hit_rate / 100, 4),
         'final_pass_rate': round(final_pass_rate / 100, 4),
+        'thresholds': {
+            'min_source_hit_rate': min_source_hit_rate / 100,
+            'min_keyword_hit_rate': min_keyword_hit_rate / 100,
+            'min_final_pass_rate': min_final_pass_rate / 100,
+        },
+        'threshold_passed': threshold_passed,
         'cases': results,
     }
 
