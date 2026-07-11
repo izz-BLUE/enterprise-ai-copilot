@@ -24,6 +24,7 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 - Cross Encoder Re-rank（hybrid_rerank 实验模式，BAAI/bge-reranker-base 精排）
 - Query Rewrite（rule 规则匹配实验模式，检索前口语化改写）
 - RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比 + Query Rewrite 对比）
+- 实验性 Retrieval Shadow Gate（默认关闭；独立 Holdout 表明 Vector/BM25 不足以判断答案证据充分性，未启用请求拦截，详见 [`docs/rag-retrieval-gate-experiment.md`](docs/rag-retrieval-gate-experiment.md)）
 - LangChain RAG Chain 实验模块
 - LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
 - Java 代理接口（traceId 全链路透传）
