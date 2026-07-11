@@ -6,11 +6,14 @@ langchain_rag_chain.py —— LangChain RAG Chain 封装
 此模块不替换 /agent/chat 主流程，仅作为实验性可复用封装。
 """
 
+from time import perf_counter
+
 from app.core.config import (
     DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL,
-    DEEPSEEK_TEMPERATURE, LLM_TIMEOUT,
+    DEEPSEEK_TEMPERATURE, LLM_TIMEOUT, logger,
 )
-from app.retrieval.hybrid_retriever import retrieve
+from app.retrieval.hybrid_retriever import retrieve_with_signals
+from app.retrieval.retrieval_gate import evaluate_gate_timed_fail_open, log_gate_event
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -44,17 +47,33 @@ def _build_context(chunks: list[dict]) -> str:
     return "\n\n".join(sections)
 
 
-def answer_with_langchain_rag(question: str, top_k: int = 3) -> dict:
+def answer_with_langchain_rag(
+    question: str, top_k: int = 3, *, retrieval_query: str | None = None,
+    trace_id: str = '',
+) -> dict:
     """使用 LangChain RAG Chain 回答用户问题。
 
     返回 dict:
         answer, model, success, sources
     异常时 success=False，answer 为降级文案。
     """
-    # 1. 检索
-    chunks = retrieve(question, top_k=top_k)
+    # 1. 共享 scored retrieval + Shadow gate；Prompt 仍使用原始 question。
+    retrieval_started = perf_counter()
+    chunks, candidate_signals = retrieve_with_signals(
+        retrieval_query or question, top_k=top_k,
+    )
+    retrieval_latency_ms = (perf_counter() - retrieval_started) * 1000
+    gate_decision, gate_latency_ms = evaluate_gate_timed_fail_open(
+        candidate_signals, trace_id=trace_id or '-',
+    )
 
     if not chunks:
+        log_gate_event(
+            trace_id=trace_id or '-', decision=gate_decision,
+            candidate_count=len(candidate_signals),
+            retrieval_latency_ms=retrieval_latency_ms,
+            gate_latency_ms=gate_latency_ms, llm_called=False,
+        )
         return {
             "answer": "当前知识库暂无相关信息",
             "model": DEEPSEEK_MODEL,
@@ -83,13 +102,27 @@ def answer_with_langchain_rag(question: str, top_k: int = 3) -> dict:
 
     try:
         response = chain.invoke({"context": context, "question": question})
-    except Exception as e:
+    except Exception:
+        logger.exception('[%s] LangChain LLM 调用失败', trace_id or '-')
+        log_gate_event(
+            trace_id=trace_id or '-', decision=gate_decision,
+            candidate_count=len(candidate_signals),
+            retrieval_latency_ms=retrieval_latency_ms,
+            gate_latency_ms=gate_latency_ms, llm_called=True,
+        )
         return {
             "answer": "当前 AI 服务暂时不可用，请稍后重试。",
             "model": DEEPSEEK_MODEL,
             "success": False,
             "sources": [],
         }
+
+    log_gate_event(
+        trace_id=trace_id or '-', decision=gate_decision,
+        candidate_count=len(candidate_signals),
+        retrieval_latency_ms=retrieval_latency_ms,
+        gate_latency_ms=gate_latency_ms, llm_called=True,
+    )
 
     # 4. 组装返回
     sources = [

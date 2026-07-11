@@ -19,7 +19,7 @@ GENERATION_REPORT = os.path.join(PROJECT_ROOT, 'data', 'eval', 'reports', 'gener
 
 
 @tool
-def rag_answer_tool(question: str) -> str:
+def rag_answer_tool(question: str, original_question: str = '', trace_id: str = '') -> str:
     """回答企业制度、流程、IT 文档、HR 文档等知识库问题。
 
     输入: question - 用户提出的企业知识库相关问题
@@ -28,7 +28,11 @@ def rag_answer_tool(question: str) -> str:
     """
     from app.chains.langchain_rag_chain import answer_with_langchain_rag
 
-    result = answer_with_langchain_rag(question)
+    result = answer_with_langchain_rag(
+        original_question or question,
+        retrieval_query=question,
+        trace_id=trace_id,
+    )
 
     output = {
         "answer": result["answer"],
