@@ -31,6 +31,7 @@ flowchart TD
         HR[Hybrid Retriever]
         FR[Faiss Semantic]
         KR[Keyword Retrieval]
+        RG[Experimental Shadow Gate<br/>default: off]
         PP[Prompt Builder]
         LLM[DeepSeek LLM]
     end
@@ -67,7 +68,7 @@ flowchart TD
     EP1 --> HR
     HR --> FR
     HR --> KR
-    HR --> PP
+    HR --> RG --> PP
     PP --> LLM
 
     EP2 --> SN
@@ -124,6 +125,12 @@ flowchart TD
 - **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
 - **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
+
+### 实验性 Retrieval Shadow Gate
+
+Hybrid Retrieval 可在内部保留同一候选的 FAISS cosine 与 BM25 原始分数，并通过实验性 Gate 记录相关性判断。该能力默认 `off`，只有显式设置 `RAG_GATE_MODE=shadow` 才进行非阻断分析；`enforce` 被配置层禁止。
+
+独立 Holdout 结果为 answerable `7/8`、no-answer block `1/8`，证明 Vector/BM25 主题相关性不足以判断答案证据是否充分。因此 Gate 不属于正式启用的生产能力，不改变 Prompt、公开响应或实际 LLM 调用。完整实验见 [RAG 生成前检索相关性 Gate 实验报告](rag-retrieval-gate-experiment.md)。
 
 ## 两条聊天链路
 
@@ -234,6 +241,8 @@ original_query → query_rewriter → rewritten_query → retrieval
 ```
 
 > `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用。
+
+> 检索相关性 Shadow Gate 同样是实验能力且默认关闭。首轮阈值只用于复现实验，不能视为可部署参数；当前未启用生成前请求拦截。
 
 ## Evaluation 架构
 
