@@ -12,7 +12,7 @@ COPY mvnw .
 RUN mvn clean package -DskipTests -B
 
 # 运行阶段
-FROM eclipse-temurin:17-jre-slim
+FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
