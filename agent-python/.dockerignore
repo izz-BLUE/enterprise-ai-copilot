@@ -1,0 +1,52 @@
+# 环境变量（包含 Secret）
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 模型二进制（运行时挂载）
+models/
+
+# 评估报告（自动生成）
+data/eval/reports/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 日志
+*.log
+*.err
+
+# 临时文件
+*.tar.gz
+*.tmp
+*.temp
+
+# 测试
+tests/
+pytest.ini
+.pytest_cache/
+
+# 文档（不需要在容器中运行）
+docs/
+*.md
+!README.md
+
+# Claude
+.claude/
+
+# Hugging Face 缓存
+.cache/
