@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装生产依赖（不含 torch/sentence-transformers/optimum）
+COPY scripts/build/requirements-prod.txt /tmp/requirements-prod.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-prod.txt && rm /tmp/requirements-prod.txt
+
+# 复制项目代码
+COPY app/ app/
+COPY scripts/build/memtest.py scripts/build/
+COPY models/ models/
+
+CMD ["python", "--version"]

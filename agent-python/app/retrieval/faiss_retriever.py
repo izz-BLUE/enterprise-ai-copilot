@@ -1,25 +1,22 @@
 import json
 import os
-import time
 
 import numpy as np
 
 from app.core.config import FAISS_INDEX_FILE, FAISS_META_FILE, logger
 
-MODEL_NAME = 'BAAI/bge-small-zh-v1.5'
-
 # Module-level state
 _index = None
 _metadata: list[dict] = []
-_model = None
 _available = False
 
 
 def _load_resources():
-    """启动时加载 Faiss 索引、metadata 和 embedding 模型。
+    """启动时加载 Faiss 索引和 metadata。
+    Embedding 模型由 embedding_runtime 统一管理，首次 encode 时延迟加载。
     如果索引文件不存在，仅记录警告，不阻塞服务启动。
     """
-    global _index, _metadata, _model, _available
+    global _index, _metadata, _available
 
     # 1. 检查文件是否存在
     if not os.path.isfile(FAISS_INDEX_FILE):
@@ -46,19 +43,6 @@ def _load_resources():
         _metadata = json.load(f)
     logger.info('Faiss metadata 加载完成: %d 条', len(_metadata))
 
-    # 4. 加载 embedding 模型
-    t0 = time.time()
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError:
-        logger.warning('sentence-transformers 未安装，Faiss 检索不可用')
-        _index = None
-        _metadata = []
-        return
-
-    _model = SentenceTransformer(MODEL_NAME)
-    logger.info('Embedding 模型加载完成: %s (耗时 %.1fs)', MODEL_NAME, time.time() - t0)
-
     _available = True
     logger.info('Faiss 检索就绪')
 
@@ -80,8 +64,10 @@ def retrieve_with_scores(query: str, top_k: int = 3) -> list[tuple[dict, float]]
 
     import faiss
 
-    # 1. 用户问题 → embedding
-    query_emb = _model.encode(query, normalize_embeddings=True)
+    from app.retrieval.embedding_runtime import encode
+
+    # 1. 用户问题 → embedding（通过统一 Runtime，支持 torch / onnx）
+    query_emb = encode(query)
 
     # 2. L2 normalize（与索引构建时的 normalize 保持一致）
     query_emb = np.expand_dims(query_emb, axis=0).astype(np.float32)
