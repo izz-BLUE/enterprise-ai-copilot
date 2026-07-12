@@ -1,0 +1,88 @@
+# Enterprise AI Copilot - 生产环境 Docker Compose
+# 用法：
+#   docker compose -f deploy/docker-compose.prod.yml up -d
+#
+# 前置条件：
+#   1. 创建 .env 文件（参考 agent-python/.env.example）
+#   2. 导出 ONNX 模型：uv run python scripts/build/export_embedding_onnx.py
+#   3. 确保 data/processed 目录存在（chunks.json, faiss.index, faiss_metadata.json）
+
+services:
+  # ── Python AI Agent (Direct ONNX) ──────────────────────────────
+  python-agent:
+    build:
+      context: ../agent-python
+      dockerfile: Dockerfile
+    container_name: ai-copilot-python
+    environment:
+      # Embedding 配置
+      EMBEDDING_BACKEND: onnx_direct
+      EMBEDDING_MODEL_PATH: /app/models/embedding/bge-small-zh-v1.5-onnx
+      EMBEDDING_ONNX_FILE: onnx/model.onnx
+      EMBEDDING_PROVIDER: CPUExecutionProvider
+      # RAG 配置
+      RAG_GATE_MODE: "off"
+      REWRITE_MODE: none
+      # LLM 配置（从 .env 读取）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-}
+    volumes:
+      # 模型目录（只读）
+      - ../agent-python/models/embedding/bge-small-zh-v1.5-onnx:/app/models/embedding/bge-small-zh-v1.5-onnx:ro
+      # 检索数据（只读）
+      - ../data/processed:/data/processed:ro
+    networks:
+      - ai-copilot-net
+    # 不映射公网端口，仅 Java 可访问
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/agent/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # ── Java Backend ────────────────────────────────────────────────
+  java-backend:
+    build:
+      context: ../backend-java
+      dockerfile: Dockerfile
+    container_name: ai-copilot-java
+    environment:
+      # Python 服务地址（内部网络）
+      PYTHON_AGENT_BASE_URL: http://python-agent:8000
+      # Admin Token
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # CORS
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      # JVM 配置
+      JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
+    ports:
+      - "${JAVA_PORT:-8080}:8080"
+    networks:
+      - ai-copilot-net
+    depends_on:
+      python-agent:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+networks:
+  ai-copilot-net:
+    driver: bridge
