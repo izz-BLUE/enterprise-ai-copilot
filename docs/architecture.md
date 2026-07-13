@@ -328,6 +328,53 @@ python.agent.base-url=http://localhost:8000
 logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %msg%n
 ```
 
+## 网络拓扑（部署环境）
+
+```mermaid
+graph TD
+    subgraph Host ["宿主机 localhost"]
+        J[Java Backend<br/>127.0.0.1:8080]
+    end
+
+    subgraph Docker ["Docker bridge: ai-copilot-net"]
+        P[Python Agent<br/>expose 8000]
+        M[models/:ro]
+        D[data/processed/:ro]
+    end
+
+    J -->|HTTP| P
+    P -->|只读挂载| M
+    P -->|只读挂载| D
+```
+
+**部署要点：**
+
+- Python 不映射宿主机公网端口，仅 expose 8000（Docker 内网）
+- Java 绑定 127.0.0.1:8080（localhost only）
+- 模型和 processed data 使用只读挂载
+- Nginx 尚未接入
+
+## Agent 边界说明
+
+LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
+
+- LangGraph 状态图：safety → router → rag/eval/refuse
+- Router 基于关键词匹配（评估类 vs RAG 问答）
+- 不具有自主任务拆解、反思、多步规划能力
+- 不使用"自主 Agent""智能规划系统"等措辞
+
+## Embedding Runtime
+
+项目使用 Direct ONNX Runtime 替代 sentence-transformers：
+
+| 后端 | 依赖 | 内存 |
+|------|------|------|
+| Torch | PyTorch + sentence-transformers | 877 MiB |
+| ONNX_ST | Torch + ONNX Runtime | 920 MiB |
+| Direct ONNX | onnxruntime + tokenizers | 174 MiB |
+
+详见 [`performance.md`](performance.md)。
+
 ## 当前架构边界（未生产化）
 
 以下能力尚未实现，属于 Roadmap 范畴：
@@ -336,7 +383,6 @@ logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %m
 - 文档上传与知识库管理
 - 多租户隔离
 - 审计日志
-- Docker Compose 部署
-- CI/CD 集成
+- Nginx、域名、HTTPS 配置
 - 监控告警
 - 多模型配置

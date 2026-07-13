@@ -12,6 +12,7 @@
 - [x] Java 统一入口，代理 Python 接口
 - [x] React + Vite 前端演示页面
 - [x] traceId 全链路透传（Frontend → Java → Python）
+- [x] Docker Compose 隔离部署（腾讯云小规格实例验证通过）
 
 ### RAG 主链路
 
@@ -27,6 +28,7 @@
 - [x] RAG Prompt 构造（知识库内容 + 严格规则）
 - [x] DeepSeek LLM 调用（OpenAI SDK 兼容）
 - [x] 稳定 RAG 接口 `/api/chat`
+- [x] Torch-free Direct ONNX Runtime（内存从 877 MiB 降至 174 MiB）
 
 ### Agent 实验链路
 
@@ -58,7 +60,7 @@
 
 ## 短期计划（Planned）
 
-- [ ] README 与 docs 持续完善
+- [ ] Nginx、域名、HTTPS 配置
 - [ ] 增加更多 eval case（跨域、对抗样本、边界条件）
 - [ ] 优化 API 返回结构（统一错误码）
 - [ ] 完善异常兜底和错误提示
@@ -69,7 +71,6 @@
 
 - [ ] 多轮对话上下文管理
 - [ ] 文档上传与知识库管理接口
-- [ ] Docker Compose 一键部署
 - [ ] 结构化日志（JSON 格式）
 
 ## 长期计划（Future）
