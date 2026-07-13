@@ -1,32 +1,75 @@
 import uuid
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
+from app.agents.langgraph_agent import run_langgraph_agent
+from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import DEEPSEEK_MODEL, MAX_MESSAGE_LENGTH, logger
 from app.schemas.chat_schema import AgentResponse, ChatRequest, ChatResponse
 from app.services.rag_service import process_chat
-from app.agents.langgraph_agent import run_langgraph_agent
 
 app = FastAPI(title='Agent Python Service')
+
+_BOUNDED_AI_PATHS = {'/agent/chat', '/agent/langgraph/chat'}
+
+
+def _busy_response(path: str, trace_id: str) -> JSONResponse:
+    common_headers = {'X-Trace-Id': trace_id, 'Retry-After': '1'}
+    if path == '/agent/langgraph/chat':
+        content = {
+            'answer': '当前请求较多，请稍后重试。',
+            'route': 'busy',
+            'safe': True,
+            'category': 'overloaded',
+            'reason': '',
+            'sources': [],
+            'success': False,
+            'traceId': trace_id,
+        }
+    else:
+        content = {
+            'answer': '当前请求较多，请稍后重试。',
+            'model': DEEPSEEK_MODEL or 'unknown',
+            'traceId': trace_id,
+            'success': False,
+        }
+    return JSONResponse(status_code=429, content=content, headers=common_headers)
 
 
 @app.middleware('http')
 async def trace_id_middleware(request: Request, call_next):
-    """从请求头读取 X-Trace-Id，没有则生成，写入 request.state 并设置响应头。"""
+    """Attach traceId and bound admission to expensive AI request paths."""
     trace_id = request.headers.get('x-trace-id')
     if not trace_id:
         trace_id = str(uuid.uuid4())
     request.state.trace_id = trace_id
 
-    response: Response = await call_next(request)
+    acquired = False
+    if request.method == 'POST' and request.url.path in _BOUNDED_AI_PATHS:
+        try:
+            request.state.queue_wait_ms = await ai_request_limiter.acquire(trace_id)
+            acquired = True
+        except ConcurrencyLimitExceeded:
+            return _busy_response(request.url.path, trace_id)
+
+    try:
+        response: Response = await call_next(request)
+    finally:
+        if acquired:
+            ai_request_limiter.release(trace_id)
+
     response.headers['X-Trace-Id'] = trace_id
     return response
 
 
 @app.get('/agent/health')
 def health():
-    return {'service': 'agent-python', 'status': 'UP'}
+    return {
+        'service': 'agent-python',
+        'status': 'UP',
+        'concurrency': ai_request_limiter.snapshot(),
+    }
 
 
 def _validate_message_length(message: str, trace_id: str) -> bool:
@@ -87,7 +130,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             success=True,
             traceId=trace_id,
         )
-    except Exception as e:
+    except Exception:
         logger.exception('[%s] LangGraph Agent 异常', trace_id)
         return AgentResponse(
             answer='当前 Agent 服务暂时不可用，请稍后重试。',

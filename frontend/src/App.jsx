@@ -75,7 +75,7 @@ function App() {
           setMessages(prev => [...prev, {
             type: 'assistant',
             question,
-            result: { question, requestMode, ...data },
+            result: { question, requestMode, httpStatus: response.status, ...data },
             resultMode: requestMode,
           }])
           return
