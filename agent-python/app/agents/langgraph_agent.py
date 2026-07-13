@@ -92,6 +92,13 @@ def rag_node(state: AgentState) -> dict:
     }
 
 
+def _pct(val) -> str:
+    """将 0~1 的小数转为百分数字符串，None 返回 'N/A'。"""
+    if val is None:
+        return 'N/A'
+    return f'{val * 100:.0f}%'
+
+
 def eval_node(state: AgentState) -> dict:
     result_str = eval_report_tool.invoke({"report_type": "all"})
     try:
@@ -102,18 +109,27 @@ def eval_node(state: AgentState) -> dict:
     ret = parsed.get("retrieval", {})
     gen = parsed.get("generation", {})
     summary_parts = []
-    if ret:
-        rp = ret.get("final_pass_rate")
+    if ret and not ret.get("error"):
+        ab_passed = ret.get("passed", 0)
+        ab_total = ret.get("answerable_cases", 0)
+        na_total = ret.get("no_answer_cases", 0)
+        total = ret.get("total", 0)
+        rp = _pct(ret.get("final_pass_rate"))
         summary_parts.append(
-            f'检索评估: {ret.get("passed")}/{ret.get("total")} 通过, '
-            f'final_pass_rate={rp}'
+            f'检索评估: answerable {ab_passed}/{ab_total} 通过, '
+            f'no-answer {na_total} 个未计入通过率, '
+            f'总用例 {total}, final_pass_rate={rp}'
         )
-    if gen:
+    if gen and not gen.get("error"):
+        gen_passed = gen.get("passed", 0)
+        gen_total = gen.get("total", 0)
+        rp = _pct(gen.get("pass_rate"))
+        srp = _pct(gen.get("stable_pass_rate"))
+        flaky = gen.get("flaky_count", 0)
         summary_parts.append(
-            f'生成评估: {gen.get("passed")}/{gen.get("total")} 通过, '
-            f'pass_rate={gen.get("pass_rate")}, '
-            f'stable_pass_rate={gen.get("stable_pass_rate")}, '
-            f'flaky={gen.get("flaky_count")}'
+            f'生成评估: {gen_passed}/{gen_total} 通过, '
+            f'pass_rate={rp}, stable_pass_rate={srp}, '
+            f'flaky={flaky}'
         )
 
     return {
