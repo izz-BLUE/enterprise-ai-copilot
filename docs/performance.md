@@ -56,6 +56,38 @@ Sentence Transformers 的 ONNX 后端仍然加载 Torch，再额外加载 ONNX R
 
 > 注意：重启后显示的 95 MiB 是冷启动状态，不能替代完整负载数据。
 
+## 公网演示发布后观察
+
+公网演示（https://copilot.jintianchi.cn）发布后 30 分钟观察：
+
+**测试口径：**
+- 观察时间：30 分钟
+- 完成公网前端加载、健康检查和至少一次完整 LLM 问答
+- 非并发压测
+
+**资源指标：**
+
+| 指标 | Python | Java | 系统 |
+|------|--------|------|------|
+| 内存使用 | 约 296 MiB / 512 MiB | 约 195 MiB / 512 MiB | 约 830 MiB 可用 |
+| Swap 使用 | - | - | 约 8 MiB |
+| OOM | 无 | 无 | - |
+| 重启 | 无 | 无 | - |
+| RestartCount | 0 | 0 | - |
+
+**公网验证：**
+- HTTPS 首页：200
+- /api/health：UP
+- /api/agent/health：UP
+- 完整问答：success=true，traceId 正常
+- 无 5xx 错误
+- 无 OOM 或持续异常
+
+**重要说明：**
+- 这不是并发压测，不代表长期峰值
+- 不替代历史完整负载约 330 MiB 的保守容量口径
+- 公网访问仍不等于大规模生产性能验证
+
 ## 向量一致性
 
 Torch vs Direct ONNX 向量对比：

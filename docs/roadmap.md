@@ -13,6 +13,12 @@
 - [x] React + Vite 前端演示页面
 - [x] traceId 全链路透传（Frontend → Java → Python）
 - [x] Docker Compose 隔离部署（腾讯云小规格实例验证通过）
+- [x] Nginx 反向代理（静态文件 + /api 代理）
+- [x] 独立子域名（copilot.jintianchi.cn）
+- [x] HTTPS（独立 Let's Encrypt 证书 + 自动续签）
+- [x] 前端公网演示
+- [x] 基础 API 限流（2 req/s，burst 5）
+- [x] Docker 持久化 external network
 
 ### RAG 主链路
 
@@ -58,9 +64,24 @@
 - [x] 知识库无结果时 Prompt 要求拒答
 - [x] 安全问题输入时 Safety Guard 拦截
 
+## 版本记录
+
+### v0.3.1 (candidate)
+
+- Public frontend demo (https://copilot.jintianchi.cn)
+- Nginx reverse proxy + HTTPS
+- Persistent Docker edge network
+- Independent Let's Encrypt certificate with auto-renewal
+- Basic API rate limiting
+
+### v0.3.0
+
+- Torch-free Direct ONNX Runtime
+- Docker Compose isolated deployment
+- Tencent Cloud small instance verification
+
 ## 短期计划（Planned）
 
-- [ ] Nginx、域名、HTTPS 配置
 - [ ] 增加更多 eval case（跨域、对抗样本、边界条件）
 - [ ] 优化 API 返回结构（统一错误码）
 - [ ] 完善异常兜底和错误提示

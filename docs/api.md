@@ -1,5 +1,18 @@
 # 接口文档
 
+## 公网演示地址
+
+| 服务 | 地址 | 说明 |
+|------|------|------|
+| 公网演示 | `https://copilot.jintianchi.cn` | React 前端 + Java API |
+| 健康检查 | `https://copilot.jintianchi.cn/api/health` | Java 健康 |
+| Python 健康 | `https://copilot.jintianchi.cn/api/agent/health` | Python 健康（通过 Java 代理） |
+
+**公网说明：**
+- Python 接口不公网暴露，仅通过 Java `/api/*` 代理访问
+- API 限流：2 req/s，burst 5（超限返回 HTTP 429）
+- 公网 Demo 环境，非生产 SLA
+
 ## 本地服务地址
 
 | 服务 | 地址 | 说明 |
@@ -212,7 +225,7 @@ LangGraph Agent 问答接口（实验链路）。
 
 ## 测试样例
 
-### 1. RAG 问答
+### 1. RAG 问答（本地）
 
 ```bash
 curl -X POST http://localhost:8080/api/chat \
@@ -221,6 +234,16 @@ curl -X POST http://localhost:8080/api/chat \
 ```
 
 预期：`success=true`，answer 包含病假材料清单。
+
+### 1b. RAG 问答（公网）
+
+```bash
+curl -X POST https://copilot.jintianchi.cn/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"病假需要提供哪些材料？"}'
+```
+
+预期：`success=true`，answer 包含病假材料清单，`traceId` 存在。
 
 ### 2. Agent RAG 问答
 
