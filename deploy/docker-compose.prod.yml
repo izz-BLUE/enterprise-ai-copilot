@@ -16,7 +16,7 @@ services:
     volumes:
       - /opt/enterprise-ai-copilot/models/bge-small-zh-v1.5-onnx:/app/models/embedding/bge-small-zh-v1.5-onnx:ro
       - /opt/enterprise-ai-copilot/data/processed:/data/processed:ro
-      - /opt/enterprise-ai-copilot/data/eval/reports:/app/data/eval/reports:ro
+      - /opt/enterprise-ai-copilot/data/eval/reports:/data/eval/reports:ro
     expose:
       - "8000"
     healthcheck:
