@@ -1,20 +1,54 @@
 # Enterprise AI Copilot
 
-An enterprise AI application backend demo built with Java Spring Boot + Python FastAPI + RAG + LangGraph.
-
 面向企业内部知识库问答场景的 AI 应用后端项目。
-项目采用 Java Spring Boot 作为业务入口，Python FastAPI 作为 AI 服务引擎，实现从文档入库、检索召回、RAG Prompt 构造、LLM 回答到评估回归的完整链路。
+项目采用 Java Spring Boot 作为业务控制面，Python FastAPI 作为 AI 数据面，实现从文档入库、检索召回、RAG Prompt 构造、LLM 回答到评估回归的完整链路。
 
-当前项目定位为：
+**项目定位：**
 
-- 企业 AI 应用后端工程实践
-- Java 后端转 AI 应用开发的参考项目
-- RAG / Agent / Evaluation 工程链路实验项目
-- 非模型训练项目，重点关注 AI 应用工程化
+- Java 控制面 + Python 数据面的双服务架构
+- 支持 RAG、Hybrid Retrieval、Safety Guard、Query Rewrite
+- Agent 使用 LangGraph 编排，路由为规则/关键词决策
+- 非自主规划型 Autonomous Agent
+- 工程化个人项目，已完成腾讯云小规格实例隔离部署验证
+
+## Core Architecture
+
+```mermaid
+flowchart LR
+    U[用户/前端] --> J[Java Gateway]
+    J --> P[Python Agent]
+    P --> SG[Safety Guard]
+    SG --> RT[Router]
+    RT --> HR[Hybrid Retrieval]
+    HR --> FA[FAISS]
+    HR --> BM[BM25]
+    HR --> RF[RRF 融合]
+    RF --> LLM[DeepSeek LLM]
+    LLM --> ANS[Answer + Sources + traceId]
+    ANS --> J
+    J --> U
+```
+
+**检索链路：**
+
+- FAISS 向量语义检索（BAAI/bge-small-zh-v1.5, 512 维）
+- BM25 字符级 n-gram 关键词检索
+- RRF（Reciprocal Rank Fusion）多路融合排序
+- Direct ONNX Runtime（Torch-free, CPUExecutionProvider）
+
+## Project Highlights
+
+- **Java + Python 双服务架构**：Java 统一入口 + Python AI 引擎，职责清晰
+- **Hybrid Retrieval**：FAISS + BM25 + RRF 融合，兼顾语义和关键词
+- **可回归的 Retrieval Evaluation**：38 eval cases，零 token 消耗，baseline 回归检测
+- **Torch-free Direct ONNX Runtime**：独立 ONNX 推理，内存从 877 MiB 降至 174 MiB
+- **Docker Compose 内网隔离**：Python 不暴露公网端口，Java 仅绑定 localhost
+- **GitHub Actions CI**：Java compile + Python retrieval eval + Frontend build
+- **资源受限服务器部署**：4 GiB Swap，Python 512 MiB，Java 512 MiB
 
 ## Project Status
 
-当前项目处于 **early-stage but actively maintained** 状态。
+当前项目处于 **actively maintained** 状态，已完成腾讯云小规格实例隔离部署验证。
 
 **已完成：**
 
@@ -29,16 +63,29 @@ An enterprise AI application backend demo built with Java Spring Boot + Python F
 - LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
 - Java 代理接口（traceId 全链路透传）
 - React 前端演示页面
+- Torch-free Direct ONNX Runtime（内存从 877 MiB 降至 174 MiB）
+- Docker Compose 隔离部署（腾讯云小规格实例验证通过）
 
-**尚未生产化：**
+**当前部署状态：**
 
-- 用户权限体系
-- 文档上传管理
-- 多租户隔离
-- 审计日志
-- Docker Compose 一键部署
+- 已在腾讯云小规格实例完成隔离部署验证
+- Java 只绑定 localhost（127.0.0.1:8080）
+- Python 只暴露 Docker 内网服务（expose 8000）
+- 模型和 processed data 使用只读挂载
+- 已创建 4 GiB Swap，swappiness=10
+- 未完成公网域名、Nginx 和 HTTPS 接入
 
 **CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+
+## Documentation
+
+| 文档 | 说明 |
+|------|------|
+| [Architecture](docs/architecture.md) | 架构设计、模块职责、网络拓扑 |
+| [Deployment](docs/deployment.md) | 部署方案、目录结构、Compose 配置 |
+| [Performance](docs/performance.md) | ONNX 优化、内存对比、向量一致性 |
+| [API](docs/api.md) | 接口文档、请求响应格式 |
+| [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
 
 ## Interview Materials
 
@@ -394,13 +441,16 @@ curl -X POST http://localhost:8080/api/agent/langgraph/chat \
 | AI Service | Python 3.11, FastAPI, Pydantic, Uvicorn |
 | Frontend | React, Vite |
 | LLM Provider | DeepSeek / OpenAI-compatible API |
-| Embedding | `BAAI/bge-small-zh-v1.5` |
+| Embedding | `BAAI/bge-small-zh-v1.5` (512 dim, ONNX FP32) |
+| Embedding Runtime | Direct ONNX Runtime (Torch-free, CPUExecutionProvider) |
 | Vector Search | faiss-cpu, IndexFlatIP |
 | Keyword Search | BM25 (custom), n-gram |
 | Re-ranker | sentence-transformers CrossEncoder |
 | RAG Framework Experiment | LangChain |
 | Agent Framework Experiment | LangGraph |
 | Evaluation | Python scripts, JSON reports |
+| Container | Docker, Docker Compose |
+| CI | GitHub Actions |
 
 ## Project Structure
 
@@ -614,7 +664,7 @@ See [`docs/rag-quality-engineering.md`](docs/rag-quality-engineering.md) for the
 
 ## Local Demo
 
-The project supports **local reproduction** for demo and interview purposes. It has not been deployed to a public server.
+The project supports **local reproduction** for demo and interview purposes.
 
 **Quick start:**
 
@@ -633,9 +683,9 @@ Open http://localhost:5173 in your browser.
 
 See [`docs/local-demo-guide.md`](docs/local-demo-guide.md) for environment setup, health checks, and troubleshooting.
 
-### Deployment Readiness
+### Deployment
 
-项目提供部署准备文档和本地启动脚本：
+项目已完成腾讯云小规格实例隔离部署验证，详见 [`docs/deployment.md`](docs/deployment.md)。
 
 ```powershell
 # 一键启动（Windows PowerShell）
@@ -644,8 +694,6 @@ See [`docs/local-demo-guide.md`](docs/local-demo-guide.md) for environment setup
 # 健康检查
 .\health-check.ps1
 ```
-
-详见 [`docs/deployment-readiness.md`](docs/deployment-readiness.md)。
 
 ## Demo Questions
 
@@ -666,14 +714,14 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 
 **What this project is:**
 
-- A local RAG application backend demo
 - An engineering practice project for RAG / Agent / Evaluation
 - A reference for Java backend developers transitioning to AI application development
+- A project with isolated deployment verification on resource-constrained server
 
 **What this project is NOT:**
 
 - A production-ready RAG platform
-- A publicly deployed service
+- A large-scale enterprise deployment
 - A system with user authentication, audit logs, or monitoring
 - A large-scale knowledge base
 
@@ -683,20 +731,26 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 - `rewrite_mode=rule` is an **experimental mode**, not enabled by default
 - 100% evaluation pass rate is based on **current 38 eval cases only**
 - The knowledge base is small (HR / IT / Banking sample documents)
-- Public server deployment is a future plan
+- Current deployment is **isolated verification**, not production-ready
+- Nginx, domain, and HTTPS not yet configured
 
 ## Roadmap
 
+**Recently completed (v0.3.0):**
+
+- Torch-free Direct ONNX Runtime
+- Docker Compose isolated deployment
+- Tencent Cloud small instance verification
+
 **Planned features:**
 
-- Query Rewrite
+- Nginx, domain, and HTTPS configuration
 - Multi-turn conversation memory
 - LLM-based Tool Calling
 - Qdrant / Milvus vector database
 - Document upload and knowledge base management
 - User authentication and permission control
 - Audit logs
-- Docker Compose deployment
 - CI-based RAG regression testing
 - More evaluation cases
 - Better frontend demo
@@ -730,9 +784,10 @@ This project focuses on the engineering layer between business systems and LLMs:
 - How RAG is built as a complete backend workflow
 - How retrieval and generation are evaluated separately
 - How Agent workflows can be introduced without replacing stable APIs
-- How an AI feature can be packaged like a maintainable backend system
+- How to optimize embedding runtime for resource-constrained environments
+- How to deploy with Docker Compose in isolated network topology
 
-The goal is not to train models, but to build **production-oriented AI application backend capabilities**.
+The goal is not to train models, but to build **AI application engineering capabilities**.
 
 ## License
 
