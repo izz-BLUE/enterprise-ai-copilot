@@ -12,7 +12,8 @@
     → Vite proxy 只转发 /api 到 Java
   → Java Spring Boot (:8080)
     → 统一入口、权限判断、traceId 管理、异常兜底、CORS
-    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 30s）
+    → Bulkhead 准入（3 个槽，排队 500ms）
+    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 40s）
   → Python FastAPI (:8000)
     → RAG 检索、Prompt 构造、LLM 调用、Agent 编排
     → 内部能力层，不直接暴露给前端
@@ -29,6 +30,7 @@
 | `TraceIdFilter` | 统一生成 UUID 格式 traceId，存入 MDC 和 request attribute，设置响应头 |
 | `ChatController` | 转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId |
 | `LangGraphAgentController` | 转发 `/api/agent/langgraph/chat`，校验 `admin.token`，设置 `X-Allow-Eval` |
+| `PythonAgentBulkhead` | 限制 Java → Python 在途 AI 请求，过载返回 429 |
 | `WebConfig` | CORS 白名单（`cors.allowed-origins`） |
 | `RestClientConfig` | RestTemplate 超时配置 |
 | `ChatRequest` | `@Size(max=2000)` 输入校验 |
@@ -187,14 +189,15 @@ Frontend: 展示 traceId 标签
 | 场景 | 处理 |
 |------|------|
 | Java → Python 连接超时 | RestTemplate connect-timeout 3s，Java 返回兜底响应 |
-| Java → Python 读取超时 | RestTemplate read-timeout 30s，Java 返回兜底响应 |
+| Java → Python 读取超时 | RestTemplate read-timeout 40s，Java 返回兜底响应 |
+| Java/Python 并发槽满 | 最多排队 500ms，然后返回 429 + `Retry-After` |
 | Python LLM 调用超时 | LLM_TIMEOUT 30s，捕获 APITimeoutError |
 | Python LLM 连接失败 | 捕获 APIConnectionError |
 | Python 服务不可用 | Java catch Exception，返回 `success=false` |
 | 知识库无检索结果 | Prompt 兜底："当前知识库暂无相关信息，不要编造" |
 
 **话术：**
-> 超时是分层的。Java 层有连接超时 3 秒和读取超时 30 秒，Python 层有 LLM 超时 30 秒。任何一层超时都会返回兜底响应，不会无限等待。异常信息不暴露给用户，只记日志。
+> 保护是分层的。Java 和 Python 各自限制 3 个在途 AI 请求，最多排队 500ms；获得槽位后，Python 的 LLM 超时是 30 秒，Java 读取超时 40 秒，Nginx 上游超时 45 秒。这样过载先快速 429，正常慢请求再受递增超时预算约束。
 
 ---
 

@@ -110,6 +110,8 @@
 | `DEEPSEEK_MODEL` | 否 | — | 模型名称，默认使用 SDK 默认模型 |
 | `DEEPSEEK_TEMPERATURE` | 否 | `0` | LLM 温度参数 |
 | `LLM_TIMEOUT` | 否 | `30` | LLM 调用超时（秒） |
+| `AI_MAX_CONCURRENT_REQUESTS` | 否 | `3` | Python AI 请求并发槽 |
+| `AI_QUEUE_TIMEOUT_MS` | 否 | `500` | Python 获取并发槽最长等待时间（毫秒） |
 | `MAX_MESSAGE_LENGTH` | 否 | `2000` | 输入消息最大长度（字符） |
 | `REWRITE_MODE` | 否 | `none` | 查询重写模式：`none` / `rule`（实验） |
 | `RERANK_MODEL` | 否 | `BAAI/bge-reranker-base` | Cross Encoder 精排模型（实验） |
@@ -124,7 +126,9 @@
 |---|---|---|
 | `python.agent.base-url` | `http://localhost:8000` | Python 服务地址 |
 | `python.agent.connect-timeout` | `3000` | Java → Python 连接超时（毫秒） |
-| `python.agent.read-timeout` | `30000` | Java → Python 读取超时（毫秒） |
+| `python.agent.read-timeout` | `40000` | Java → Python 读取超时（毫秒） |
+| `python.agent.max-concurrent-requests` | `3` | Java → Python 在途 AI 请求上限 |
+| `python.agent.acquire-timeout-ms` | `500` | Java 获取并发槽最长等待时间（毫秒） |
 | `cors.allowed-origins` | `http://localhost:5173,http://127.0.0.1:5173` | CORS 允许的来源（逗号分隔） |
 | `admin.token` | （空） | Admin Token，空 = Demo 模式，非空 = 需校验 |
 | `logging.pattern.console` | （含 traceId） | 日志格式 |
