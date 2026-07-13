@@ -47,11 +47,15 @@
 │       ├── tokenizer.json
 │       └── 1_Pooling/config.json
 ├── data/
-│   └── processed/                  # 知识库数据（只读挂载）
-│       ├── faiss.index
-│       ├── faiss_metadata.json
-│       ├── chunks.json
-│       └── embeddings.json
+│   ├── processed/                  # 知识库数据（只读挂载）
+│   │   ├── faiss.index
+│   │   ├── faiss_metadata.json
+│   │   ├── chunks.json
+│   │   └── embeddings.json
+│   └── eval/
+│       └── reports/                # 评估报告（只读挂载到 Python 容器）
+│           ├── retrieval_eval_report.json
+│           └── generation_eval_report.json
 ├── deploy/
 │   ├── docker-compose.prod.yml
 │   └── .env                        # 权限 600
@@ -208,12 +212,14 @@ graph LR
 | EMBEDDING_ONNX_FILE | onnx/model.onnx |
 | EMBEDDING_PROVIDER | CPUExecutionProvider |
 | RAG_GATE_MODE | off |
-| REWRITE_MODE | none |
+| REWRITE_MODE | ${REWRITE_MODE:-rule}（生产默认 rule） |
+| ADMIN_TOKEN | ${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}（必填） |
 
 ## Secret 管理
 
 - `.env` 文件权限 600
 - API Key 不进 Git、不进镜像、不出现在 Compose
+- ADMIN_TOKEN 为非空随机值，仅存于服务器 `.env`
 - 不输出到日志
 - 通过 `--env-file` 传入容器
 

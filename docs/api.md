@@ -129,10 +129,10 @@ Java 代理 Python 健康检查。
 }
 ```
 
-**响应**（评估查询）
+**响应**（评估查询，v0.3.2+ 返回实际指标）
 ```json
 {
-  "answer": "检索评估: 8/8 通过, final_pass_rate=1.0；生成评估: 8/8 通过...",
+  "answer": "检索评估: 28/28 通过, final_pass_rate=1.0；生成评估: 38/38 通过, pass_rate=1.0, stable_pass_rate=0.9737, flaky=1",
   "route": "eval",
   "safe": true,
   "category": "normal",
@@ -168,11 +168,12 @@ Java 代理 Python 健康检查。
 | success | bool | 是否成功 |
 | traceId | string | 请求追踪 ID |
 
-**权限行为（Phase 3 Batch 3-B）：**
+**权限行为（v0.3.2+）：**
 
 - 普通 RAG 问答和 Safety Guard 拒答不受权限影响
-- Evaluation 查询需要管理员权限：`admin.token` 非空时，请求头 `X-Admin-Token` 必须匹配才允许 eval 路由
-- `admin.token` 为空时（Demo 模式），所有用户均可访问 Evaluation
+- 公网部署（v0.3.2+）`ADMIN_TOKEN` 必须为非空值，Compose 启动时强制校验
+- Evaluation 查询需要管理员权限：请求头 `X-Admin-Token` 必须匹配才允许 eval 路由
+- 本地开发 `admin.token` 可为空（Demo 模式），所有用户均可访问 Evaluation
 - `X-Admin-Token` 由调用方发送给 Java 后端，不应由前端 role 代替（权限判断在 Java 后端完成）
 - `X-Allow-Eval` 是 Java → Python 内部 header，表示 Java 已完成权限判断，**不是认证凭证**，Python 不应将其当作独立安全边界
 
@@ -354,6 +355,6 @@ Generation Eval 结果中的 `failure_type` 字段：
 | 参数 | 可选值 | 默认 | 说明 |
 |---|---|---|---|
 | `retrieval_mode` | `vector` / `hybrid` / `hybrid_rerank` | `hybrid` | 检索模式 |
-| `rewrite_mode` | `none` / `rule` | `none` | 查询重写模式 |
+| `rewrite_mode` | `none` / `rule` | `none`（本地）/ `rule`（公网） | 查询重写模式 |
 
-> `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用。
+> `hybrid_rerank` 是实验模式。公网部署（v0.3.2+）默认启用 `rewrite_mode=rule`。

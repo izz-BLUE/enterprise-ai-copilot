@@ -85,6 +85,8 @@ flowchart LR
 - Java 只绑定 localhost（127.0.0.1:8080）
 - Python 只暴露 Docker 内网服务（expose 8000）
 - 模型和 processed data 使用只读挂载
+- 评估报告只读挂载到 Python 容器
+- 生产 REWRITE_MODE=rule，ADMIN_TOKEN 非空强制校验
 - 已创建 4 GiB Swap，swappiness=10
 
 **CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
@@ -558,11 +560,10 @@ admin.token=
 
 **admin.token 说明：**
 
-- 默认为空，属于本地 Demo 便捷模式
-- 为空时 Evaluation 查询对所有用户可用，不影响本地演示和开发调试
+- 本地开发默认为空，属于 Demo 便捷模式（Evaluation 对所有用户可用）
+- 公网部署（v0.3.2+）必须设置非空 `ADMIN_TOKEN`，Compose 启动时强制校验
 - `admin.token` 非空时，只有请求头 `X-Admin-Token` 匹配才允许访问 Evaluation 路由
 - 普通 RAG 问答和 Safety Guard 不受 `admin.token` 影响
-- 生产化部署必须配置 `admin.token`，或替换为正式认证体系
 - 当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整用户权限体系
 
 ## Environment Variables
@@ -579,7 +580,7 @@ DEEPSEEK_MODEL=deepseek-chat                   # 模型名称
 DEEPSEEK_TEMPERATURE=0                         # LLM 温度参数，默认 0
 LLM_TIMEOUT=30                                 # LLM 调用超时（秒），默认 30
 MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
-REWRITE_MODE=none                              # 查询重写：none / rule（实验）
+REWRITE_MODE=none                              # 查询重写：none / rule（本地默认 none，公网部署使用 rule）
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
 ```
 
@@ -759,7 +760,14 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 
 ## Roadmap
 
-**Recently completed (v0.3.1):**
+**v0.3.2 候选（待浏览器验收）：**
+
+- 生产环境启用规则查询重写（REWRITE_MODE=rule），修复口语化查询命中
+- ADMIN_TOKEN 非空强制校验，Evaluation 权限边界生效
+- 评估报告只读挂载到生产容器，Evaluation 工具返回实际指标
+- 状态：`READY_FOR_BROWSER_UAT`，未 Push、未打 Tag
+
+**Previously completed (v0.3.1):**
 
 - Public frontend demo (https://copilot.jintianchi.cn)
 - Nginx reverse proxy + HTTPS

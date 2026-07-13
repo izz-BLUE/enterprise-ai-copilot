@@ -66,7 +66,14 @@
 
 ## 版本记录
 
-### v0.3.1 (candidate)
+### v0.3.2 (candidate — READY_FOR_BROWSER_UAT)
+
+- 生产环境启用规则查询重写（REWRITE_MODE=rule），口语化查询命中修复
+- ADMIN_TOKEN 非空强制校验，Evaluation 权限边界生效
+- 评估报告只读挂载到生产容器，Evaluation 工具返回实际指标（方案 A）
+- 状态：待浏览器验收，未 Push、未打 Tag
+
+### v0.3.1
 
 - Public frontend demo (https://copilot.jintianchi.cn)
 - Nginx reverse proxy + HTTPS
