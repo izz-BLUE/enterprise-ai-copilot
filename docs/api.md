@@ -29,7 +29,17 @@ Java 服务健康检查。
 
 **响应**
 ```json
-{"service": "backend-java", "status": "UP"}
+{
+  "service": "backend-java",
+  "status": "UP",
+  "concurrency": {
+    "maxConcurrent": 3,
+    "active": 0,
+    "available": 3,
+    "rejected": 0,
+    "queueTimeoutMs": 500
+  }
+}
 ```
 
 ---
@@ -40,7 +50,17 @@ Java 代理 Python 健康检查。
 
 **响应**（转发 Python 原始响应）
 ```json
-{"service": "agent-python", "status": "UP"}
+{
+  "service": "agent-python",
+  "status": "UP",
+  "concurrency": {
+    "maxConcurrent": 3,
+    "active": 0,
+    "available": 3,
+    "rejected": 0,
+    "queueTimeoutMs": 500
+  }
+}
 ```
 
 ---
@@ -95,9 +115,19 @@ Java 代理 Python 健康检查。
 }
 ```
 
+**应用过载响应**（Java 或 Python 并发槽在 500ms 内不可用，HTTP 429，包含 `Retry-After: 1`）
+```json
+{
+  "answer": "当前请求较多，请稍后重试。",
+  "model": "unknown",
+  "traceId": "xxx",
+  "success": false
+}
+```
+
 > **Phase 3 Batch 2 说明：**
 > - Java 侧通过 `@Size(max=2000)` 校验输入长度，Python 侧通过 `MAX_MESSAGE_LENGTH` 兜底校验。
-> - Java 调 Python 配置了连接超时（3s）和读取超时（30s）。
+> - Java 调 Python 配置了连接超时（3s）和读取超时（40s）。
 > - Python LLM 调用配置了超时（默认 30s），超时或连接失败会返回错误响应。
 > - CORS 已从 `*` 收敛为可配置白名单（`cors.allowed-origins`）。
 > - 以上不改变正常 RAG 响应结构。
@@ -160,9 +190,9 @@ Java 代理 Python 健康检查。
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `refuse` / `error` |
+| route | string | 路由结果：`rag` / `eval` / `refuse` / `busy` / `error` |
 | safe | bool | 安全守卫是否通过 |
-| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `error` |
+| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `overloaded` / `error` |
 | reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功 |
@@ -191,6 +221,20 @@ Java 代理 Python 健康检查。
 }
 ```
 
+**应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
+```json
+{
+  "answer": "当前请求较多，请稍后重试。",
+  "route": "busy",
+  "safe": true,
+  "category": "overloaded",
+  "reason": "",
+  "sources": [],
+  "success": false,
+  "traceId": "xxx"
+}
+```
+
 **适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
 
 ---
@@ -203,7 +247,17 @@ Python AI 服务健康检查。
 
 **响应**
 ```json
-{"service": "agent-python", "status": "UP"}
+{
+  "service": "agent-python",
+  "status": "UP",
+  "concurrency": {
+    "maxConcurrent": 3,
+    "active": 0,
+    "available": 3,
+    "rejected": 0,
+    "queueTimeoutMs": 500
+  }
+}
 ```
 
 ---

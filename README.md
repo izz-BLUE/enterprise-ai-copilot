@@ -44,7 +44,8 @@ flowchart LR
 - **Torch-free Direct ONNX Runtime**：独立 ONNX 推理，内存从 877 MiB 降至 174 MiB
 - **Docker Compose 内网隔离**：Python 不暴露公网端口，Java 仅绑定 localhost
 - **HTTPS 公网演示**：独立子域名、独立 Let's Encrypt 证书、自动续签、基础 API 限流
-- **GitHub Actions CI**：Java compile + Python retrieval eval + Frontend build
+- **有界并发保护**：Nginx 限流 + Java/Python 双层并发槽，过载显式返回 429
+- **GitHub Actions CI**：Java compile/test + Python concurrency tests/retrieval eval + Frontend build
 - **资源受限服务器部署**：4 GiB Swap，Python 512 MiB，Java 512 MiB
 
 ## Project Status
@@ -89,7 +90,7 @@ flowchart LR
 - 生产 REWRITE_MODE=rule，ADMIN_TOKEN 非空强制校验
 - 已创建 4 GiB Swap，swappiness=10
 
-**CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+**CI：** GitHub Actions 基础验证（Java compile/test + Python concurrency tests/retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
 ## Documentation
 
@@ -98,6 +99,7 @@ flowchart LR
 | [Architecture](docs/architecture.md) | 架构设计、模块职责、网络拓扑 |
 | [Deployment](docs/deployment.md) | 部署方案、目录结构、Compose 配置 |
 | [Performance](docs/performance.md) | ONNX 优化、内存对比、向量一致性 |
+| [Concurrency & Load Test](docs/concurrency-and-load-test.md) | 有界并发设计、超时预算、k6 分层压测 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
 | [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
 
@@ -553,7 +555,10 @@ python.agent.base-url=http://localhost:8000
 cors.allowed-origins=http://localhost:5173,http://127.0.0.1:5173
 # Java → Python 超时（毫秒）
 python.agent.connect-timeout=3000
-python.agent.read-timeout=30000
+python.agent.read-timeout=40000
+# Java → Python 有界并发
+python.agent.max-concurrent-requests=3
+python.agent.acquire-timeout-ms=500
 # 管理员 Token（为空时为 Demo 模式，Evaluation 对所有用户可用）
 admin.token=
 ```
@@ -579,6 +584,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com    # DeepSeek API 地址
 DEEPSEEK_MODEL=deepseek-chat                   # 模型名称
 DEEPSEEK_TEMPERATURE=0                         # LLM 温度参数，默认 0
 LLM_TIMEOUT=30                                 # LLM 调用超时（秒），默认 30
+AI_MAX_CONCURRENT_REQUESTS=3                   # Python AI 并发槽，默认 3
+AI_QUEUE_TIMEOUT_MS=500                        # 获取槽位最长等待时间（毫秒），默认 500
 MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
 REWRITE_MODE=none                              # 查询重写：none / rule（本地默认 none，公网部署使用 rule）
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
@@ -760,12 +767,16 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 
 ## Roadmap
 
-**v0.3.2 候选（待浏览器验收）：**
+**v0.3.3（已发布）：**
+
+- 修复 Markdown 单个 `~` 被错误渲染为删除线的问题
+
+**v0.3.2（已发布）：**
 
 - 生产环境启用规则查询重写（REWRITE_MODE=rule），修复口语化查询命中
 - ADMIN_TOKEN 非空强制校验，Evaluation 权限边界生效
 - 评估报告只读挂载到生产容器，Evaluation 工具返回实际指标
-- 状态：`READY_FOR_BROWSER_UAT`，未 Push、未打 Tag
+- 公网 UAT、CI、Tag 和 Release 已完成
 
 **Previously completed (v0.3.1):**
 

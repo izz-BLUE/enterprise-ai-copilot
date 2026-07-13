@@ -18,6 +18,8 @@
 - [x] HTTPS（独立 Let's Encrypt 证书 + 自动续签）
 - [x] 前端公网演示
 - [x] 基础 API 限流（2 req/s，burst 5）
+- [x] Java/Python 双层有界并发保护（短队列超时返回 429）
+- [x] k6 分层压测脚本与停止条件
 - [x] Docker 持久化 external network
 
 ### RAG 主链路
@@ -66,12 +68,17 @@
 
 ## 版本记录
 
-### v0.3.2 (candidate — READY_FOR_BROWSER_UAT)
+### v0.3.3
+
+- 修复 Markdown 单个 `~` 被错误渲染为删除线的问题
+- 公网部署、浏览器 UAT、CI、Tag 和 Release 已完成
+
+### v0.3.2
 
 - 生产环境启用规则查询重写（REWRITE_MODE=rule），口语化查询命中修复
 - ADMIN_TOKEN 非空强制校验，Evaluation 权限边界生效
 - 评估报告只读挂载到生产容器，Evaluation 工具返回实际指标（方案 A）
-- 状态：待浏览器验收，未 Push、未打 Tag
+- 公网 UAT、CI、Tag 和 Release 已完成
 
 ### v0.3.1
 
@@ -94,6 +101,7 @@
 - [ ] 完善异常兜底和错误提示
 - [ ] 补充单元测试和集成测试
 - [ ] eval 支持 TopK 自动最优选择
+- [ ] 在目标服务器执行并归档 k6 并发压测报告
 
 ## 中期计划（Planned）
 

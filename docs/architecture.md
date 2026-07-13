@@ -107,14 +107,15 @@ flowchart TD
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
 - **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python `/agent/langgraph/chat`，透传 traceId；根据 `admin.token` / `X-Admin-Token` 判断管理员权限，通过 `X-Allow-Eval` header 传递给 Python（v0.3.2+：公网部署 ADMIN_TOKEN 必须非空）
 - **HealthController / AgentHealthController**：健康检查
+- **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
-- **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 30s）
+- **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
 
 ## Python AI Service 职责
 
-- **trace_id_middleware**：接收/生成 traceId，写入 `request.state`，设置响应头
+- **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
 - **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/refuse）
 - **safety_guard**：基于关键词的输入安全检查（5 类风险）
@@ -140,8 +141,10 @@ Hybrid Retrieval 可在内部保留同一候选的 FAISS cosine 与 BM25 原始�
 POST /api/chat
   → Java ChatController（读取 traceId，透传 X-Trace-Id）
     → @Size(max=2000) 输入长度校验
-    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 30s）
+    → PythonAgentBulkhead（默认 3 个并发槽，排队 500ms）
+    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 40s）
     → Python POST /agent/chat
+      → RequestConcurrencyLimiter（默认 3 个并发槽，排队 500ms）
       → MAX_MESSAGE_LENGTH 兜底校验（默认 2000）
       → rag_service.process_chat()
         → safety_guard.check_user_query_safety()  # Phase 3: 规则版 Safety Guard 前置检查
@@ -292,7 +295,8 @@ Frontend: 展示 traceId 标签
 | 场景 | 处理 |
 |------|------|
 | Python 服务不可用 | Java 返回 `success=false`，traceId 仍然存在 |
-| Java → Python 超时 | RestTemplate 超时（3s 连接 / 30s 读取），Java 返回兜底响应 |
+| Java → Python 超时 | RestTemplate 超时（3s 连接 / 40s 读取），Java 返回兜底响应 |
+| AI 并发槽已满 | Java 或 Python 在短队列截止后返回 HTTP 429 + `Retry-After: 1` |
 | LLM 调用超时 | Python `llm_service` 捕获 `APITimeoutError`，返回 `success=false` |
 | LLM 调用失败 | Python rag_service 返回 `success=false`，日志记录异常 |
 | 输入过长 | Java `@Size(max=2000)` 拦截 + Python `MAX_MESSAGE_LENGTH` 兜底 |
@@ -326,6 +330,12 @@ python.agent.base-url=http://localhost:8000
 
 # Java 日志格式（含 traceId）
 logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %msg%n
+
+# Java → Python 有界并发和超时
+python.agent.max-concurrent-requests=3
+python.agent.acquire-timeout-ms=500
+python.agent.connect-timeout=3000
+python.agent.read-timeout=40000
 ```
 
 ## 网络拓扑（部署环境）
@@ -371,6 +381,7 @@ graph TD
 - 模型和 processed data 使用只读挂载
 - 独立 Let's Encrypt 证书，自动续签
 - 基础 API 限流（2 req/s，burst 5）
+- Java/Python 双层有界并发（默认各 3 个槽，排队 500ms）
 
 ## Agent 边界说明
 
@@ -403,4 +414,6 @@ LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
 - 审计日志
 - 监控告警
 - 多模型配置
-- 高可用和高并发
+- 高可用、水平扩容和大规模高并发（当前仅实现单机有界并发保护）
+
+并发保护的配置、压测脚本和验收边界见 [`concurrency-and-load-test.md`](concurrency-and-load-test.md)。

@@ -173,6 +173,7 @@ graph TD
 - HTTP → HTTPS 301 重定向
 - 安全响应头（X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy）
 - API 基础限流（2 req/s，burst 5）
+- 应用有界并发：Java/Python 各 3 个并发槽，短队列超时返回 429
 - 不开放公网 8000/8080
 - 不在服务器构建前端或 Java/Python 镜像
 
@@ -213,6 +214,13 @@ graph LR
 | EMBEDDING_PROVIDER | CPUExecutionProvider |
 | RAG_GATE_MODE | off |
 | REWRITE_MODE | ${REWRITE_MODE:-rule}（生产默认 rule） |
+| LLM_TIMEOUT | ${LLM_TIMEOUT:-30}（秒） |
+| AI_MAX_CONCURRENT_REQUESTS | ${AI_MAX_CONCURRENT_REQUESTS:-3} |
+| AI_QUEUE_TIMEOUT_MS | ${AI_QUEUE_TIMEOUT_MS:-500} |
+| PYTHON_AGENT_CONNECT_TIMEOUT | ${PYTHON_AGENT_CONNECT_TIMEOUT:-3000}（毫秒） |
+| PYTHON_AGENT_READ_TIMEOUT | ${PYTHON_AGENT_READ_TIMEOUT:-40000}（毫秒） |
+| PYTHON_AGENT_MAX_CONCURRENT_REQUESTS | ${PYTHON_AGENT_MAX_CONCURRENT_REQUESTS:-3} |
+| PYTHON_AGENT_ACQUIRE_TIMEOUT_MS | ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500} |
 | ADMIN_TOKEN | ${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}（必填） |
 
 ## Secret 管理
@@ -248,8 +256,8 @@ docker run --rm --network enterprise-ai-copilot_ai-copilot-net \
 
 ### 预期结果
 
-- Python: healthy, `{"service":"agent-python","status":"UP"}`
-- Java: healthy, `{"status":"UP","service":"backend-java"}`
+- Python: healthy，响应包含 `status=UP` 和 `concurrency` 快照
+- Java: healthy，响应包含 `status=UP` 和 `concurrency` 快照
 - 无 OOM、无重启
 
 ## 回滚
@@ -273,3 +281,6 @@ docker compose \
 - 未配置集中日志、APM 或自动扩缩容
 - 当前是单机隔离部署验证 + 公网演示
 - 公网演示不等于生产负载验证
+- 已实现单机有界并发保护，但没有高可用、自动扩缩容或大规模容量结论
+
+分层压测步骤、停止条件和验收口径见 [`concurrency-and-load-test.md`](concurrency-and-load-test.md)。

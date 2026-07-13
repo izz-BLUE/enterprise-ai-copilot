@@ -187,7 +187,7 @@ Admin Token 是最小方案：
 | 层 | 超时 | 配置 |
 |---|------|------|
 | Java → Python 连接 | 3s | `python.agent.connect-timeout` |
-| Java → Python 读取 | 30s | `python.agent.read-timeout` |
+| Java → Python 读取 | 40s | `python.agent.read-timeout` |
 | Python → LLM | 30s | `LLM_TIMEOUT` |
 
 任何一层超时都会返回兜底响应：
@@ -195,6 +195,8 @@ Admin Token 是最小方案：
 - Python 层：`success=false`，answer 为"当前 AI 服务暂时不可用"
 
 异常信息不暴露给用户，只记日志。用户通过 traceId 反馈问题，服务端通过日志排查。
+
+并发过载不等待上述完整超时：Java/Python 各有 3 个并发槽，最多排队 500ms，未获得槽位就返回 HTTP 429 和 `Retry-After: 1`。
 
 ---
 
@@ -208,11 +210,11 @@ Admin Token 是最小方案：
 
 ---
 
-## Q14：Python 服务裸露为什么是风险？
+## Q14：为什么 Python 服务不能暴露公网？
 
 **回答：**
 
-Python FastAPI 在端口 8000 运行，技术上可被直接访问（绕过 Java）。
+如果 Python FastAPI 的 8000 端口直接暴露公网，请求就可能绕过 Java。
 
 风险：
 1. 绕过 Java 层的安全检查（Safety Guard、输入校验、Admin Token）
@@ -220,22 +222,21 @@ Python FastAPI 在端口 8000 运行，技术上可被直接访问（绕过 Java
 3. 攻击者可伪造 `X-Allow-Eval: true` 直接访问 Evaluation
 4. 直接调用 LLM，绕过所有保护
 
-这是 FIX-003，明确列为上线前阻塞项。推荐方案：Nginx 反向代理只暴露 Java 8080，Python 8000 绑定 localhost。
+当前部署已经按该边界处理：Python 只在 Docker 内网 `expose 8000`，无宿主机端口映射；Java 只绑定 `127.0.0.1:8080`，公网流量必须经过 Nginx。
 
 ---
 
-## Q15：当前为什么不部署上线？
+## Q15：已经有公网 Demo，为什么仍不是生产系统？
 
 **回答：**
 
-1. FIX-003（Python 服务裸露）未解决
-2. 无正式认证体系（JWT / RBAC）
-3. 无请求频率限制
-4. 无生产级监控和日志系统
-5. 评估集规模小（38 个 case）
-6. 当前定位是本地 Demo / 面试演示
+1. 只有共享 Admin Token，没有 JWT / RBAC 和 per-user 身份
+2. 单机 Compose，无高可用和自动扩缩容
+3. 没有生产级 APM、集中日志和告警
+4. Safety Guard 仍是规则版，评估集只有 38 个 case
+5. 有界并发机制需要在目标服务器完成容量压测后才能给出 QPS/P95 结论
 
-已完成部署准备文档，如果要上线，按 `docs/deployment-readiness.md` 的检查清单逐步实施。
+公网地址是功能演示和小规格部署验证，不承诺生产 SLA。
 
 ---
 
@@ -244,20 +245,20 @@ Python FastAPI 在端口 8000 运行，技术上可被直接访问（绕过 Java
 **回答：**
 
 **P0（上线前必须）：**
-1. Python 服务绑定 localhost，Nginx 反向代理只暴露 Java
-2. 替换 Admin Token 为 JWT + 用户体系
-3. 接入 Spring Security
+1. 替换 Admin Token 为 JWT + 用户体系
+2. 接入 Spring Security 与细粒度授权
+3. 补齐集中日志、指标、告警和审计
 
 **P1（进入开发前）：**
 1. sources 字段脱敏（文件名映射为文档标题）
 2. 日志脱敏（用户问题截断）
-3. 请求频率限制
+3. 在目标环境完成并发压测和容量基线
 
 **P2（后续优化）：**
-1. Docker Compose 本地生产模拟
+1. 多实例与外部向量数据库方案
 2. Safety Guard 增强（变体关键词）
 3. Prompt Injection 防护
-4. CI/CD 集成
+4. 浏览器自动化 UAT 与更完整的 CI/CD
 
 ---
 
@@ -283,11 +284,11 @@ Faiss 语义检索和 BM25 关键词检索的分数尺度不同，不能直接�
 
 1. **评估集规模小** — 38 个 case，不能覆盖所有场景
 2. **无正式认证** — Admin Token 是共享密钥，无 per-user 身份
-3. **Python 服务裸露** — 端口 8000 可被直接访问
+3. **单机部署** — 无高可用、水平扩容和故障转移
 4. **Safety Guard 仅关键词匹配** — 无法防变体绕过
-5. **无单元测试** — Java 和 Python 都缺
+5. **浏览器自动化不足** — 关键 UI 仍需要人工 UAT
 6. **DTO 契约无强类型** — Java ↔ Python 手动对齐
-7. **无请求频率限制** — 可被暴力调用
+7. **容量数据待补** — 已有有界并发和 k6 脚本，但服务器报告尚未归档
 
 这些都是我在 Phase 3 审查中发现并记录的，有明确的修复计划。
 
@@ -297,13 +298,13 @@ Faiss 语义检索和 BM25 关键词检索的分数尺度不同，不能直接�
 
 **回答：**
 
-> 不是。当前定位是本地 Demo / 面试演示项目，不做公网部署。
+> 不是。当前有 HTTPS 公网 Demo，但定位是个人项目的功能演示和小规格部署验证，不承诺生产 SLA。
 >
 > 但我按生产化风险做了多轮安全加固 — Phase 3 共 12 项修复，覆盖 CORS、超时、输入校验、Safety Guard、traceId、异常收敛、Admin Token、Evaluation 访问限制。A3 QA 回归和 A4 安全复验都通过了。
 >
-> Python 服务裸露（FIX-003）我没有假装解决，明确列为上线前阻塞项。如果要上线，按部署准备文档逐步实施。
+> 部署边界已经收敛：Python 无宿主机端口，Java 只绑定 localhost，公网经过 Nginx；同时有入口限流和 Java/Python 双层有界并发。但认证、高可用、监控告警和大规模容量验证仍未完成。
 >
-> 这个项目展示的是后端工程能力和 AI 应用工程化思路，不是展示已上线。
+> 所以我会把它描述为“已公网部署验证”，不会描述为“生产级系统”。
 
 ---
 
