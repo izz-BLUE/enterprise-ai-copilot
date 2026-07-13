@@ -9,13 +9,14 @@ services:
       EMBEDDING_ONNX_FILE: onnx/model.onnx
       EMBEDDING_PROVIDER: CPUExecutionProvider
       RAG_GATE_MODE: "off"
-      REWRITE_MODE: none
+      REWRITE_MODE: ${REWRITE_MODE:-rule}
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL}"
     volumes:
       - /opt/enterprise-ai-copilot/models/bge-small-zh-v1.5-onnx:/app/models/embedding/bge-small-zh-v1.5-onnx:ro
       - /opt/enterprise-ai-copilot/data/processed:/data/processed:ro
+      - /opt/enterprise-ai-copilot/data/eval/reports:/app/data/eval/reports:ro
     expose:
       - "8000"
     healthcheck:
@@ -42,7 +43,7 @@ services:
       PYTHON_AGENT_BASE_URL: http://python-agent:8000
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
       CORS_ALLOWED_ORIGINS: http://localhost:5173,https://copilot.jintianchi.cn
-      ADMIN_TOKEN: "${ADMIN_TOKEN}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}"
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
