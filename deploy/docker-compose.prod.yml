@@ -41,7 +41,7 @@ services:
     environment:
       PYTHON_AGENT_BASE_URL: http://python-agent:8000
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
-      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,https://copilot.jintianchi.cn
       ADMIN_TOKEN: "${ADMIN_TOKEN}"
     ports:
       - "127.0.0.1:8080:8080"
@@ -57,7 +57,12 @@ services:
           memory: 512M
     networks:
       - ai-copilot-net
+      - eat-what-net
 
 networks:
   ai-copilot-net:
     driver: bridge
+
+  eat-what-net:
+    external: true
+    name: deploy_eat-what-net
