@@ -1,5 +1,8 @@
 import './Sidebar.css'
 
+const IS_PUBLIC_DEMO = typeof window !== 'undefined'
+  && window.location.hostname === 'copilot.jintianchi.cn'
+
 const MODES = [
   {
     key: 'agent',
@@ -50,10 +53,10 @@ export default function Sidebar({ mode, onModeChange, loading }) {
       <div className="sidebar-footer">
         <div className="env-badge">
           <span className="env-dot" />
-          <span>本地 Demo 环境</span>
+          <span>{IS_PUBLIC_DEMO ? '公网演示环境' : '本地 Demo 环境'}</span>
         </div>
         <div className="env-info">
-          Java :8080 → Python :8000
+          {IS_PUBLIC_DEMO ? 'HTTPS → Nginx → Java → Python' : 'Java :8080 → Python :8000'}
         </div>
       </div>
     </aside>
