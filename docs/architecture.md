@@ -332,16 +332,29 @@ logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %m
 
 ```mermaid
 graph TD
-    subgraph Host ["宿主机 localhost"]
+    subgraph Internet
+        U[用户浏览器]
+    end
+
+    subgraph Host ["宿主机"]
+        NG[Nginx<br/>0.0.0.0:80/443]
         J[Java Backend<br/>127.0.0.1:8080]
     end
 
-    subgraph Docker ["Docker bridge: ai-copilot-net"]
+    subgraph Net1 ["Docker: deploy_eat-what-net"]
+        NG
+        J
+    end
+
+    subgraph Net2 ["Docker: ai-copilot-net"]
+        J
         P[Python Agent<br/>expose 8000]
         M[models/:ro]
         D[data/processed/:ro]
     end
 
+    U -->|HTTPS| NG
+    NG -->|/api proxy| J
     J -->|HTTP| P
     P -->|只读挂载| M
     P -->|只读挂载| D
@@ -349,10 +362,15 @@ graph TD
 
 **部署要点：**
 
+- Nginx 监听 0.0.0.0:80/443，提供静态文件和 /api 反向代理
+- Nginx 位于 `deploy_eat-what-net`，通过该网络访问 Java
+- Java 同时连接 `deploy_eat-what-net` 和 `ai-copilot-net`
+- Python 只连接 `ai-copilot-net`，Nginx 无法直接访问 Python
+- Java 绑定 127.0.0.1:8080（localhost only，不暴露公网）
 - Python 不映射宿主机公网端口，仅 expose 8000（Docker 内网）
-- Java 绑定 127.0.0.1:8080（localhost only）
 - 模型和 processed data 使用只读挂载
-- Nginx 尚未接入
+- 独立 Let's Encrypt 证书，自动续签
+- 基础 API 限流（2 req/s，burst 5）
 
 ## Agent 边界说明
 
@@ -383,6 +401,6 @@ LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
 - 文档上传与知识库管理
 - 多租户隔离
 - 审计日志
-- Nginx、域名、HTTPS 配置
 - 监控告警
 - 多模型配置
+- 高可用和高并发

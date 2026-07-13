@@ -82,6 +82,96 @@
 model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 ```
 
+## 公网部署（copilot.jintianchi.cn）
+
+### 域名和证书
+
+| 项目 | 说明 |
+|------|------|
+| 域名 | copilot.jintianchi.cn |
+| DNS | A 记录指向服务器 IP |
+| 证书 | 独立 Let's Encrypt 证书（非共享） |
+| 签发 | Docker certbot/certbot:v5.7.0 |
+| 有效期 | 90 天（自动续签） |
+| 续签 | `/opt/enterprise-ai-copilot/deploy/renew-copilot-cert.sh` |
+| Cron | `/etc/cron.d/eac-copilot-certbot`（每天 3:15 AM 和 3:15 PM） |
+
+### Nginx 配置
+
+配置文件归档在 `deploy/nginx/copilot.conf`，当前服务器因历史原因将该片段合并进共享 `eat-what.conf`。
+
+**HTTP (80)：**
+- ACME challenge 路由（webroot）
+- 其他请求 301 到 HTTPS
+
+**HTTPS (443)：**
+- 独立证书路径
+- 静态文件：`/usr/share/nginx/html/copilot/current`
+- SPA fallback：`try_files $uri $uri/ /index.html`
+- `/assets/` 缓存 7 天
+- `/api/` 反向代理到 `http://ai-copilot-java:8080`
+- 安全响应头（nosniff, DENY, strict-origin, permissions-policy）
+- 请求体限制 64k
+- API 限流：2 req/s，burst 5
+
+### 前端 Release 结构
+
+```
+/opt/eat-what/deploy/nginx/html/copilot/
+├── releases/
+│   └── ${RELEASE_ID}/          # 不可变 release 目录
+│       ├── index.html
+│       └── assets/
+└── current -> releases/${RELEASE_ID}  # 原子软链接切换
+```
+
+Release ID 格式：`${UTC_TIMESTAMP}-${SHORT_SHA}`
+
+### Docker 网络
+
+```mermaid
+graph TD
+    subgraph Internet
+        U[用户浏览器]
+    end
+
+    subgraph Host ["宿主机"]
+        NG[Nginx 0.0.0.0:80/443]
+        J[Java 127.0.0.1:8080]
+    end
+
+    subgraph Net1 ["deploy_eat-what-net (external)"]
+        NG
+        J
+    end
+
+    subgraph Net2 ["ai-copilot-net (bridge)"]
+        J
+        P[Python expose 8000]
+    end
+
+    U -->|HTTPS| NG
+    NG -->|/api| J
+    J -->|HTTP| P
+```
+
+- Nginx 位于 `deploy_eat-what-net`（与 eat-what/jobfit 共享）
+- Java 同时连接 `deploy_eat-what-net` 和 `ai-copilot-net`
+- Python 只连接 `ai-copilot-net`
+- Nginx 无法直接访问 Python
+
+### CORS
+
+生产 Origin：`https://copilot.jintianchi.cn`
+
+### 安全措施
+
+- HTTP → HTTPS 301 重定向
+- 安全响应头（X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy）
+- API 基础限流（2 req/s，burst 5）
+- 不开放公网 8000/8080
+- 不在服务器构建前端或 Java/Python 镜像
+
 ## Compose 配置
 
 ### 服务拓扑
@@ -171,8 +261,9 @@ docker compose \
 
 ## 当前边界
 
-- 尚未接入 Nginx
-- 尚未配置域名和 HTTPS
+- 已接入 Nginx 反向代理（copilot.jintianchi.cn）
+- 已配置独立域名和 HTTPS（Let's Encrypt 自动续签）
 - 未配置高可用
 - 未配置集中日志、APM 或自动扩缩容
-- 当前是单机隔离部署验证
+- 当前是单机隔离部署验证 + 公网演示
+- 公网演示不等于生产负载验证

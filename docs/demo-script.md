@@ -192,10 +192,10 @@ cd frontend && npm run dev
 
 ## 应该说的话
 
-- "当前是本地可复现的 Demo"
+- "当前是本地可复现的 Demo + 公网演示"
 - "评估 100% 是基于当前 38 个 eval cases"
 - "hybrid_rerank 和 rewrite_mode=rule 是实验模式"
-- "公网部署是后续计划，需要考虑 API Key 安全、限流、进程守护"
+- "公网演示已发布，但不等于生产 SLA"
 - "当前重点是 RAG 应用后端和质量评估闭环"
 
 ---
@@ -204,7 +204,7 @@ cd frontend && npm run dev
 
 参考口径：
 
-> "这个项目主要用于展示 RAG 应用后端和质量评估链路，所以我优先保证了本地可复现、评估可复跑、链路可解释。现在可以通过本地前端、Java 服务和 Python Agent 完整演示 RAG 问答、Agent 路由、Query Rewrite、no-answer 拒答和 evaluation 结果。公网部署放在后续计划里，因为涉及 API Key 安全、接口限流、Nginx、进程守护和成本控制。当前阶段没有把重点放在上线，而是先把 RAG 质量工程闭环做完整。"
+> "项目已完成公网演示发布（https://copilot.jintianchi.cn），包括 Nginx 反向代理、HTTPS、独立证书自动续签和基础 API 限流。但公网演示不等于生产 SLA——当前没有完整用户认证、没有高可用、知识库规模较小。我的重点是 RAG 质量工程闭环，公网发布是为了验证部署链路和面试演示。"
 
 ## 面试官可能问"评估 100% 是不是代表 RAG 完全可靠"
 

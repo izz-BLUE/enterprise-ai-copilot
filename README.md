@@ -9,7 +9,7 @@
 - 支持 RAG、Hybrid Retrieval、Safety Guard、Query Rewrite
 - Agent 使用 LangGraph 编排，路由为规则/关键词决策
 - 非自主规划型 Autonomous Agent
-- 工程化个人项目，已完成腾讯云小规格实例隔离部署验证
+- 工程化个人项目，已完成腾讯云小规格实例隔离部署和公网演示发布
 
 ## Core Architecture
 
@@ -43,12 +43,21 @@ flowchart LR
 - **可回归的 Retrieval Evaluation**：38 eval cases，零 token 消耗，baseline 回归检测
 - **Torch-free Direct ONNX Runtime**：独立 ONNX 推理，内存从 877 MiB 降至 174 MiB
 - **Docker Compose 内网隔离**：Python 不暴露公网端口，Java 仅绑定 localhost
+- **HTTPS 公网演示**：独立子域名、独立 Let's Encrypt 证书、自动续签、基础 API 限流
 - **GitHub Actions CI**：Java compile + Python retrieval eval + Frontend build
 - **资源受限服务器部署**：4 GiB Swap，Python 512 MiB，Java 512 MiB
 
 ## Project Status
 
-当前项目处于 **actively maintained** 状态，已完成腾讯云小规格实例隔离部署验证。
+当前项目处于 **actively maintained** 状态，已完成腾讯云小规格实例隔离部署验证和公网演示发布。
+
+**公网演示：**
+
+- 地址：https://copilot.jintianchi.cn
+- React 前端通过 Nginx 提供静态文件
+- `/api` 反向代理到 Java（8080），Java 调用 Python（8000）
+- Python 不暴露宿主机端口
+- 独立 Let's Encrypt 证书，自动续签
 
 **已完成：**
 
@@ -69,11 +78,14 @@ flowchart LR
 **当前部署状态：**
 
 - 已在腾讯云小规格实例完成隔离部署验证
+- 公网演示已发布：https://copilot.jintianchi.cn
+- 独立子域名 + 独立 Let's Encrypt 证书 + 自动续签
+- Nginx 反向代理：静态文件 + /api 代理到 Java
+- 基础 API 限流（2 req/s，burst 5）
 - Java 只绑定 localhost（127.0.0.1:8080）
 - Python 只暴露 Docker 内网服务（expose 8000）
 - 模型和 processed data 使用只读挂载
 - 已创建 4 GiB Swap，swappiness=10
-- 未完成公网域名、Nginx 和 HTTPS 接入
 
 **CI：** GitHub Actions 基础验证（Java compile + Python retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
@@ -406,10 +418,18 @@ POST /api/agent/langgraph/chat
 
 ### API Example
 
-**Stable RAG Chat**
+**Stable RAG Chat (Local)**
 
 ```bash
 curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"病假需要提供哪些材料？"}'
+```
+
+**Stable RAG Chat (Public Demo)**
+
+```bash
+curl -X POST https://copilot.jintianchi.cn/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"病假需要提供哪些材料？"}'
 ```
@@ -717,6 +737,7 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 - An engineering practice project for RAG / Agent / Evaluation
 - A reference for Java backend developers transitioning to AI application development
 - A project with isolated deployment verification on resource-constrained server
+- A public demo for portfolio and interview purposes
 
 **What this project is NOT:**
 
@@ -724,19 +745,29 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 - A large-scale enterprise deployment
 - A system with user authentication, audit logs, or monitoring
 - A large-scale knowledge base
+- A high-availability or high-concurrency production system
 
 **Important notes:**
 
 - `hybrid_rerank` is an **experimental mode**, not enabled by default
 - `rewrite_mode=rule` is an **experimental mode**, not enabled by default
 - 100% evaluation pass rate is based on **current 38 eval cases only**
-- The knowledge base is small (HR / IT / Banking sample documents)
-- Current deployment is **isolated verification**, not production-ready
-- Nginx, domain, and HTTPS not yet configured
+- The knowledge base is small (~33 chunks, HR / IT / Banking sample documents)
+- Current deployment is **isolated verification + public demo**, not production SLA
+- Public demo does not equal production load validation
+- No complete user authentication system currently
 
 ## Roadmap
 
-**Recently completed (v0.3.0):**
+**Recently completed (v0.3.1):**
+
+- Public frontend demo (https://copilot.jintianchi.cn)
+- Nginx reverse proxy + HTTPS
+- Persistent Docker edge network
+- Independent Let's Encrypt certificate with auto-renewal
+- Basic API rate limiting
+
+**Previously completed (v0.3.0):**
 
 - Torch-free Direct ONNX Runtime
 - Docker Compose isolated deployment
@@ -744,7 +775,6 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 
 **Planned features:**
 
-- Nginx, domain, and HTTPS configuration
 - Multi-turn conversation memory
 - LLM-based Tool Calling
 - Qdrant / Milvus vector database
