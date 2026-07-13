@@ -55,7 +55,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: agent-python
-        run: uv sync
+        run: uv sync --group dev
+
+      - name: Run concurrency unit tests
+        working-directory: agent-python
+        run: uv run pytest -q tests/test_concurrency_limiter.py tests/test_concurrency_response.py
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python
