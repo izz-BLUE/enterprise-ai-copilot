@@ -10,15 +10,20 @@ const CATEGORY_LABELS = {
   'audit_tampering': '删除审计 / 隐藏痕迹',
   'unauthorized_access': '越权访问 / 数据窃取',
   'access_control': 'Evaluation 权限受限',
+  'overloaded': '服务繁忙',
 }
 
 const ROUTE_LABELS = {
   rag: { label: 'RAG 问答', cls: 'tag-blue' },
   eval: { label: '评估查询', cls: 'tag-purple' },
   refuse: { label: '安全拒答', cls: 'tag-red' },
+  busy: { label: '并发保护', cls: 'tag-orange' },
 }
 
 function getStatusInfo(result) {
+  if (result?.httpStatus === 429 || result?.route === 'busy' || result?.category === 'overloaded') {
+    return { type: 'busy', label: '服务繁忙', cls: 'tag-orange' }
+  }
   if (result?.route === 'refuse' && result?.category === 'access_control') {
     return { type: 'access_denied', label: '权限受限', cls: 'tag-orange' }
   }

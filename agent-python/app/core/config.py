@@ -65,6 +65,16 @@ REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
 # LLM Timeout (seconds)
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
 
+# Bounded concurrency for AI endpoints. This protects the single-worker demo
+# from admitting more retrieval / LLM work than the small host can sustain.
+AI_MAX_CONCURRENT_REQUESTS = int(os.getenv('AI_MAX_CONCURRENT_REQUESTS', '3'))
+AI_QUEUE_TIMEOUT_MS = int(os.getenv('AI_QUEUE_TIMEOUT_MS', '500'))
+
+if AI_MAX_CONCURRENT_REQUESTS < 1:
+    raise ValueError('AI_MAX_CONCURRENT_REQUESTS 必须大于等于 1')
+if AI_QUEUE_TIMEOUT_MS < 1:
+    raise ValueError('AI_QUEUE_TIMEOUT_MS 必须大于等于 1')
+
 # Input Validation
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
 

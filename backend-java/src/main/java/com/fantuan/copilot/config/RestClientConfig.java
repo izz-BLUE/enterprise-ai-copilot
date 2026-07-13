@@ -13,7 +13,7 @@ public class RestClientConfig {
     @Value("${python.agent.connect-timeout:3000}")
     private int connectTimeout;
 
-    @Value("${python.agent.read-timeout:30000}")
+    @Value("${python.agent.read-timeout:40000}")
     private int readTimeout;
 
     @Bean
