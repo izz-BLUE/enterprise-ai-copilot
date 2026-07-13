@@ -59,12 +59,18 @@ def eval_report_tool(report_type: str) -> str:
             with open(RETRIEVAL_REPORT, 'r', encoding='utf-8') as f:
                 r = json.load(f)
             result["retrieval"] = {
-                "final_pass_rate": r.get("final_pass_rate"),
-                "source_hit_rate": r.get("source_hit_rate"),
-                "keyword_hit_rate": r.get("keyword_hit_rate"),
+                "timestamp": r.get("timestamp"),
+                "rewrite_mode": r.get("rewrite_mode", "unknown"),
+                "retrieval_mode": r.get("retrieval_mode", "unknown"),
+                "top_k": r.get("top_k"),
                 "total": r.get("total"),
+                "answerable_cases": r.get("answerable_cases"),
+                "no_answer_cases": r.get("no_answer_cases"),
                 "passed": r.get("passed"),
                 "failed": r.get("failed"),
+                "source_hit_rate": r.get("source_hit_rate"),
+                "keyword_hit_rate": r.get("keyword_hit_rate"),
+                "final_pass_rate": r.get("final_pass_rate"),
             }
         else:
             result["retrieval"] = {

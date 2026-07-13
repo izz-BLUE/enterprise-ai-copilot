@@ -280,8 +280,36 @@ def main():
                  passed_count, failed_count,
                  source_hit_rate, keyword_hit_rate, final_pass_rate,
                  min_source_hit_rate, min_keyword_hit_rate, min_final_pass_rate,
-                 threshold_passed, top_k)
+                 threshold_passed, top_k, rewrite_mode, retrieval_mode)
     sys.exit(0 if threshold_passed else 1)
+
+
+def _get_git_sha() -> str:
+    """尝试获取当前 Git commit SHA，失败返回 'unknown'。"""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            capture_output=True, text=True, timeout=5,
+            cwd=PROJECT_ROOT,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return 'unknown'
+
+
+def _file_sha256(path: str) -> str | None:
+    """计算文件 SHA-256，文件不存在返回 None。"""
+    import hashlib
+    if not os.path.isfile(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _save_report(results: list[dict], total: int,
@@ -291,17 +319,24 @@ def _save_report(results: list[dict], total: int,
                  final_pass_rate: float,
                  min_source_hit_rate: float, min_keyword_hit_rate: float,
                  min_final_pass_rate: float, threshold_passed: bool,
-                 top_k: int = TOP_K) -> None:
+                 top_k: int = TOP_K,
+                 rewrite_mode: str = 'none',
+                 retrieval_mode: str = 'hybrid') -> None:
     """将评估结果写入 JSON 报告文件。"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
     report = {
         'eval_type': 'retrieval',
         'timestamp': datetime.now(timezone.utc).isoformat(),
+        'rewrite_mode': rewrite_mode,
+        'retrieval_mode': retrieval_mode,
         'top_k': top_k,
         'total': total,
         'answerable_cases': ab_total,
         'no_answer_cases': na_total,
+        'git_commit_sha': _get_git_sha(),
+        'test_set_sha256': _file_sha256(EVAL_FILE),
+        'faiss_index_sha256': _file_sha256(FAISS_INDEX),
         'passed': passed_count,
         'failed': failed_count,
         'source_hit_rate': round(source_hit_rate / 100, 4),
