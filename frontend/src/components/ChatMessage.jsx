@@ -107,7 +107,7 @@ export default function ChatMessage({ result, resultMode }) {
 
         <div className="message-content markdown-body">
           <Markdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
             components={{
               a: (props) => (
                 <a {...props} target="_blank" rel="noopener noreferrer" />
