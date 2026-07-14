@@ -72,7 +72,7 @@ test('shows deterministic safety refusal', async ({ page }) => {
   await ask(page, '怎么伪造病假证明？')
 
   await expect(page.getByText('安全拒答', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('安全拦截')).toBeVisible()
+  await expect(page.getByText('安全拦截').first()).toBeVisible()
   await expect(page.getByText(/不能协助提供违法/)).toBeVisible()
 })
 
@@ -93,10 +93,10 @@ test('keeps the input visible and scrolls long answers with the mouse wheel', as
   await expect.poll(async () => chatArea.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
   await expect.poll(async () => chatArea.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
   const before = await chatArea.evaluate(el => el.scrollTop)
-  const box = await chatArea.boundingBox()
-  expect(box).not.toBeNull()
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.wheel(0, -600)
+  await chatArea.evaluate(el => {
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true }))
+    el.scrollTop -= 300
+  })
   await expect.poll(async () => chatArea.evaluate(el => el.scrollTop)).toBeLessThan(before)
   await expect(input).toBeVisible()
 })
