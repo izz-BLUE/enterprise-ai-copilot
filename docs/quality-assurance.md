@@ -4,13 +4,16 @@ This project combines deterministic tests, retrieval evaluation, controlled load
 
 ## Continuous integration
 
-GitHub Actions runs three independent jobs:
+GitHub Actions runs four independent functional jobs, plus security workflows:
 
 | Area | Checks |
 |------|--------|
 | Java backend | compile, unit tests, concurrency behavior |
 | Python service | concurrency tests, retrieval evaluation in `none` and `rule` rewrite modes |
 | Frontend | lint and production build |
+| Browser | five Playwright scenarios against mocked API contracts |
+
+Gitleaks scans repository history for committed secrets. CodeQL analyzes Java, Python, and JavaScript on pull requests, pushes to `main`, and a weekly schedule. Dependabot checks GitHub Actions, Maven, uv, and npm dependencies monthly.
 
 The workflow is defined in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 
@@ -52,7 +55,7 @@ Release verification also checks the public page, Java and Python health endpoin
 ## Known gaps
 
 - The retrieval set is intentionally small and domain-specific.
-- Browser UAT is manual; there is no Playwright suite yet.
+- Playwright covers the main chat, Markdown, Safety Guard, and scrolling regressions; broad visual and cross-browser UAT is still manual.
 - Long-running, multi-client, distributed capacity tests have not been completed.
 - Authentication is a shared administrator token rather than per-user JWT/RBAC.
 - Observability does not yet include a full metrics, alerting, and audit stack.
