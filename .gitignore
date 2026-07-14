@@ -43,6 +43,8 @@ agent-python/models/
 
 # frontend
 node_modules/
+frontend/playwright-report/
+frontend/test-results/
 enterprise-ai-copilot-frontend-*.tar.gz
 
 # private raw data
