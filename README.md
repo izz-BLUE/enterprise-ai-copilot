@@ -44,7 +44,7 @@ flowchart LR
 - **Torch-free Direct ONNX Runtime**：独立 ONNX 推理，内存从 877 MiB 降至 174 MiB
 - **Docker Compose 内网隔离**：Python 不暴露公网端口，Java 仅绑定 localhost
 - **HTTPS 公网演示**：独立子域名、独立 Let's Encrypt 证书、自动续签、基础 API 限流
-- **有界并发保护**：Nginx 限流 + Java/Python 双层并发槽，过载显式返回 429
+- **有界并发保护**：Nginx 限流 + Java/Python 双层并发槽，过载显式返回 JSON 429；目标服务器 L1-L4 受控验收通过
 - **GitHub Actions CI**：Java compile/test + Python concurrency tests/retrieval eval + Frontend build
 - **资源受限服务器部署**：4 GiB Swap，Python 512 MiB，Java 512 MiB
 
@@ -83,6 +83,8 @@ flowchart LR
 - 独立子域名 + 独立 Let's Encrypt 证书 + 自动续签
 - Nginx 反向代理：静态文件 + /api 代理到 Java
 - 基础 API 限流（2 req/s，burst 5）
+- Java/Python 并发槽均为 3，获取槽位最多等待 500ms
+- 已完成目标服务器 L1-L4 受控压测，结果与边界见 [`docs/performance.md`](docs/performance.md#目标服务器受控并发压测)
 - Java 只绑定 localhost（127.0.0.1:8080）
 - Python 只暴露 Docker 内网服务（expose 8000）
 - 模型和 processed data 使用只读挂载
@@ -100,6 +102,7 @@ flowchart LR
 | [Deployment](docs/deployment.md) | 部署方案、目录结构、Compose 配置 |
 | [Performance](docs/performance.md) | ONNX 优化、内存对比、向量一致性 |
 | [Concurrency & Load Test](docs/concurrency-and-load-test.md) | 有界并发设计、超时预算、k6 分层压测 |
+| [v0.4.0 Release Notes](docs/releases/v0.4.0.md) | 有界并发、目标服务器验收摘要、升级与回滚说明 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
 | [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
 
@@ -675,7 +678,7 @@ RAG quality was improved through a 5-iteration engineering process (D36-D40):
 |-----------|-------|---------|
 | D36 | BM25 + RRF Hybrid Retrieval | `hybrid` mode (default), combining Faiss + BM25 via RRF |
 | D37 | Cross Encoder Re-rank | `hybrid_rerank` experimental mode with BAAI/bge-reranker-base |
-| D38 | Query Rewrite | `rewrite_mode=rule` experimental mode, rule-based regex rewrite |
+| D38 | Query Rewrite | `rewrite_mode=rule` rule-based regex rewrite，生产演示已启用 |
 | D39 | Colloquial eval cases | 13 new colloquial eval cases, none vs rule comparison |
 | D40 | Generation diagnostics | Prompt completeness, keyword_groups, failure_type classification |
 
@@ -758,14 +761,22 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 **Important notes:**
 
 - `hybrid_rerank` is an **experimental mode**, not enabled by default
-- `rewrite_mode=rule` is an **experimental mode**, not enabled by default
+- `rewrite_mode=rule` 是规则式 Query Rewrite，当前生产演示已启用；它不是 LLM 自主改写
 - 100% evaluation pass rate is based on **current 38 eval cases only**
 - The knowledge base is small (~33 chunks, HR / IT / Banking sample documents)
 - Current deployment is **isolated verification + public demo**, not production SLA
-- Public demo does not equal production load validation
+- 已完成短时受控并发验收，但不等于大规模生产容量验证或 SLA
 - No complete user authentication system currently
 
 ## Roadmap
+
+**v0.4.0：**
+
+- Java/Python 双层有界并发保护（各 3 个并发槽，500ms 短队列）
+- Python LLM、Java 下游和 Nginx 递增超时预算（30s / 40s / 45s）
+- k6 L1-L4 分层压测与目标服务器脱敏结果归档
+- 公网 Nginx 429 统一为 JSON，包含 `Retry-After` 和边缘 traceId
+- CI 增加 Java/Python 并发测试
 
 **v0.3.3（已发布）：**
 
