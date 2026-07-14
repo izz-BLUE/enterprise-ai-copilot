@@ -48,7 +48,7 @@ jobs:
         run: pip install uv
 
       - name: Cache uv dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: agent-python/.venv
           key: uv-${{ runner.os }}-${{ hashFiles('agent-python/uv.lock') }}
