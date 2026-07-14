@@ -25,6 +25,8 @@ cd frontend
 npm install
 npm run lint
 npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
 
 Knowledge-base or prompt changes require a fresh retrieval evaluation. If source documents change, rebuild chunks, embeddings, and the FAISS index before evaluating.
