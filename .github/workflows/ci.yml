@@ -59,7 +59,7 @@ jobs:
 
       - name: Run concurrency unit tests
         working-directory: agent-python
-        run: uv run pytest -q tests/test_concurrency_limiter.py tests/test_concurrency_response.py
+        run: uv run python -m pytest -q tests/test_concurrency_limiter.py tests/test_concurrency_response.py
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python
