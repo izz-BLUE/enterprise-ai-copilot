@@ -10,8 +10,10 @@
 
 **公网说明：**
 - Python 接口不公网暴露，仅通过 Java `/api/*` 代理访问
-- API 限流：2 req/s，burst 5（超限返回 HTTP 429）
+- API 限流：2 req/s，burst 5（超限返回 JSON 429，并包含 `Retry-After: 1`）
 - 公网 Demo 环境，非生产 SLA
+
+公网入口限流发生在 Java 之前。此时响应中的 `traceId` 来自 Nginx `$request_id`；进入 Java 的请求仍由 `TraceIdFilter` 生成 UUID v4 traceId。
 
 ## 本地服务地址
 
