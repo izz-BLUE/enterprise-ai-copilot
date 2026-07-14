@@ -147,7 +147,7 @@ POST /api/chat
       → RequestConcurrencyLimiter（默认 3 个并发槽，排队 500ms）
       → MAX_MESSAGE_LENGTH 兜底校验（默认 2000）
       → rag_service.process_chat()
-        → safety_guard.check_user_query_safety()  # Phase 3: 规则版 Safety Guard 前置检查
+        → safety_guard.check_user_query_safety()  # 规则版 Safety Guard 前置检查
         → query_rewriter.rewrite_query()           # 实验模式，none 时跳过
         → hybrid_retriever.retrieve()
           ├── faiss_retriever（BGE embedding 语义检索）
@@ -159,7 +159,7 @@ POST /api/chat
         → ChatResponse（含 traceId）
 ```
 
-**特点**：手写全链路，不依赖 LangChain/LangGraph，稳定可靠。Phase 3 新增 Safety Guard 前置检查，高风险问题直接拒答不进入检索。
+**特点**：手写全链路，不依赖 LangChain/LangGraph。Safety Guard 在检索前检查输入，高风险问题直接拒答，不进入检索。
 
 > **注意：** Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
 
@@ -273,7 +273,7 @@ original_query → query_rewriter → rewritten_query → retrieval
 
 ## traceId 全链路透传
 
-> **Phase 3 Batch 3-A 变更：** Java 入口统一生成服务端 traceId，不再信任客户端传入的 `X-Trace-Id`。
+> **信任边界：** Java 入口统一生成服务端 traceId，不信任客户端传入的 `X-Trace-Id`。
 
 ```
 Frontend: 发送请求（X-Trace-Id 可选，不被信任）
@@ -304,7 +304,7 @@ Frontend: 展示 traceId 标签
 | 安全问题输入 | Safety Guard 拦截，返回安全拒答文案 |
 | Agent 异常 | Python endpoint catch Exception，返回 `success=false` |
 
-> **Phase 3 Batch 3-A 变更：** 异常响应中的 `reason` 字段不再暴露底层异常详情（如 `e.getMessage()` / `str(e)`）。用户看到稳定通用文案，服务端日志保留完整异常堆栈和 traceId，用户通过 traceId 反馈问题，服务端通过日志排查。
+> **异常边界：** 响应中的 `reason` 字段不暴露底层异常详情（如 `e.getMessage()` / `str(e)`）。用户看到稳定通用文案，服务端日志保留完整异常堆栈和 traceId，用户可通过 traceId 反馈问题。
 
 ## Python 模块一览
 

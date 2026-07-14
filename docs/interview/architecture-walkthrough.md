@@ -156,8 +156,8 @@ POST /api/agent/langgraph/chat
 **关键约束：**
 - 前端 role 不可信，权限判断在 Java 后端
 - `X-Allow-Eval` 不是认证凭证，是 Java → Python 内部信号
-- Python 服务直接暴露时攻击者可伪造 `X-Allow-Eval`（FIX-003）
-- `admin.token` 为空时为 Demo 模式，不具备生产安全性
+- Python 服务只在 Docker 内网暴露，外部请求必须经过 Nginx 和 Java
+- 生产环境必须配置非空 `admin.token`；空值只适用于本地开发
 
 **话术：**
 > 权限方案是最小 Admin Token，不是完整用户体系。优点是实现简单、不引入复杂登录；缺点是共享 Token、无 per-user 身份。如果要上线，需要替换为 JWT + 用户体系。
@@ -220,16 +220,16 @@ Frontend: 展示 traceId 标签
 2. 绕过 Java 层的安全检查（Safety Guard、输入校验、Admin Token）
 3. 绕过 Java 层的超时控制
 4. 攻击者可伪造 `X-Allow-Eval: true` 直接访问 Evaluation
-5. 这是 FIX-003，明确列为上线前阻塞项
+5. 当前部署通过 Docker 网络隔离 Python，公网只暴露 Nginx
 
 ---
 
-## 为什么当前不做公网部署？
+## 公网部署如何控制边界？
 
 **回答：**
 
-1. FIX-003（Python 服务裸露）未解决
-2. 无正式认证体系（JWT / RBAC）
-3. 无请求频率限制
-4. 无生产级监控和日志系统
-5. 当前定位是本地 Demo / 面试演示，已按上线标准做了部署准备文档
+1. Nginx 负责 HTTPS、静态资源、反向代理和入口限流
+2. Java 只绑定宿主机 localhost，Python 不映射宿主机端口
+3. 管理员 Evaluation 需要非空 Token，普通问答保持公开演示
+4. Java/Python 都设置并发槽和超时，过载显式返回 429
+5. 当前仍缺少正式用户认证、高可用和完整监控，因此不承诺生产 SLA
