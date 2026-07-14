@@ -93,10 +93,8 @@ test('keeps the input visible and scrolls long answers with the mouse wheel', as
   await expect.poll(async () => chatArea.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
   await expect.poll(async () => chatArea.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
   const before = await chatArea.evaluate(el => el.scrollTop)
-  await chatArea.evaluate(el => {
-    el.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true }))
-    el.scrollTop -= 300
-  })
+  await chatArea.hover()
+  await page.mouse.wheel(0, -600)
   await expect.poll(async () => chatArea.evaluate(el => el.scrollTop)).toBeLessThan(before)
   await expect(input).toBeVisible()
 })
