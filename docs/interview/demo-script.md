@@ -196,24 +196,23 @@ curl -X POST http://localhost:8080/api/agent/langgraph/chat \
 
 ---
 
-### 9. 展示部署准备文档（1 分钟）
+### 9. 展示部署与质量文档（1 分钟）
 
-**演示目标：** 展示部署准备和生产化思考。
+**演示目标：** 展示部署边界和验证方法。
 
-**操作：** 打开 `docs/deployment-readiness.md`，快速浏览目录。
+**操作：** 打开 `docs/deployment.md` 和 `docs/quality-assurance.md`，快速浏览目录。
 
 **重点展示：**
-- 完整环境变量清单（Python / Java / Frontend）
-- 本地启动流程
-- 健康检查命令
-- FIX-003 Python 服务边界说明
-- 部署前检查清单
+- Docker Compose 网络与端口边界
+- Nginx、HTTPS 和证书续签
+- CI 与 Retrieval Evaluation
+- 分层压测和发布后 Smoke 检查
 
 **话术：**
-> 虽然当前不做公网部署，但我按上线标准做了部署准备文档。包括完整环境变量清单、启动流程、健康检查、部署前检查清单。Python 服务裸露（FIX-003）我明确列为上线前阻塞项，推荐通过部署拓扑解决 — Nginx 反向代理只暴露 Java 8080，Python 8000 绑定 localhost 不对外。
+> 公网部署通过 Nginx 统一入口，Java 只绑定 localhost，Python 只在 Docker 内网暴露。文档同时记录了 CI、检索评估和分层压测口径；这些验证支持当前部署结论，但不等于生产 SLA。
 
 ---
 
 ## Demo 后总结话术（30 秒）
 
-> 总结一下：这个项目不是简单的 RAG Demo，我按生产化风险做了多轮安全加固。RAG 用的是 Faiss + BM25 + RRF 融合检索，Agent 用的是 LangGraph 状态图编排，评估有 38 个 case 的两层评估体系。安全方面做了 Safety Guard、Admin Token 权限边界、traceId 链路追踪、超时兜底。Python 服务裸露我没有假装解决，明确列为上线前阻塞项。
+> 总结一下：RAG 使用 FAISS + BM25 + RRF 融合检索，实验性 Agent 使用 LangGraph 状态图，检索质量通过 38 个固定用例回归。安全和稳定性方面有 Safety Guard、Admin Token、traceId、超时和有界并发。项目已完成公网隔离部署和短时受控验证，但正式认证、高可用和完整可观测性仍是后续工作。

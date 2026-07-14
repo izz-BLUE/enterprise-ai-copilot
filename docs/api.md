@@ -71,7 +71,7 @@ Java 代理 Python 健康检查。
 
 **稳定 RAG 主链路。** Java 代理 Python `/agent/chat`。
 
-> **安全说明（Phase 3 Batch 1）：** RAG 主链路现在会先经过 Safety Guard 前置检查。高风险问题（如伪造、违法、攻击等）会被直接拦截并返回安全拒答文案，不会进入检索和 LLM 调用。安全拒答时 `success=true`，表示系统成功处理并拒绝了高风险请求。当前 Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
+> **安全说明：** RAG 主链路会先经过 Safety Guard 前置检查。高风险问题（如伪造、违法、攻击等）会被直接拦截并返回安全拒答文案，不会进入检索和 LLM 调用。安全拒答时 `success=true`，表示系统成功处理并拒绝了高风险请求。当前 Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
 
 **请求**
 ```json
@@ -127,7 +127,7 @@ Java 代理 Python 健康检查。
 }
 ```
 
-> **Phase 3 Batch 2 说明：**
+> **请求边界：**
 > - Java 侧通过 `@Size(max=2000)` 校验输入长度，Python 侧通过 `MAX_MESSAGE_LENGTH` 兜底校验。
 > - Java 调 Python 配置了连接超时（3s）和读取超时（40s）。
 > - Python LLM 调用配置了超时（默认 30s），超时或连接失败会返回错误响应。
@@ -347,7 +347,7 @@ curl -X POST http://localhost:8080/api/chat \
 
 ## traceId 全链路
 
-> **Phase 3 Batch 3-A 变更：** 外部请求传入的 `X-Trace-Id` 不再被信任。Java 入口（`TraceIdFilter`）统一生成服务端 traceId，格式为 UUID v4。客户端传入的非法格式（含控制字符、超长、非 UUID）会被丢弃并重新生成。Java → Python 通过 `X-Trace-Id` 请求头透传服务端生成的 traceId。
+> **信任边界：** 外部请求传入的 `X-Trace-Id` 不被信任。Java 入口（`TraceIdFilter`）统一生成服务端 traceId，格式为 UUID v4。客户端传入的非法格式（含控制字符、超长、非 UUID）会被丢弃并重新生成。Java → Python 通过 `X-Trace-Id` 请求头透传服务端生成的 traceId。
 
 所有接口支持 `X-Trace-Id` 响应头返回：
 
