@@ -1,25 +1,24 @@
 # Enterprise AI Copilot
 
-面向企业内部知识库问答场景的 AI 应用后端项目。
-项目采用 Java Spring Boot 作为业务控制面，Python FastAPI 作为 AI 数据面，实现从文档入库、检索召回、RAG Prompt 构造、LLM 回答到评估回归的完整链路。
+[![CI](https://github.com/izz-BLUE/enterprise-ai-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/izz-BLUE/enterprise-ai-copilot/actions/workflows/ci.yml)
+[![Secret Scan](https://github.com/izz-BLUE/enterprise-ai-copilot/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/izz-BLUE/enterprise-ai-copilot/actions/workflows/secret-scan.yml)
+[![Release](https://img.shields.io/github/v/release/izz-BLUE/enterprise-ai-copilot)](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/latest)
+[![License](https://img.shields.io/github/license/izz-BLUE/enterprise-ai-copilot)](LICENSE)
 
-**项目定位：**
+面向企业知识库问答的工程化 RAG 项目。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。
 
-- Java 控制面 + Python 数据面的双服务架构
-- 支持 RAG、Hybrid Retrieval、Safety Guard、Query Rewrite
-- Agent 使用 LangGraph 编排，路由为规则/关键词决策
-- 非自主规划型 Autonomous Agent
-- 工程化个人项目，已完成腾讯云小规格实例隔离部署和公网演示发布
+- 在线演示：<https://copilot.jintianchi.cn>
+- 当前版本：[v0.4.0](docs/releases/v0.4.0.md)
+- 项目边界：已完成小规格单机部署和短时受控验证，不承诺生产 SLA
 
-## Core Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
     U[用户/前端] --> J[Java Gateway]
     J --> P[Python Agent]
     P --> SG[Safety Guard]
-    SG --> RT[Router]
-    RT --> HR[Hybrid Retrieval]
+    SG --> HR[Hybrid Retrieval]
     HR --> FA[FAISS]
     HR --> BM[BM25]
     HR --> RF[RRF 融合]
@@ -29,70 +28,31 @@ flowchart LR
     J --> U
 ```
 
-**检索链路：**
+LangGraph 路由是并行的实验链路；上图展示稳定 RAG 主流程。公网请求经过 Nginx 和 Java，Python 不映射宿主机端口。
 
-- FAISS 向量语义检索（BAAI/bge-small-zh-v1.5, 512 维）
-- BM25 字符级 n-gram 关键词检索
-- RRF（Reciprocal Rank Fusion）多路融合排序
-- Direct ONNX Runtime（Torch-free, CPUExecutionProvider）
+## What this project demonstrates
 
-## Project Highlights
+| Area | Implementation and evidence |
+|------|-----------------------------|
+| Retrieval | FAISS 语义检索 + 字符级 BM25 + RRF；38 个固定用例回归 |
+| Query handling | 生产演示启用确定性规则改写，保留原问题用于最终 Prompt |
+| Runtime | Torch-free ONNX Runtime；Embedding 进程内存由 877 MiB 降至 174 MiB |
+| Safety | 两条问答链路均执行规则版 Safety Guard；Evaluation 使用 Admin Token |
+| Isolation | Nginx → localhost Java → Docker 内网 Python；模型和数据只读挂载 |
+| Overload control | Nginx 限流 + Java/Python 各 3 个并发槽；超限返回 JSON 429 |
+| Verification | Java/Python 单测、检索评估、前端 lint/build、Playwright、分层 k6 场景 |
 
-- **Java + Python 双服务架构**：Java 统一入口 + Python AI 引擎，职责清晰
-- **Hybrid Retrieval**：FAISS + BM25 + RRF 融合，兼顾语义和关键词
-- **可回归的 Retrieval Evaluation**：38 eval cases，零 token 消耗，baseline 回归检测
-- **Torch-free Direct ONNX Runtime**：独立 ONNX 推理，内存从 877 MiB 降至 174 MiB
-- **Docker Compose 内网隔离**：Python 不暴露公网端口，Java 仅绑定 localhost
-- **HTTPS 公网演示**：独立子域名、独立 Let's Encrypt 证书、自动续签、基础 API 限流
-- **有界并发保护**：Nginx 限流 + Java/Python 双层并发槽，过载显式返回 JSON 429；目标服务器 L1-L4 受控验收通过
-- **GitHub Actions CI**：Java compile/test + Python concurrency tests/retrieval eval + Frontend build
-- **资源受限服务器部署**：4 GiB Swap，Python 512 MiB，Java 512 MiB
+## Design decisions and trade-offs
 
-## Project Status
+| Decision | Why | Current limitation |
+|----------|-----|--------------------|
+| Java 控制面 + Python AI 服务 | 保留 Java 的 API/权限能力，同时使用 Python AI 生态 | DTO 需要跨服务同步，部署比单体复杂 |
+| RRF 融合 FAISS 与 BM25 | 两种检索分数尺度不同，按排名融合无需手工归一化 | 融合参数仍基于小型领域数据集 |
+| 规则 Query Rewrite | 延迟和成本可预测，可确定性回归 | 只能覆盖已知口语表达 |
+| 双层并发槽而非长队列 | 小规格机器过载时快速失败，避免线程和内存持续堆积 | 单机吞吐上限较低，尚未验证水平扩容 |
+| LangGraph 保持实验链路 | 便于比较显式 RAG 与图编排，不影响稳定接口 | 不是自主规划型 Agent |
 
-当前项目处于 **actively maintained** 状态，已完成腾讯云小规格实例隔离部署验证和公网演示发布。
-
-**公网演示：**
-
-- 地址：https://copilot.jintianchi.cn
-- React 前端通过 Nginx 提供静态文件
-- `/api` 反向代理到 Java（8080），Java 调用 Python（8000）
-- Python 不暴露宿主机端口
-- 独立 Let's Encrypt 证书，自动续签
-
-**已完成：**
-
-- Java + Python 双服务架构
-- RAG 主问答链路
-- Hybrid Retrieval（Faiss + BM25 + RRF 融合，支持 vector / hybrid / hybrid_rerank 三种模式）
-- Cross Encoder Re-rank（hybrid_rerank 实验模式，BAAI/bge-reranker-base 精排）
-- Query Rewrite（rule 规则匹配实验模式，检索前口语化改写）
-- RAG Evaluation（两层评估 + flaky 检测 + baseline 回归 + 无答案负样本 + TopK 对比 + Query Rewrite 对比）
-- 实验性 Retrieval Shadow Gate（默认关闭；独立 Holdout 表明 Vector/BM25 不足以判断答案证据充分性，未启用请求拦截，详见 [`docs/rag-retrieval-gate-experiment.md`](docs/rag-retrieval-gate-experiment.md)）
-- LangChain RAG Chain 实验模块
-- LangGraph Agent 实验模块（Safety Guard + 意图路由 + Tool Calling）
-- Java 代理接口（traceId 全链路透传）
-- React 前端演示页面
-- Torch-free Direct ONNX Runtime（内存从 877 MiB 降至 174 MiB）
-- Docker Compose 隔离部署（腾讯云小规格实例验证通过）
-
-**当前部署状态：**
-
-- 已在腾讯云小规格实例完成隔离部署验证
-- 公网演示已发布：https://copilot.jintianchi.cn
-- 独立子域名 + 独立 Let's Encrypt 证书 + 自动续签
-- Nginx 反向代理：静态文件 + /api 代理到 Java
-- 基础 API 限流（2 req/s，burst 5）
-- Java/Python 并发槽均为 3，获取槽位最多等待 500ms
-- 已完成目标服务器 L1-L4 受控压测，结果与边界见 [`docs/performance.md`](docs/performance.md#目标服务器受控并发压测)
-- Java 只绑定 localhost（127.0.0.1:8080）
-- Python 只暴露 Docker 内网服务（expose 8000）
-- 模型和 processed data 使用只读挂载
-- 评估报告只读挂载到 Python 容器
-- 生产 REWRITE_MODE=rule，ADMIN_TOKEN 非空强制校验
-- 已创建 4 GiB Swap，swappiness=10
-
-**CI：** GitHub Actions 基础验证（Java compile/test + Python concurrency tests/retrieval eval + Frontend build），详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+Cross Encoder 精排和 Retrieval Shadow Gate 均做过实验，但在当前数据集上没有形成足够收益，因此未作为生产演示默认路径。
 
 ## Documentation
 
@@ -118,41 +78,6 @@ flowchart LR
 | [Demo Script](docs/interview/demo-script.md) | 10 分钟面试 Demo 路线（含操作、预期、话术） |
 | [Architecture Walkthrough](docs/interview/architecture-walkthrough.md) | 5 分钟架构讲解稿 |
 | [FAQ & Deep Dive](docs/interview/faq-and-deep-dive.md) | 20 个面试官追问 Q&A |
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U[User] --> F[React Frontend]
-    F --> J[Java Spring Boot Backend]
-    J --> P[Python FastAPI AI Service]
-
-    P --> R[Hybrid Retrieval]
-    R --> V[Faiss Vector Search]
-    R --> K[Keyword Retrieval]
-
-    V --> C[TopK Chunks]
-    K --> C
-    C --> RP[RAG Prompt]
-    RP --> L[LLM Provider]
-    L --> A[Answer + Sources]
-    A --> J
-    J --> F
-```
-
-**整体链路：**
-
-```
-User
-  → React Frontend
-  → Java Spring Boot /api/chat
-  → Python FastAPI /agent/chat
-  → Hybrid Retrieval
-  → TopK Chunks
-  → RAG Prompt
-  → LLM
-  → Answer + Sources
-```
 
 ## Core Features
 
@@ -311,7 +236,7 @@ original_query → query_rewriter → rewritten_query → retrieval → context
 - 无匹配规则时返回原问题，不影响检索
 - 实验模式，默认不启用
 
-### 6. RAG Evaluation
+### 7. RAG Evaluation
 
 项目内置两层评估：
 
@@ -344,7 +269,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - 支持文本归一化，减少格式误判
 - 支持 baseline 对比，为后续 CI 质量门禁做准备
 
-### 7. LangChain RAG Chain
+### 8. LangChain RAG Chain
 
 **实验模块：**
 
@@ -374,7 +299,7 @@ uv run python scripts/experiments/langchain_rag_demo.py "病假需要提供哪�
 
 **说明：** 当前 `/agent/chat` 主流程仍使用手写 RAG 实现，LangChain 模块仅作为实验性封装。
 
-### 8. LangGraph Agent
+### 9. LangGraph Agent
 
 **实验模块：**
 
@@ -596,8 +521,6 @@ REWRITE_MODE=none                              # 查询重写：none / rule（�
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
 ```
 
-> **注意：** 代码中使用的环境变量名是 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`。部分旧文档中记录的 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 与代码不一致，应以代码为准。
-
 **Do not commit `.env` or any API keys to GitHub.**
 
 Recommended `.gitignore` entries:
@@ -663,7 +586,7 @@ Current evaluation cases cover scenarios such as:
 |---------|------------|---------------------------|
 | Python API | `/agent/chat` | `/agent/langgraph/chat` |
 | Implementation | Hand-written RAG | LangGraph Agent |
-| Safety Guard | No | Yes |
+| Safety Guard | Yes | Yes |
 | Intent Routing | No | Yes |
 | Tool Calling | No | Rule-based tools |
 | Stability | Stable main pipeline | Experimental |
@@ -688,8 +611,8 @@ RAG quality was improved through a 5-iteration engineering process (D36-D40):
 
 | Mode | Retrieval | Generation | No-answer |
 |------|-----------|------------|-----------|
-| none (default) | 100% | 100% (28/28) | 100% (10/10) |
-| rule (experimental) | 100% | 100% (28/28) | 100% (10/10) |
+| none (local default) | source 100%, keyword/final 96.4% | 100% (28/28) | 100% (10/10) |
+| rule (public demo) | 100% | 100% (28/28) | 100% (10/10) |
 
 > These numbers reflect the current 38 eval cases only. The evaluation set is still small and needs expansion.
 

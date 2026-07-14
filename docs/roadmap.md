@@ -22,6 +22,8 @@
 - [x] k6 分层压测脚本与停止条件
 - [x] 目标服务器 L1-L4 受控压测与脱敏结果归档
 - [x] Docker 持久化 external network
+- [x] GitHub Actions：Java/Python/Frontend/Playwright 质量门禁
+- [x] Gitleaks、CodeQL 与 Dependabot 基础安全自动化
 
 ### RAG 主链路
 
@@ -66,6 +68,7 @@
 - [x] LLM 调用失败时返回兜底文案
 - [x] 知识库无结果时 Prompt 要求拒答
 - [x] 安全问题输入时 Safety Guard 拦截
+- [x] Playwright 核心回归（问答、Markdown、拒答、长消息滚动）
 
 ## 版本记录
 
@@ -106,12 +109,11 @@
 
 ## 短期计划（Planned）
 
-- [ ] 增加更多 eval case（跨域、对抗样本、边界条件）
+- [ ] [增加更多 eval case 与长时间容量基线](https://github.com/izz-BLUE/enterprise-ai-copilot/issues/14)
 - [ ] 优化 API 返回结构（统一错误码）
 - [ ] 完善异常兜底和错误提示
-- [ ] 补充单元测试和集成测试
+- [ ] 扩展跨浏览器、窄屏和视觉回归测试
 - [ ] eval 支持 TopK 自动最优选择
-- [ ] 扩展长时间、多客户端和分布式容量测试
 
 ## 中期计划（Planned）
 
@@ -122,11 +124,11 @@
 ## 长期计划（Future）
 
 - [ ] Qdrant / Milvus 替代 FAISS（支持增量更新、分布式）
-- [ ] 用户权限与认证（JWT / API Key）
+- [ ] [用户级权限与认证（JWT / RBAC）](https://github.com/izz-BLUE/enterprise-ai-copilot/issues/12)
 - [ ] 审计日志
-- [x] CI 基础验证（GitHub Actions：Java compile + Python retrieval eval + Frontend build）
+- [x] CI 基础验证（Java/Python/Frontend/Playwright）
 - [ ] CI RAG 回归测试（generation eval + baseline comparison）
-- [ ] 可观测性（RAG 延迟 P99、token 消耗、评估趋势）
+- [ ] [指标、告警与请求级可观测性](https://github.com/izz-BLUE/enterprise-ai-copilot/issues/13)
 - [ ] 多模型配置（不同场景用不同模型）
 - [ ] 更完整的 Agent 工具体系（工单查询、请假申请等写操作）
 - [ ] LLM 自主 Tool Choice（替代规则路由）
