@@ -1,99 +1,63 @@
 # 项目介绍
 
-> 面试开场用。根据面试时间选择 30 秒 / 1 分钟 / 3 分钟版本。
-
----
+下面提供三种长度的介绍口径。所有表述以当前仓库和 v0.4.0 的公开验证结果为准。
 
 ## 30 秒版本
 
-> 这是一个企业知识库 AI 应用后端项目，Java Spring Boot 做业务网关，Python FastAPI 做 AI 服务引擎，支持 RAG 问答和 LangGraph Agent 实验链路。我按生产化风险做了多轮安全加固，包括 Safety Guard、权限边界、traceId 链路追踪、超时兜底等。当前定位是本地 Demo / 面试演示项目。
-
----
+> Enterprise AI Copilot 是一个企业知识库问答项目。Java Spring Boot 负责统一 API 和边界控制，Python FastAPI 负责检索、LLM 调用与 Agent 编排，React 提供演示界面。项目实现了 FAISS + BM25 + RRF 混合检索、可回归的检索评估、请求追踪和有界并发，并已在小规格云服务器上完成 HTTPS 部署和受控压测。
 
 ## 1 分钟版本
 
-> 这是一个企业知识库 AI 应用后端项目，采用 Java Spring Boot + Python FastAPI + React 三端架构。
+> 这是一个 Java、Python 和 React 组成的企业知识库问答系统。Java 是对外入口，负责输入校验、traceId、超时、并发保护和异常收敛；Python 负责文档检索、Prompt 构造、LLM 调用和实验性的 LangGraph 路由。
 >
-> Java 做业务网关，负责统一入口、权限判断、异常兜底；Python 做 AI 服务引擎，负责 RAG 检索、Prompt 构造、LLM 调用、Agent 编排。
+> RAG 主链路采用 FAISS 语义检索与字符级 BM25，再用 RRF 融合排名。检索质量通过 38 个固定用例回归，测试区分 answerable 与 no-answer 场景，并在 CI 中运行。部署侧使用 Nginx、Docker Compose 和 HTTPS，Python 不暴露宿主机端口；Nginx、Java、Python 三层都有明确的限流、并发或超时边界。
 >
-> 核心能力包括：稳定 RAG 主链路（Hybrid Retrieval = Faiss + BM25 + RRF）、LangGraph Agent 实验链路（Safety Guard + 意图路由 + Tool Calling）、两层评估体系（Retrieval + Generation，支持 flaky 检测和 baseline 回归）。
->
-> 我在项目中按生产化风险做了 Phase 3 多轮安全加固，共 12 项修复，覆盖 CORS、超时、输入校验、Safety Guard、traceId、异常收敛、Admin Token 权限边界、Evaluation 访问限制。
->
-> 当前定位是本地 Demo / 面试演示项目，不做公网部署，但已完成部署准备文档。
-
----
+> 这个项目已经完成公网功能验证和小规格服务器的短时受控压测，但没有正式用户体系、高可用和完整监控，因此我把它定义为工程化个人项目，而不是生产级平台。
 
 ## 3 分钟版本
 
-> 这是一个企业知识库 AI 应用后端项目，采用 Java Spring Boot + Python FastAPI + React 三端架构。
+> 项目的目标是把一个知识库问答原型补齐为可以部署、测试和解释的 AI 应用。
 >
-> **架构设计：** Java 做业务网关，是唯一的对外入口，负责权限判断、traceId 管理、异常兜底、CORS 控制。Python 做 AI 服务引擎，是内部能力层，负责 RAG 检索、Prompt 构造、LLM 调用、Agent 编排。前端通过 Vite proxy 只调 Java，不直接调 Python。
+> 架构上，React 只访问 Java。Java 作为控制面统一处理 CORS、输入长度、traceId、管理员权限、异常和 Java 到 Python 的在途请求数。Python 是内部 AI 服务，负责 Safety Guard、查询改写、混合检索、Prompt 和 LLM 调用。公网流量先经过 Nginx，Python 只存在于 Docker 内网。
 >
-> **核心链路有两条：** 第一条是稳定 RAG 主链路，手写全链路不依赖 LangChain，用 Faiss 语义检索 + BM25 关键词检索 + RRF 融合排序，TopK=3 传给 LLM。第二条是 LangGraph Agent 实验链路，Safety Guard 做输入安全检查，router_node 做意图路由，分 RAG 问答、Evaluation 查询、安全拒答三个分支。
+> 检索部分没有直接把向量分数和 BM25 分数相加，因为两者尺度不同。我使用 RRF 按排名融合，让语义召回和关键词召回互补。生产配置还启用了确定性规则改写，解决“几点上班”这类口语查询与知识库表述不一致的问题。
 >
-> **评估体系：** 38 个测试用例，两层评估 — Retrieval Evaluation 零 token 消耗检查检索命中，Generation Evaluation 调用 LLM 检查回答质量，支持 flaky 检测和 baseline 回归。
+> 质量保障分为几层：单元测试验证 Java/Python 并发边界，Retrieval Evaluation 用固定数据集检查来源、关键词和最终结果，前端执行 lint 与构建；部署后再做健康检查、代表性问答、拒答、权限和 429 契约验证。k6 测试分别覆盖健康接口、Safety 拒答、应用层过载和公网限流，避免把不同层的结果混在一起。
 >
-> **安全加固：** Phase 3 做了 12 项修复 — CORS 从 `*` 收敛为白名单、Java 和 Python 双层超时控制、双层输入长度校验、Safety Guard 覆盖两条链路、traceId 服务端统一生成不信任客户端、异常信息收敛不暴露底层细节、Admin Token 最小权限保护 Evaluation。
->
-> **项目边界：** 当前定位是本地 Demo / 面试演示项目，不做公网部署。FIX-003（Python 服务裸露）仍是上线前阻塞项。当前方案是最小 Admin Token + Evaluation 访问限制，不是完整用户权限体系。
-
----
-
-## 项目背景
-
-- 企业内部知识库问答场景
-- 从 Java 后端转型 AI 应用开发的工程实践
-- 重点关注 RAG / Agent / Evaluation 工程化，不涉及模型训练
+> 项目目前在小规格单机上运行。过载请求会在短等待后返回 429，而不是无限排队。现有测试证明保护机制在记录的环境和时长内有效，但不能推出生产 SLA。正式上线仍需补充用户级认证、集中监控告警、长期多客户端容量测试和高可用部署。
 
 ## 技术栈
 
 | 层 | 技术 |
-|---|------|
-| 前端 | React + Vite |
-| 业务网关 | Java 17, Spring Boot 3.x, RestTemplate, Maven |
+|---|---|
+| 前端 | React, Vite |
+| API 与控制面 | Java 17, Spring Boot 3, Maven |
 | AI 服务 | Python 3.11, FastAPI, Pydantic, Uvicorn |
-| LLM | DeepSeek / OpenAI-compatible API |
-| Embedding | BAAI/bge-small-zh-v1.5 |
-| 向量检索 | faiss-cpu, IndexFlatIP |
-| 关键词检索 | BM25 (自研), 字符级 n-gram |
-| Agent 框架 | LangGraph (实验) |
-| 评估 | Python 脚本, JSON 报告 |
+| LLM | DeepSeek（OpenAI-compatible API） |
+| Embedding | BAAI/bge-small-zh-v1.5, ONNX Runtime |
+| 检索 | FAISS, 字符级 BM25, RRF |
+| Agent | LangGraph（实验链路） |
+| 部署与验证 | Docker Compose, Nginx, Let's Encrypt, GitHub Actions, k6 |
 
-## 我负责的内容
+## 可以重点展开的实现
 
-- 整体架构设计（Java + Python 双服务分工）
-- RAG 主链路实现（Hybrid Retrieval = Faiss + BM25 + RRF）
-- LangGraph Agent 实验链路（Safety Guard + 意图路由 + Tool Calling）
-- Evaluation 两层评估体系
-- Phase 3 安全加固（12 项修复）
-- 多 Agent 协作开发流程设计
-- 部署准备文档和本地生产模拟
+- Java/Python 服务边界与失败处理
+- FAISS + BM25 + RRF 混合检索
+- 查询改写与检索评估的对应关系
+- answerable/no-answer 评估口径
+- traceId、Safety Guard 与 Evaluation 权限边界
+- Nginx 限流和 Java/Python 双层有界并发
+- 小内存服务器上的 ONNX 与容器资源优化
 
-## 项目亮点
+## 项目边界
 
-| 亮点 | 说明 |
-|------|------|
-| Java + Python 双服务架构 | 职责清晰，Java 做网关控制，Python 做 AI 能力 |
-| Hybrid Retrieval | Faiss 语义 + BM25 关键词 + RRF 融合，三种模式可切换 |
-| LangGraph Agent | Safety Guard → 意图路由 → RAG / Eval / Refuse |
-| Evaluation 回归 | 38 cases, flaky 检测, baseline 回归, 零 token Retrieval Eval |
-| Safety Guard | 5 类风险关键词覆盖两条链路 |
-| traceId 全链路 | 服务端统一生成 → 日志关联 → 前端展示 |
-| timeout / fallback | Java RestTemplate + Python LLM 双层超时 |
-| Admin Token 权限边界 | 最小方案保护 Evaluation，不引入复杂登录 |
-| 多 Agent 协作 | 9 个协文档、任务看板、Session 注册、分支管理 |
+| 已验证 | 尚未完成 |
+|---|---|
+| HTTPS 公网演示与隔离部署 | 正式用户认证、JWT/RBAC |
+| RAG 与实验性 LangGraph 链路 | 多租户与数据权限 |
+| 检索回归和 CI | 大规模、长时间分布式压测 |
+| Safety Guard 基础拒答 | 语义级安全与 Prompt Injection 完整防护 |
+| Nginx/Java/Python 过载保护 | 多实例、高可用与自动扩缩容 |
+| 短时受控压测 | 完整监控、告警与审计平台 |
 
-## 当前项目边界
-
-| 已完成 | 未完成 |
-|--------|--------|
-| RAG 主链路 | Python 服务访问控制（FIX-003） |
-| LangGraph Agent | 正式认证体系（JWT / RBAC） |
-| Safety Guard | sources 字段脱敏 |
-| Evaluation 回归 | 日志脱敏 |
-| Admin Token | 限流 |
-| traceId 链路追踪 | Docker Compose 部署 |
-| timeout / fallback | 前端管理台 |
-| CORS 白名单 | CI/CD 集成 |
-| 部署准备文档 | |
+面试时应主动说明这些边界。能够区分“已经验证”“当前设计”和“未来计划”，比把项目描述成生产级系统更可信。

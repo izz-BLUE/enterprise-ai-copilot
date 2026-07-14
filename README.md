@@ -102,9 +102,11 @@ flowchart LR
 | [Deployment](docs/deployment.md) | 部署方案、目录结构、Compose 配置 |
 | [Performance](docs/performance.md) | ONNX 优化、内存对比、向量一致性 |
 | [Concurrency & Load Test](docs/concurrency-and-load-test.md) | 有界并发设计、超时预算、k6 分层压测 |
+| [Quality Assurance](docs/quality-assurance.md) | CI、检索评估、安全检查、发布验证与已知边界 |
 | [v0.4.0 Release Notes](docs/releases/v0.4.0.md) | 有界并发、目标服务器验收摘要、升级与回滚说明 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
 | [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
+| [Contributing](CONTRIBUTING.md) | 本地检查、变更规范与 PR 清单 |
 
 ## Interview Materials
 

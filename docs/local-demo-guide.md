@@ -187,6 +187,7 @@ Generation 评估需要 API Key（会调用 LLM）。
 
 ## 相关文档
 
-- [`docs/deployment-readiness.md`](deployment-readiness.md) — 部署准备指南，包含环境变量清单、健康检查命令、FIX-003 边界说明
+- [`docs/deployment.md`](deployment.md) — Docker Compose、网络边界、Nginx 与 HTTPS 部署说明
+- [`docs/quality-assurance.md`](quality-assurance.md) — CI、检索评估、安全检查与发布验证口径
 - [`README.md`](../README.md) — 项目全貌和 Quick Start
 - [`docs/api.md`](api.md) — 接口文档
