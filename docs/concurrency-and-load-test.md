@@ -13,7 +13,7 @@
 
 | 层级 | 机制 | 默认值 | 作用 |
 |------|------|--------|------|
-| Nginx | 按客户端 IP 限流 | 2 req/s，burst 5 | 保护公网入口 |
+| Nginx | 按客户端 IP 限流 | 2 req/s，burst 5 | 保护公网入口，超限返回 JSON 429 |
 | Java | `PythonAgentBulkhead` | 3 个并发槽，排队 500ms | 限制 Java → Python 在途 AI 调用 |
 | Python | `RequestConcurrencyLimiter` | 3 个并发槽，排队 500ms | 保护检索、Agent 和 LLM 执行入口 |
 | Python LLM | 调用超时 | 30s | 限制模型调用时间 |
@@ -28,6 +28,8 @@ Java 和 Python 的健康接口都暴露不含敏感信息的并发快照：`max
 - Header：`Retry-After: 1`
 - `success=false`
 - Agent 链路额外返回 `route=busy`、`category=overloaded`
+
+公网 Nginx 限流发生在 Java 之前，因此使用 Nginx `$request_id` 作为边缘层 traceId；响应保持前端可解析的 `answer` / `model` / `traceId` / `success` JSON 结构，并包含 `Retry-After: 1`。它与进入 Java 后生成的 UUID traceId 属于不同层级。
 
 ## 配置项
 
@@ -104,7 +106,7 @@ k6 run \
   load-tests/k6/public-rate-limit.js
 ```
 
-该脚本只访问健康接口，预期同时出现 200 和 429。它验证的是公网入口限流，不代表应用 bulkhead 容量。
+该脚本只访问健康接口，预期同时出现 200 和 429。429 必须是 JSON、包含 `Retry-After: 1` 和非空 traceId，且不得暴露具体 Nginx 版本。它验证的是公网入口限流，不代表应用 bulkhead 容量。
 
 ## 执行顺序与观测
 
@@ -131,6 +133,6 @@ k6 run \
 | 健康稳定性 | 0 失败，P95 < 1s |
 | Safety 基线 | 100% HTTP 200，全部 `route=refuse`，traceId 一致，P95 < 3s |
 | AI 过载 | 仅出现有效 200 或显式 429；无 5xx；429 有 `Retry-After`；服务无重启 |
-| 公网限流 | 出现 200 与 429；无 5xx；依赖服务正常 |
+| 公网限流 | 出现 200 与 429；429 契约检查全部通过；无 5xx；依赖服务正常 |
 
 只有在目标服务器完成测试并归档原始证据后，才能在简历或面试中引用具体 QPS、P95、P99 或最大并发数。当前代码提供的是保护机制与可重复测试方法，不等于已经获得容量结论。
