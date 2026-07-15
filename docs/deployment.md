@@ -30,6 +30,19 @@
 5. SCP 上传到服务器
 6. 服务器 `docker load` 加载镜像
 
+构建 Java 和 Python 镜像时使用相同的版本参数，例如：
+
+```bash
+--build-arg APP_VERSION=0.4.1-dev \
+--build-arg GIT_COMMIT="$(git rev-parse HEAD)" \
+--build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+生产发布应传入正式版本号、完整 Commit SHA 和 UTC 构建时间。Java 可通过
+`/api/version` 查询，Python 内部可通过 `/agent/version` 查询；两个接口均不返回 Secret。
+生产 `.env` 应设置 `JAVA_IMAGE` 和 `PYTHON_IMAGE`，值使用版本号与 Git 短 SHA
+组成的不可变标签。
+
 ### 镜像
 
 | 镜像 | 说明 |

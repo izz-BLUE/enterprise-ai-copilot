@@ -1,6 +1,6 @@
 services:
   python-agent:
-    image: enterprise-ai-copilot-python:6e24f52
+    image: "${PYTHON_IMAGE:-enterprise-ai-copilot-python:6e24f52}"
     container_name: ai-copilot-python
     restart: unless-stopped
     environment:
@@ -36,7 +36,7 @@ services:
       - ai-copilot-net
 
   java-backend:
-    image: enterprise-ai-copilot-java:6e24f52
+    image: "${JAVA_IMAGE:-enterprise-ai-copilot-java:6e24f52}"
     container_name: ai-copilot-java
     restart: unless-stopped
     depends_on:

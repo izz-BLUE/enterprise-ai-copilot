@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from fastapi import FastAPI, Request
@@ -7,6 +8,7 @@ from app.agents.langgraph_agent import run_langgraph_agent
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import DEEPSEEK_MODEL, MAX_MESSAGE_LENGTH, logger
 from app.schemas.chat_schema import AgentResponse, ChatRequest, ChatResponse
+from app.schemas.version_schema import VersionResponse
 from app.services.rag_service import process_chat
 
 app = FastAPI(title='Agent Python Service')
@@ -70,6 +72,16 @@ def health():
         'status': 'UP',
         'concurrency': ai_request_limiter.snapshot(),
     }
+
+
+@app.get('/agent/version', response_model=VersionResponse)
+def version() -> VersionResponse:
+    return VersionResponse(
+        service='agent-python',
+        version=os.getenv('APP_VERSION', 'dev'),
+        gitCommit=os.getenv('GIT_COMMIT', 'unknown'),
+        buildTime=os.getenv('BUILD_TIME', 'unknown'),
+    )
 
 
 def _validate_message_length(message: str, trace_id: str) -> bool:
