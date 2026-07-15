@@ -16,6 +16,19 @@ FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_TIME=${BUILD_TIME}
+
+LABEL org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.source="https://github.com/izz-BLUE/enterprise-ai-copilot"
+
 # 复制构建产物
 COPY --from=build /app/target/*.jar app.jar
 

@@ -1,5 +1,18 @@
 FROM python:3.11-slim
 
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_TIME=${BUILD_TIME}
+
+LABEL org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.source="https://github.com/izz-BLUE/enterprise-ai-copilot"
+
 # 安全：创建非 root 用户
 RUN groupadd -r agent && useradd -r -g agent -d /app -s /sbin/nologin agent
 
