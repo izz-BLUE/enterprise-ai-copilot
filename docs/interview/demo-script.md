@@ -161,6 +161,7 @@ Frontend: UP (http://localhost:5173)
 
 **操作：** 用 curl 或 Postman 发送请求：
 ```bash
+# 从本地环境变量读取；请预先通过安全方式设置 ADMIN_TOKEN，不要将真实值写入文档或命令历史。
 curl -X POST http://localhost:8080/api/agent/langgraph/chat \
   -H "Content-Type: application/json" \
   -H "X-Admin-Token: ${ADMIN_TOKEN}" \
