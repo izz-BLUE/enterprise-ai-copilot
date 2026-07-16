@@ -112,6 +112,8 @@ flowchart TD
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
+- **BusinessActionService**：Java 权威校验、PendingAction 状态机、幂等确认与审计
+- **LeaveSandboxService**：线程安全的内存年假余额与模拟 LeaveRequest，重启后重置
 
 ## Python AI Service 职责
 
@@ -126,6 +128,9 @@ flowchart TD
 - **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
 - **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
+- **tool_calling_service**：独立的单 Tool 年假规划 Adapter；固定 `tool_choice=required` 且仅该调用关闭 Thinking，不接入 LangGraph
+
+受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
 
 ### 实验性 Retrieval Shadow Gate
 

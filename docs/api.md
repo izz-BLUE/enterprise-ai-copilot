@@ -241,6 +241,34 @@ Java 代理 Python 健康检查。
 
 ---
 
+### POST /api/agent/actions/{actionId}/confirm
+
+确认并确定性执行一份 Java 内存中的模拟年假草稿。Feature Flag 默认关闭。
+
+请求 Header：`X-Admin-Token`、`Idempotency-Key: <UUID>`。请求体只能包含：
+
+```json
+{"confirmationNonce": "一次性确认凭据"}
+```
+
+成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。相同或不同幂等键在成功后重试均返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额。
+
+### POST /api/agent/actions/{actionId}/cancel
+
+取消尚未确认的草稿。请求 Header 为 `X-Admin-Token`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。
+
+所有 PendingAction、confirm、cancel 和 Action 错误响应均包含：
+
+```http
+Cache-Control: no-store
+```
+
+Action 错误使用独立契约，错误码包括 `INVALID_IDEMPOTENCY_KEY`、`ADMIN_REQUIRED`、`INVALID_CONFIRMATION_NONCE`、`ACTION_NOT_FOUND`、`ACTION_IN_PROGRESS`、`ACTION_STATE_CONFLICT`、`ACTION_STALE`、`ACTION_EXPIRED`、`BUSINESS_RULE_VIOLATION`、`BUSINESS_ACTIONS_DISABLED` 和 `ACTION_CAPACITY_EXCEEDED`。
+
+该接口是 Sandbox：不接真实 OA、不使用数据库，不支持中国法定节假日和调休。
+
+---
+
 ## Python AI Service API（端口 8000）
 
 ### GET /agent/health
