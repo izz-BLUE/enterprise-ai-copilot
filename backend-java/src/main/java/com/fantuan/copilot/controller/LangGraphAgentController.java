@@ -127,6 +127,9 @@ public class LangGraphAgentController {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
                 return safeActionFailure(traceId, "暂时无法生成申请草稿，请检查信息后重试。");
+            } catch (RuntimeException exception) {
+                log.error("[{}] PendingAction持久化失败", traceId);
+                return safeActionFailure(traceId, "业务动作处理失败，请稍后重试。");
             }
         }
         AgentChatResponse publicResponse = AgentChatResponse.fromPython(pythonResponse, pendingAction);

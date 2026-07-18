@@ -11,6 +11,8 @@ jobs:
   java-check:
     name: Java Backend
     runs-on: ubuntu-latest
+    env:
+      TESTCONTAINERS_RYUK_DISABLED: "false"
     steps:
       - uses: actions/checkout@v7
 

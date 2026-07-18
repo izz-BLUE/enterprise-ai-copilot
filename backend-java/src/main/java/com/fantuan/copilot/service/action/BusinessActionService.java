@@ -9,12 +9,15 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.LeaveRequest;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.repository.action.LeaveAccountRepository;
+import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -22,6 +25,8 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.UUID;
@@ -29,28 +34,31 @@ import java.util.UUID;
 @Service
 public class BusinessActionService {
     private static final Logger log = LoggerFactory.getLogger(BusinessActionService.class);
-    private static final String EMPLOYEE_ID = "DEMO-001";
-    private static final String DISPLAY_NAME = "Demo User";
+    private static final String SUCCESS_MESSAGE = "模拟年假申请已提交。";
+    private static final String CANCELLED_MESSAGE = "申请草稿已取消。";
 
     private final BusinessActionProperties properties;
     private final AdminAccessService adminAccessService;
-    private final PendingActionRepository repository;
+    private final PendingActionRepository actions;
+    private final LeaveAccountRepository accounts;
+    private final LeaveRequestRepository requests;
     private final ActionNonceService nonceService;
-    private final LeaveSandboxService sandbox;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public BusinessActionService(BusinessActionProperties properties,
                                  AdminAccessService adminAccessService,
-                                 PendingActionRepository repository,
+                                 PendingActionRepository actions,
+                                 LeaveAccountRepository accounts,
+                                 LeaveRequestRepository requests,
                                  ActionNonceService nonceService,
-                                 LeaveSandboxService sandbox,
                                  Clock clock) {
         this.properties = properties;
         this.adminAccessService = adminAccessService;
-        this.repository = repository;
+        this.actions = actions;
+        this.accounts = accounts;
+        this.requests = requests;
         this.nonceService = nonceService;
-        this.sandbox = sandbox;
         this.clock = clock;
     }
 
@@ -61,124 +69,147 @@ public class BusinessActionService {
                 && (!properties.isRequireAdmin() || adminAccessService.isAdmin(presentedToken));
     }
 
+    @Transactional
     public PendingActionView createPending(AnnualLeaveActionProposal proposal,
                                            String originTraceId,
                                            String presentedToken) {
         requireEnabledAndAdmin(presentedToken);
         ValidatedLeave validated = validate(proposal);
-        LeaveSandboxService.Preview preview = sandbox.preview(
-                EMPLOYEE_ID, proposal.startDate(), proposal.endDate(), validated.days());
-        ActionNonceService.Nonce nonce = nonceService.create();
         Instant now = clock.instant();
-        String actionId = randomActionId();
-        PendingAction action = new PendingAction(
-                actionId, BusinessActionType.ANNUAL_LEAVE_REQUEST, originTraceId,
-                EMPLOYEE_ID, DISPLAY_NAME, proposal.startDate(), proposal.endDate(),
-                proposal.halfDay(), validated.reason(), validated.days(),
-                preview.balanceBefore(), preview.balanceAfter(), nonce.digest(), now,
+
+        actions.lockControl();
+        actions.expirePending(now);
+        if (actions.countActive() >= properties.getMaxPending()) {
+            throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
+        }
+
+        BigDecimal balanceBefore = accounts.findBalanceForUpdate(DemoLeaveAccountInitializer.EMPLOYEE_ID)
+                .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
+        if (requests.hasConflict(DemoLeaveAccountInitializer.EMPLOYEE_ID,
+                proposal.startDate(), proposal.endDate())) {
+            throw rule("日期范围与已提交的模拟申请冲突。");
+        }
+        if (balanceBefore.compareTo(validated.days()) < 0) {
+            throw rule("模拟年假余额不足。");
+        }
+
+        BigDecimal balanceAfter = balanceBefore.subtract(validated.days());
+        ActionNonceService.Nonce nonce = nonceService.create();
+        PendingAction action = PendingAction.pending(randomActionId(),
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, originTraceId,
+                DemoLeaveAccountInitializer.EMPLOYEE_ID, DemoLeaveAccountInitializer.DISPLAY_NAME,
+                proposal.startDate(), proposal.endDate(), proposal.halfDay(), validated.reason(),
+                validated.days(), balanceBefore, balanceAfter, nonce.digest(), now,
                 now.plusSeconds(properties.getTtlSeconds()));
-        repository.saveNew(action);
-        audit(originTraceId, action, null, ActionStatus.PENDING_CONFIRMATION, "ACTION_CREATED", null);
-        return new PendingActionView(actionId, action.actionType(), action.status(),
-                "提交模拟年假申请",
-                new AnnualLeaveSummary(DISPLAY_NAME, action.startDate(), action.endDate(),
-                        action.halfDay(), action.days(), action.reason(),
-                        action.balanceBefore(), action.balanceAfter()),
-                nonce.plaintext(), action.expiresAt(), true);
+        actions.saveNew(action);
+        actions.maintainBounds(properties.getMaxCompleted());
+        audit(originTraceId, action, null, ActionStatus.PENDING_CONFIRMATION,
+                "ACTION_CREATED", null, null);
+        return pendingView(action, nonce.plaintext());
     }
 
+    @Transactional(noRollbackFor = {
+            ActionStaleException.class,
+            ActionExpiredAfterUpdateException.class
+    })
     public ActionExecutionResponse confirm(String actionId, String confirmationNonce,
                                            String idempotencyKey, String presentedToken,
                                            String traceId) {
         requireEnabledAndAdmin(presentedToken);
         UUID key = parseIdempotencyKey(idempotencyKey);
-        PendingAction action = find(actionId);
-        synchronized (action) {
-            verifyNonce(action, confirmationNonce);
-            if (action.status() == ActionStatus.EXPIRED) {
-                throw error(HttpStatus.GONE, "ACTION_EXPIRED",
-                        "该申请草稿已过期，请重新生成。", action);
-            }
-            if (action.status() == ActionStatus.SUCCEEDED) {
-                return action.completedResponse().replayedFor(traceId);
-            }
-            if (action.status() == ActionStatus.PROCESSING) {
-                throw error(HttpStatus.CONFLICT, "ACTION_IN_PROGRESS", "申请正在处理中。", action);
-            }
-            if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
-                throw error(HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT", "当前状态不能确认。", action);
-            }
-            action.markProcessing(key);
-            audit(traceId, action, ActionStatus.PENDING_CONFIRMATION,
-                    ActionStatus.PROCESSING, "CONFIRM_ACCEPTED", null);
+        PendingAction action = findForUpdate(actionId);
+        Instant now = clock.instant();
+        expireIfNeeded(action, now);
+        verifyNonce(action, confirmationNonce);
+
+        if (action.status() == ActionStatus.SUCCEEDED) {
+            return succeededResponse(action, traceId, true);
+        }
+        if (action.status() == ActionStatus.PROCESSING) {
+            throw error(HttpStatus.CONFLICT, "ACTION_IN_PROGRESS", "申请正在处理中。", action);
+        }
+        if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
+            throw error(HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT", "当前状态不能确认。", action);
         }
 
-        try {
-            LeaveRequest request = sandbox.submit(action);
-            Instant completedAt = clock.instant();
-            ActionExecutionResponse response = new ActionExecutionResponse(
-                    action.actionId(), action.actionType(), ActionStatus.SUCCEEDED,
-                    request.requestId(), "模拟年假申请已提交。", false, completedAt,
-                    action.originTraceId(), traceId);
-            synchronized (action) {
-                action.markSucceeded(request.requestId(), response, completedAt);
-            }
-            repository.maintainBounds();
-            audit(traceId, action, ActionStatus.PROCESSING,
-                    ActionStatus.SUCCEEDED, "ACTION_SUCCEEDED", request.requestId());
-            return response;
-        } catch (ActionException exception) {
-            synchronized (action) {
-                action.markFailed("ACTION_STALE", clock.instant());
-            }
-            repository.maintainBounds();
-            audit(traceId, action, ActionStatus.PROCESSING,
-                    ActionStatus.FAILED, "ACTION_STALE", null);
-            throw error(HttpStatus.CONFLICT, "ACTION_STALE",
-                    "申请状态已变化，请重新生成草稿。", action);
-        } catch (RuntimeException exception) {
-            synchronized (action) {
-                action.markFailed("ACTION_INTERNAL_ERROR", clock.instant());
-            }
-            repository.maintainBounds();
-            audit(traceId, action, ActionStatus.PROCESSING,
-                    ActionStatus.FAILED, "ACTION_INTERNAL_ERROR", null);
-            throw error(HttpStatus.INTERNAL_SERVER_ERROR, "ACTION_INTERNAL_ERROR",
-                    "模拟申请处理失败。", action);
+        actions.markProcessing(action.actionId(), key);
+        BigDecimal currentBalance = accounts.findBalanceForUpdate(action.employeeId())
+                .orElseThrow(() -> new IllegalStateException("Leave account unavailable"));
+        if (currentBalance.compareTo(action.balanceBefore()) != 0
+                || currentBalance.compareTo(action.days()) < 0
+                || requests.hasConflict(action.employeeId(), action.startDate(), action.endDate())) {
+            actions.markFailed(action.actionId(), "ACTION_STALE", now);
+            audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.FAILED,
+                    "ACTION_STALE", null, now);
+            throw new ActionStaleException(action.actionId());
         }
+
+        String requestId = requestId(requests.nextNumber());
+        LeaveRequest request = new LeaveRequest(requestId, action.employeeId(), "ANNUAL",
+                action.startDate(), action.endDate(), action.halfDay(), action.days(), now);
+        requests.save(action.actionId(), request);
+        accounts.updateBalance(action.employeeId(), currentBalance.subtract(action.days()), now);
+        actions.markSucceeded(action.actionId(), requestId, SUCCESS_MESSAGE, now);
+        audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
+                "ACTION_SUCCEEDED", requestId, now);
+        return new ActionExecutionResponse(action.actionId(), action.actionType(),
+                ActionStatus.SUCCEEDED, requestId, SUCCESS_MESSAGE, false, now,
+                action.originTraceId(), traceId);
     }
 
+    @Transactional(noRollbackFor = ActionExpiredAfterUpdateException.class)
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
                                           String presentedToken, String traceId) {
         requireEnabledAndAdmin(presentedToken);
-        PendingAction action = find(actionId);
-        ActionExecutionResponse response;
-        synchronized (action) {
-            verifyNonce(action, confirmationNonce);
-            if (action.status() == ActionStatus.EXPIRED) {
-                throw error(HttpStatus.GONE, "ACTION_EXPIRED",
-                        "该申请草稿已过期，请重新生成。", action);
-            }
-            if (action.status() == ActionStatus.CANCELLED) {
-                return cancelledResponse(action, traceId, true);
-            }
-            if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
-                throw error(HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT", "当前状态不能取消。", action);
-            }
-            ActionStatus from = action.status();
-            action.markCancelled(clock.instant());
-            audit(traceId, action, from, ActionStatus.CANCELLED, "ACTION_CANCELLED", null);
-            response = cancelledResponse(action, traceId, false);
+        PendingAction action = findForUpdate(actionId);
+        Instant now = clock.instant();
+        expireIfNeeded(action, now);
+        verifyNonce(action, confirmationNonce);
+        if (action.status() == ActionStatus.CANCELLED) {
+            return cancelledResponse(action, traceId, true);
         }
-        repository.maintainBounds();
-        return response;
+        if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
+            throw error(HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT", "当前状态不能取消。", action);
+        }
+        actions.markCancelled(action.actionId(), CANCELLED_MESSAGE, now);
+        audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.CANCELLED,
+                "ACTION_CANCELLED", null, now);
+        return new ActionExecutionResponse(action.actionId(), action.actionType(),
+                ActionStatus.CANCELLED, null, CANCELLED_MESSAGE, false, now,
+                action.originTraceId(), traceId);
+    }
+
+    private PendingActionView pendingView(PendingAction action, String plaintextNonce) {
+        return new PendingActionView(action.actionId(), action.actionType(), action.status(),
+                "提交模拟年假申请", new AnnualLeaveSummary(action.displayName(),
+                action.startDate(), action.endDate(), action.halfDay(), action.days(),
+                action.reason(), action.balanceBefore(), action.balanceAfter()),
+                plaintextNonce, action.expiresAt(), true);
+    }
+
+    private ActionExecutionResponse succeededResponse(PendingAction action,
+                                                       String traceId, boolean replayed) {
+        return new ActionExecutionResponse(action.actionId(), action.actionType(),
+                ActionStatus.SUCCEEDED, action.requestId(), action.executionMessage(), replayed,
+                action.completedAt(), action.originTraceId(), traceId);
     }
 
     private ActionExecutionResponse cancelledResponse(PendingAction action,
                                                        String traceId, boolean replayed) {
         return new ActionExecutionResponse(action.actionId(), action.actionType(),
-                ActionStatus.CANCELLED, null, "申请草稿已取消。", replayed,
+                ActionStatus.CANCELLED, null, action.executionMessage(), replayed,
                 action.completedAt(), action.originTraceId(), traceId);
+    }
+
+    private void expireIfNeeded(PendingAction action, Instant now) {
+        if (action.status() == ActionStatus.PENDING_CONFIRMATION && !now.isBefore(action.expiresAt())) {
+            actions.markExpired(action.actionId(), now);
+            throw new ActionExpiredAfterUpdateException(action.actionId());
+        }
+        if (action.status() == ActionStatus.EXPIRED) {
+            throw error(HttpStatus.GONE, "ACTION_EXPIRED", "该申请草稿已过期，请重新生成。", action);
+        }
     }
 
     private ValidatedLeave validate(AnnualLeaveActionProposal proposal) {
@@ -204,7 +235,6 @@ public class BusinessActionService {
                 || rawReason.codePoints().anyMatch(Character::isISOControl)) {
             throw rule("申请原因必须为1到200个非控制字符。");
         }
-
         BigDecimal days;
         if (proposal.halfDay() == HalfDay.AM || proposal.halfDay() == HalfDay.PM) {
             if (!proposal.startDate().equals(proposal.endDate()) || isWeekend(proposal.startDate())) {
@@ -242,15 +272,14 @@ public class BusinessActionService {
         }
     }
 
-    private PendingAction find(String actionId) {
-        return repository.find(actionId).orElseThrow(() -> new ActionException(
+    private PendingAction findForUpdate(String actionId) {
+        return actions.findForUpdate(actionId).orElseThrow(() -> new ActionException(
                 HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", actionId, null));
     }
 
     private void verifyNonce(PendingAction action, String plaintext) {
         if (!nonceService.matches(plaintext, action.confirmationNonceDigest())) {
-            throw error(HttpStatus.FORBIDDEN, "INVALID_CONFIRMATION_NONCE",
-                    "确认凭据无效。", action);
+            throw error(HttpStatus.FORBIDDEN, "INVALID_CONFIRMATION_NONCE", "确认凭据无效。", action);
         }
     }
 
@@ -261,6 +290,11 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY",
                     "Idempotency-Key必须是UUID。", null, null);
         }
+    }
+
+    private String requestId(long number) {
+        return "LR-" + YearMonth.now(clock).format(DateTimeFormatter.ofPattern("yyyyMM"))
+                + "-" + String.format("%06d", number);
     }
 
     private String randomActionId() {
@@ -280,11 +314,11 @@ public class BusinessActionService {
     }
 
     private void audit(String traceId, PendingAction action, ActionStatus from,
-                       ActionStatus to, String resultCode, String requestId) {
+                       ActionStatus to, String resultCode, String requestId, Instant completedAt) {
         log.info("action_audit traceId={} originTraceId={} actionId={} actionType={} "
                         + "statusFrom={} statusTo={} resultCode={} requestId={} createdAt={} completedAt={}",
                 traceId, action.originTraceId(), action.actionId(), action.actionType(), from, to,
-                resultCode, requestId, action.createdAt(), action.completedAt());
+                resultCode, requestId, action.createdAt(), completedAt);
     }
 
     private record ValidatedLeave(String reason, BigDecimal days) {}

@@ -100,4 +100,23 @@ class BusinessActionControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_REQUEST"));
     }
+
+    @Test
+    void infrastructureFailureReturnsSafeInternalError() throws Exception {
+        when(service.confirm(anyString(), anyString(), anyString(),
+                org.mockito.ArgumentMatchers.<String>any(), anyString()))
+                .thenThrow(new RuntimeException("database detail must not escape"));
+
+        mockMvc.perform(post("/api/agent/actions/act_test/confirm")
+                        .header("Idempotency-Key", UUID.randomUUID())
+                        .requestAttr("traceId", "safe-error-trace")
+                        .contentType("application/json")
+                        .content("{\"confirmationNonce\":\"nonce\"}"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.errorCode").value("ACTION_INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.message").value("业务动作处理失败。"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("database detail"))));
+    }
 }
