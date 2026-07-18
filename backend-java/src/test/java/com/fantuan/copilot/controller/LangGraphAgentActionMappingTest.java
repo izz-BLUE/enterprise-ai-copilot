@@ -39,10 +39,10 @@ class LangGraphAgentActionMappingTest {
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
                 LocalDate.of(2026, 7, 20), "私事", HalfDay.NONE);
         PythonAgentResponse python = new PythonAgentResponse("draft", "action", true,
-                "business_action", "", List.of(), true, "origin", proposal, List.of());
+                "business_action", "", List.of(), true, "python-trace-999", proposal, List.of());
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
-        when(actionService.createPending(eq(proposal), eq("origin"), eq("admin")))
+        when(actionService.createPending(eq(proposal), eq("java-trace-123"), eq("admin")))
                 .thenAnswer(invocation -> {
                     assertEquals(0, bulkhead.snapshot().get("active"));
                     return mock(PendingActionView.class);
@@ -52,7 +52,7 @@ class LangGraphAgentActionMappingTest {
                 restTemplate, bulkhead, admin, actionService);
         ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
         HttpServletRequest request = mock(HttpServletRequest.class);
-        when(request.getAttribute("traceId")).thenReturn("trace");
+        when(request.getAttribute("traceId")).thenReturn("java-trace-123");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
 
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
@@ -65,5 +65,7 @@ class LangGraphAgentActionMappingTest {
         assertEquals("true", entity.getValue().getHeaders().getFirst("X-Allow-Business-Actions"));
         assertEquals("2026-07-16", entity.getValue().getHeaders().getFirst("X-Business-Date"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Admin-Token"));
+        verify(actionService).createPending(proposal, "java-trace-123", "admin");
+        verify(actionService, never()).createPending(proposal, "python-trace-999", "admin");
     }
 }

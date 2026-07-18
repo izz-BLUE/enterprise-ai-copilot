@@ -51,6 +51,22 @@ class BusinessActionServiceTest {
     }
 
     @Test
+    void originTraceIdIsStoredAndReturnedByConfirm() {
+        Fixture fixture = fixture();
+        PendingActionView pending = fixture.service.createPending(
+                standardProposal(), "java-trace-123", ADMIN);
+
+        PendingAction stored = fixture.repository.find(pending.actionId()).orElseThrow();
+        assertEquals("java-trace-123", stored.originTraceId());
+
+        ActionExecutionResponse confirmed = fixture.service.confirm(
+                pending.actionId(), pending.confirmationNonce(),
+                UUID.randomUUID().toString(), ADMIN, "confirm-trace-456");
+        assertEquals("java-trace-123", confirmed.originTraceId());
+        assertNotEquals("python-trace-999", confirmed.originTraceId());
+    }
+
+    @Test
     void featureFlagAndAdminAreEnforced() {
         Fixture fixture = fixture();
         fixture.properties.setEnabled(false);

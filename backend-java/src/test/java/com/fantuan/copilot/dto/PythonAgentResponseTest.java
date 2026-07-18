@@ -16,8 +16,8 @@ class PythonAgentResponseTest {
         String json = """
                 {"answer":"draft","route":"action","safe":true,"category":"business_action",
                  "reason":"","sources":[],"success":true,"traceId":"origin",
-                 "action_proposal":{"actionType":"ANNUAL_LEAVE_REQUEST","startDate":"2026-07-20",
-                 "endDate":"2026-07-20","reason":"私事","halfDay":"NONE"},"missing_fields":[]}
+                 "action_proposal":{"action_type":"ANNUAL_LEAVE_REQUEST","start_date":"2026-07-20",
+                 "end_date":"2026-07-20","reason":"私事","half_day":"NONE"},"missing_fields":[]}
                 """;
         PythonAgentResponse response = mapper.readValue(json, PythonAgentResponse.class);
         assertNotNull(response.actionProposal());

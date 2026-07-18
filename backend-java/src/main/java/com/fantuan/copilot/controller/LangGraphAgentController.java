@@ -122,7 +122,7 @@ public class LangGraphAgentController {
             }
             try {
                 pendingAction = businessActionService.createPending(
-                        pythonResponse.actionProposal(), pythonResponse.traceId(), presentedToken);
+                        pythonResponse.actionProposal(), traceId, presentedToken);
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());

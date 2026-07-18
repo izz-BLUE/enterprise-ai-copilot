@@ -1,21 +1,7 @@
 from datetime import date
 from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class RawAnnualLeaveToolArguments(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    result_type: Literal["PROPOSAL", "CLARIFICATION"]
-    start_date: str
-    end_date: str
-    reason: str
-    half_day: Literal["NONE", "AM", "PM"]
-    missing_fields: list[Literal["start_date", "end_date", "reason"]] = Field(
-        default_factory=list
-    )
-    clarification_question: str
+from pydantic import BaseModel, ConfigDict
 
 
 class AnnualLeaveActionProposal(BaseModel):

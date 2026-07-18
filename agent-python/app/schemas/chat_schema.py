@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.schemas.action_schema import AnnualLeaveActionProposal
 
 
 class ChatRequest(BaseModel):
@@ -18,6 +20,8 @@ class AgentResponse(BaseModel):
     safe: bool
     category: str
     reason: str
-    sources: list = []
+    sources: list = Field(default_factory=list)
     success: bool
     traceId: str = ""
+    action_proposal: AnnualLeaveActionProposal | None = None
+    missing_fields: list[str] = Field(default_factory=list)

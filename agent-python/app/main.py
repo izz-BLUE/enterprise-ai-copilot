@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import date
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -127,10 +128,24 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
         )
 
     allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
+    allow_business_actions = (
+        req.headers.get('x-allow-business-actions', 'false').lower() == 'true'
+    )
+    business_date = None
+    business_date_header = req.headers.get('x-business-date')
+    if business_date_header:
+        try:
+            business_date = date.fromisoformat(business_date_header)
+        except ValueError:
+            pass
 
     try:
         result = run_langgraph_agent(
-            request.message, allow_eval=allow_eval, trace_id=trace_id,
+            request.message,
+            allow_eval=allow_eval,
+            allow_business_actions=allow_business_actions,
+            business_date=business_date,
+            trace_id=trace_id,
         )
         return AgentResponse(
             answer=result.get('answer', ''),
@@ -139,8 +154,10 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             category=result.get('category', ''),
             reason=result.get('reason', ''),
             sources=result.get('sources', []),
-            success=True,
+            success=result.get('route') != 'error',
             traceId=trace_id,
+            action_proposal=result.get('action_proposal'),
+            missing_fields=result.get('missing_fields', []),
         )
     except Exception:
         logger.exception('[%s] LangGraph Agent 异常', trace_id)
