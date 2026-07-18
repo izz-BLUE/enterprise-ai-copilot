@@ -124,14 +124,16 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python，透传 Java traceId、Evaluation/Business Action 许可和 Java 权威业务日期；Admin Token 不下传 Python。Python 返回 Proposal 后，在 Python permit 已释放的情况下调用 `BusinessActionService`
+- **LangGraphAgentController**：在 Python 调用前解析白名单 Demo 身份，转发时只透传 Java traceId、Evaluation/Business Action 许可和 Java 权威业务日期；Admin Token 与 Demo 身份均不下传 Python。Python 返回 Proposal 后，在 permit 已释放的情况下调用 `BusinessActionService`
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
-- **BusinessActionService**：Java 权威校验、Spring 事务、PendingAction 状态机、持久化幂等确认与审计
+- **DemoIdentityService**：默认关闭的三身份白名单目录，服务端派生 employeeId/displayName/role
+- **BusinessActionService**：Java 权威校验、Action 归属、Spring 事务、PendingAction 状态机、持久化幂等确认与审计；只依赖 `LeaveExecutionGateway`
+- **PostgresLeaveSandboxGateway**：当前同数据库事务执行适配器，按 employeeId 检查冲突、生成编号并写入 LeaveRequest
 - **JdbcPendingActionRepository / JdbcLeaveAccountRepository / JdbcLeaveRequestRepository**：明确 SQL、Action/Account 行锁、唯一申请关联和原子余额扣减
 - **Flyway / PostgreSQL 16**：版本化结构迁移，并持久化 Action、余额、申请及执行结果
 
@@ -218,16 +220,19 @@ POST /api/agent/langgraph/chat
           │                 └── Python 确定性 Proposal
           └── refuse_node
                 └── 返回安全拒答文案
-    → Java BusinessActionService 权威复核
+    → Java DemoIdentityService（身份不下传 Python）
+    → Java BusinessActionService 权威复核与 owner 校验
       → PendingAction
         → React 脱敏确认卡
-          ├── confirm + 稳定 Idempotency-Key → PostgreSQL事务、Account行锁、LeaveRequest
+          ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL事务
           └── cancel（无 Idempotency-Key）→ CANCELLED
 ```
 
 **特点**：LangGraph 状态图编排，规则路由，Safety Guard + Tools + 多分支。
 
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
+
+> **身份边界：** `X-Demo-User-Id` 只用于本地或受控演示，不是认证。Manager 没有审批权限。未来 DingTalk/Feishu/WeCom 等真实 OA Gateway 需要 Outbox 与异步一致性机制，不能参与当前本地 PostgreSQL 事务。
 
 ## 离线知识库构建流程
 

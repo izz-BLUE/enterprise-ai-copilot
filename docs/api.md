@@ -191,6 +191,8 @@ Java 代理 Python 健康检查。
 
 **响应**（完整年假申请，Java 公网契约）
 
+Agent 模式必须携带 `X-Demo-User-Id`，其值只能来自服务端演示身份目录。该请求头仅用于本地或受控演示环境，不是真实认证；Java 不会把它、employeeId、角色、余额或申请历史发送给 Python/模型。
+
 Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权限、日期、工作日、余额和冲突校验；校验通过后，公网响应只暴露可确认的 `pendingAction`：
 
 ```json
@@ -303,7 +305,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 确认并确定性执行一份 PostgreSQL 持久化的模拟年假草稿。Feature Flag 默认关闭。
 
-请求 Header：`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
+请求 Header：`X-Demo-User-Id: <demo-user-id>`、`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
 
 ```json
 {"confirmationNonce": "<confirmation-nonce>"}
@@ -331,7 +333,9 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 ### POST /api/agent/actions/{actionId}/cancel
 
-取消尚未确认的草稿。请求 Header 为 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
+取消尚未确认的草稿。请求 Header 为 `X-Demo-User-Id` 和 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
+
+Confirm/Cancel 都会在锁定 Action 后先校验员工归属，再检查 nonce、过期和状态。其他身份即使持有正确 actionId、nonce、Admin Token 和幂等键，也只得到与不存在 Action 完全相同的 `404 ACTION_NOT_FOUND`，且不会改变草稿、余额或申请记录。
 
 React 根据 `expiresAt` 设置有界计时器，本地到期后禁用 Confirm/Cancel 并提示重新生成草稿；如果服务端返回 `ACTION_EXPIRED`，同样进入不可重试的过期终态。服务端时间与状态始终是权威来源。
 
@@ -359,9 +363,18 @@ ACTION_INTERNAL_ERROR
 BUSINESS_RULE_VIOLATION
 BUSINESS_ACTIONS_DISABLED
 ACTION_CAPACITY_EXCEEDED
+DEMO_IDENTITY_REQUIRED
+DEMO_IDENTITY_INVALID
+DEMO_IDENTITY_DISABLED
 ```
 
-该接口是 Sandbox：不接真实 OA、不使用数据库，不支持中国法定节假日和调休。
+该接口是 PostgreSQL Sandbox：不接真实 OA，不支持中国法定节假日和调休。
+
+### GET /api/demo/identities
+
+仅在 `demo.identity.enabled=true` 时返回三个固定演示身份的 `userId`、`displayName` 和 `role`，响应为 `Cache-Control: no-store`。不返回 employeeId、余额、申请、nonce、Action 或数据库主键。关闭时返回 `503 DEMO_IDENTITY_DISABLED`。
+
+`X-Demo-User-Id` 不是登录或认证机制，任何公开生产环境都不得依赖它建立用户身份。
 
 ---
 
