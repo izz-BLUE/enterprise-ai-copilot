@@ -227,6 +227,8 @@ Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权
 
 该响应使用 `Cache-Control: no-store`。`traceId` 来自 Java 入口；它同时作为 PendingAction 的权威 `originTraceId`，不采用 Python 响应中的 traceId。
 
+React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公开消息状态和确认卡只保留草稿摘要；nonce 仅保存在页面内存 `Map` 中，不进入 DOM、日志或浏览器持久化存储。
+
 **响应**（年假申请缺字段）
 
 缺少日期或原因时，Python 返回确定性 Clarification，Provider 调用次数为 0，Java 不创建 PendingAction：
@@ -309,6 +311,8 @@ Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权
 
 成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。相同或不同幂等键在成功后重试均返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额。
 
+前端首次 Confirm 使用 `crypto.randomUUID()` 生成并缓存该草稿的 Key。网络失败、HTTP 502/503 或其他可重试错误后，“重试确认”必须复用同一个 Key；快速双击由请求前同步锁拦截，只允许一个在途请求。请求体不会回传 summary、日期、原因、余额或状态。
+
 首次成功示意：
 
 ```json
@@ -327,7 +331,9 @@ Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权
 
 ### POST /api/agent/actions/{actionId}/cancel
 
-取消尚未确认的草稿。请求 Header 为 `X-Admin-Token`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。
+取消尚未确认的草稿。请求 Header 为 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
+
+React 根据 `expiresAt` 设置有界计时器，本地到期后禁用 Confirm/Cancel 并提示重新生成草稿；如果服务端返回 `ACTION_EXPIRED`，同样进入不可重试的过期终态。服务端时间与状态始终是权威来源。
 
 所有 PendingAction、confirm、cancel 和 Action 错误响应均包含：
 

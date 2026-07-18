@@ -210,8 +210,9 @@ POST /api/agent/langgraph/chat
                 └── 返回安全拒答文案
     → Java BusinessActionService 权威复核
       → PendingAction
-        ├── confirm → Leave Sandbox
-        └── cancel → CANCELLED
+        → React 脱敏确认卡
+          ├── confirm + 稳定 Idempotency-Key → Leave Sandbox
+          └── cancel（无 Idempotency-Key）→ CANCELLED
 ```
 
 **特点**：LangGraph 状态图编排，规则路由，Safety Guard + Tools + 多分支。
@@ -418,7 +419,8 @@ LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
 - 不具有自主任务拆解、反思、多步规划能力
 - 不使用"自主 Agent""智能规划系统"等措辞
 - Native Tool 是零参数协议门禁，不提取字段、不执行写操作、不提供业务事实
-- 前端 PendingAction 确认卡尚未实现；当前 confirm/cancel 通过后端 API 使用
+- React 展示 PendingAction 确认卡；confirmationNonce 和 Confirm 幂等 Key 仅存在页面内存，双击由同步锁拦截，网络失败重试 Confirm 时复用原 Key
+- 客户端按 `expiresAt` 提前禁用过期草稿，服务端 Action 状态和错误码仍是权威来源；确认/取消执行期间禁用清空会话和模式切换
 - PendingAction、幂等结果和 Leave Sandbox 均为单进程内存状态，重启后清空，不支持分布式幂等，不接真实 OA，也不处理法定节假日和调休
 
 ## Embedding Runtime

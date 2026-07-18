@@ -2,7 +2,7 @@
 
 ## 定位与边界
 
-该能力是内存 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。它不接真实 OA，不新增数据库、Redis 或消息队列；服务重启后 PendingAction、模拟余额和 LeaveRequest 全部清空。React 确认卡尚未实现，当前通过后端 API 验证 confirm/cancel 链路。
+该能力是内存 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。它不接真实 OA，不新增数据库、Redis 或消息队列；服务重启后 PendingAction、模拟余额和 LeaveRequest 全部清空。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
 
 Feature Flag `business.actions.enabled` 默认关闭。共享 Admin Token 只用于演示访问控制，不代表员工身份认证。当前不支持分布式幂等，也不处理中国法定节假日与调休。
 
@@ -20,8 +20,9 @@ flowchart LR
     T --> P[Deterministic Proposal]
     P --> V[Java BusinessActionService]
     V --> A[PendingAction]
-    A -->|confirm| L[Leave Sandbox]
-    A -->|cancel| X[CANCELLED]
+    A --> R[React PendingAction Card]
+    R -->|confirm + stable idempotency key| L[Leave Sandbox]
+    R -->|cancel| X[CANCELLED]
 ```
 
 Safety 先于 Evaluation，Evaluation 先于 Annual Leave Action，其他请求继续进入 RAG。年假政策、余额、结转和审批流程查询不会进入 Action Tool。
@@ -76,6 +77,14 @@ PENDING_CONFIRMATION
 确认 nonce 由 32 字节 `SecureRandom` 生成，明文只在创建响应返回；服务端只保存 SHA-256 摘要并使用常量时间比较。confirm 要求 UUID `Idempotency-Key`。状态转换以 PendingAction 为同步边界，Sandbox 在临界区内重新检查余额和冲突、扣减余额并创建 LeaveRequest，重复确认不会再次执行。
 
 confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被拒绝。PendingAction、confirm、cancel 及 Action 错误响应均使用 `Cache-Control: no-store`。
+
+## React 人工确认链路
+
+前端收到 PendingAction 后立即把 `confirmationNonce` 从可渲染响应中拆出，仅保存到当前页面生命周期内的 `useRef(Map)`；公开消息状态和 `PendingActionCard` props 中不包含 nonce。nonce、Admin Token 和幂等 Key 都不会写入 DOM、URL、日志、`localStorage` 或 `sessionStorage`。
+
+Confirm 首次点击使用 `crypto.randomUUID()` 生成幂等 Key，并按消息保存在页面内存。网络失败、HTTP 502/503 或可重试服务端错误后，重试确认复用原 Key，避免服务端已成功但客户端未收到结果时重复执行。Cancel 不发送 `Idempotency-Key`。同步 `Set` 锁在 React 状态更新前生效，防止确认或取消的快速双击产生多个请求。
+
+卡片状态为 `pending → confirming → succeeded` 或 `pending → cancelling → cancelled`；过期草稿进入 `expired`，可重试错误进入 `error` 并且只显示与上一次决定一致的重试按钮。客户端到期计时用于提前禁用交互，服务端 `ACTION_EXPIRED` 仍是权威结果。执行中的动作会禁用清空会话和模式切换。
 
 ## 配置
 
