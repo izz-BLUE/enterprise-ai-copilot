@@ -11,13 +11,22 @@ export class BusinessActionApiError extends Error {
   }
 }
 
-async function postDecision({ path, confirmationNonce, adminToken, idempotencyKey }) {
+async function postDecision({
+  path,
+  confirmationNonce,
+  adminToken,
+  idempotencyKey,
+  demoUserId,
+}) {
   const headers = { 'Content-Type': 'application/json' }
   if (adminToken?.trim()) {
     headers['X-Admin-Token'] = adminToken.trim()
   }
   if (idempotencyKey) {
     headers['Idempotency-Key'] = idempotencyKey
+  }
+  if (demoUserId) {
+    headers['X-Demo-User-Id'] = demoUserId
   }
 
   let response
@@ -67,19 +76,27 @@ export function confirmBusinessAction({
   confirmationNonce,
   idempotencyKey,
   adminToken,
+  demoUserId,
 }) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/confirm`,
     confirmationNonce,
     idempotencyKey,
     adminToken,
+    demoUserId,
   })
 }
 
-export function cancelBusinessAction({ actionId, confirmationNonce, adminToken }) {
+export function cancelBusinessAction({
+  actionId,
+  confirmationNonce,
+  adminToken,
+  demoUserId,
+}) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/cancel`,
     confirmationNonce,
     adminToken,
+    demoUserId,
   })
 }

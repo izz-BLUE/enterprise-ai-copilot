@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import InfoPanel from './components/InfoPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ChatMessage, { UserMessage, LoadingMessage } from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import AdminPanel from './components/AdminPanel'
+import DemoIdentityPanel from './components/DemoIdentityPanel'
 import {
   BusinessActionApiError,
   cancelBusinessAction,
@@ -20,6 +21,9 @@ const TERMINAL_ACTION_ERRORS = new Set([
   'INVALID_CONFIRMATION_NONCE',
   'ACTION_STATE_CONFLICT',
   'ACTION_STALE',
+  'DEMO_IDENTITY_REQUIRED',
+  'DEMO_IDENTITY_INVALID',
+  'DEMO_IDENTITY_DISABLED',
 ])
 
 const RETRYABLE_ACTION_ERRORS = new Set([
@@ -51,6 +55,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [messages, setMessages] = useState([])
   const [adminToken, setAdminToken] = useState('')
+  const [demoIdentity, setDemoIdentity] = useState(null)
   const [error, setError] = useState(null)
   const chatEndRef = useRef(null)
   const actionSecretsRef = useRef(new Map())
@@ -59,6 +64,30 @@ function App() {
 
   const actionBusy = messages.some(message =>
     message.actionUi?.phase === 'confirming' || message.actionUi?.phase === 'cancelling')
+
+  const handleInitialIdentity = useCallback(identity => {
+    setDemoIdentity(current => current || identity)
+  }, [])
+
+  const clearIdentityBoundSession = () => {
+    setMessages([])
+    setInput('')
+    setError(null)
+    actionSecretsRef.current.clear()
+    idempotencyKeysRef.current.clear()
+    actionLocksRef.current.clear()
+  }
+
+  const handleDemoIdentityChange = nextIdentity => {
+    if (!nextIdentity || nextIdentity.userId === demoIdentity?.userId
+        || loading || actionBusy || actionLocksRef.current.size > 0) return
+    const hasPendingDraft = messages.some(message =>
+      ['pending', 'error'].includes(message.actionUi?.phase))
+    if (hasPendingDraft && !window.confirm(
+      '切换身份会清空当前会话，当前草稿需要重新生成。')) return
+    clearIdentityBoundSession()
+    setDemoIdentity(nextIdentity)
+  }
 
   // 自动滚动到底部
   useEffect(() => {
@@ -133,11 +162,13 @@ function App() {
             confirmationNonce: secret.confirmationNonce,
             idempotencyKey,
             adminToken,
+            demoUserId: demoIdentity?.userId,
           })
         : await cancelBusinessAction({
             actionId: action.actionId,
             confirmationNonce: secret.confirmationNonce,
             adminToken,
+            demoUserId: demoIdentity?.userId,
           })
 
       updateActionUi(messageId, {
@@ -191,6 +222,10 @@ function App() {
     if (!question || loading) return
 
     const requestMode = mode
+    if (requestMode === 'agent' && !demoIdentity) {
+      setError('请选择有效的演示身份。')
+      return
+    }
     setLoading(true)
     setError(null)
     setInput('')
@@ -205,6 +240,9 @@ function App() {
     const headers = { 'Content-Type': 'application/json' }
     if (requestMode === 'agent' && adminToken.trim()) {
       headers['X-Admin-Token'] = adminToken.trim()
+    }
+    if (requestMode === 'agent') {
+      headers['X-Demo-User-Id'] = demoIdentity.userId
     }
 
     try {
@@ -370,6 +408,12 @@ function App() {
         </div>
 
         <div className="input-section">
+          <DemoIdentityPanel
+            demoIdentity={demoIdentity}
+            onInitialIdentity={handleInitialIdentity}
+            onIdentityChange={handleDemoIdentityChange}
+            disabled={loading || actionBusy}
+          />
           <AdminPanel adminToken={adminToken} setAdminToken={setAdminToken} />
           <ChatInput
             input={input}

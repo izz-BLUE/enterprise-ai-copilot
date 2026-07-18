@@ -1,0 +1,50 @@
+.demo-identity-panel {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.demo-identity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.demo-identity-heading label {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.demo-role {
+  color: var(--color-primary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.demo-identity-panel select {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.demo-identity-panel select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.demo-identity-panel p {
+  margin: var(--space-sm) 0 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.demo-identity-panel .demo-identity-error {
+  color: var(--color-error);
+}

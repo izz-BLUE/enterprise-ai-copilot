@@ -36,6 +36,10 @@ export default function Sidebar({ mode, onModeChange, loading }) {
         {MODES.map(m => (
           <button
             key={m.key}
+            type="button"
+            aria-label={`切换到${m.label}`}
+            aria-pressed={mode === m.key}
+            data-mode={m.key}
             className={`nav-item ${mode === m.key ? 'active' : ''}`}
             onClick={() => onModeChange(m.key)}
             disabled={loading}
