@@ -189,16 +189,72 @@ Java 代理 Python 健康检查。
 }
 ```
 
+**响应**（完整年假申请，Java 公网契约）
+
+Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权限、日期、工作日、余额和冲突校验；校验通过后，公网响应只暴露可确认的 `pendingAction`：
+
+```json
+{
+  "answer": "我已生成一份模拟年假申请草稿，请确认后提交。",
+  "route": "action",
+  "safe": true,
+  "category": "business_action",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "...",
+  "pendingAction": {
+    "actionId": "...",
+    "type": "ANNUAL_LEAVE_REQUEST",
+    "status": "PENDING_CONFIRMATION",
+    "title": "提交模拟年假申请",
+    "summary": {
+      "displayName": "Demo User",
+      "startDate": "2026-07-20",
+      "endDate": "2026-07-20",
+      "halfDay": "NONE",
+      "days": 1.0,
+      "reason": "示例原因",
+      "balanceBefore": 5.0,
+      "balanceAfter": 4.0
+    },
+    "confirmationNonce": "仅在本次响应返回的确认凭据",
+    "expiresAt": "2026-07-20T10:10:00Z",
+    "confirmationRequired": true
+  }
+}
+```
+
+该响应使用 `Cache-Control: no-store`。`traceId` 来自 Java 入口；它同时作为 PendingAction 的权威 `originTraceId`，不采用 Python 响应中的 traceId。
+
+**响应**（年假申请缺字段）
+
+缺少日期或原因时，Python 返回确定性 Clarification，Provider 调用次数为 0，Java 不创建 PendingAction：
+
+```json
+{
+  "answer": "请提供明确的年假日期。",
+  "route": "action",
+  "safe": true,
+  "category": "business_action",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "..."
+}
+```
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `refuse` / `busy` / `error` |
+| route | string | 路由结果：`rag` / `eval` / `action` / `refuse` / `busy` / `error` |
 | safe | bool | 安全守卫是否通过 |
 | category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `overloaded` / `error` |
 | reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功 |
 | traceId | string | 请求追踪 ID |
+| pendingAction | object/null | Java 权威校验后创建的待确认动作；仅完整 Action 返回 |
 
 **权限行为（v0.3.2+）：**
 
@@ -245,13 +301,29 @@ Java 代理 Python 健康检查。
 
 确认并确定性执行一份 Java 内存中的模拟年假草稿。Feature Flag 默认关闭。
 
-请求 Header：`X-Admin-Token`、`Idempotency-Key: <UUID>`。请求体只能包含：
+请求 Header：`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
 
 ```json
-{"confirmationNonce": "一次性确认凭据"}
+{"confirmationNonce": "<confirmation-nonce>"}
 ```
 
 成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。相同或不同幂等键在成功后重试均返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额。
+
+首次成功示意：
+
+```json
+{
+  "actionId": "...",
+  "type": "ANNUAL_LEAVE_REQUEST",
+  "status": "SUCCEEDED",
+  "requestId": "...",
+  "message": "模拟年假申请已提交。",
+  "replayed": false,
+  "completedAt": "...",
+  "originTraceId": "...",
+  "traceId": "..."
+}
+```
 
 ### POST /api/agent/actions/{actionId}/cancel
 
@@ -263,7 +335,23 @@ Java 代理 Python 健康检查。
 Cache-Control: no-store
 ```
 
-Action 错误使用独立契约，错误码包括 `INVALID_IDEMPOTENCY_KEY`、`ADMIN_REQUIRED`、`INVALID_CONFIRMATION_NONCE`、`ACTION_NOT_FOUND`、`ACTION_IN_PROGRESS`、`ACTION_STATE_CONFLICT`、`ACTION_STALE`、`ACTION_EXPIRED`、`BUSINESS_RULE_VIOLATION`、`BUSINESS_ACTIONS_DISABLED` 和 `ACTION_CAPACITY_EXCEEDED`。
+Action 错误使用独立契约，错误码包括：
+
+```text
+INVALID_REQUEST
+INVALID_IDEMPOTENCY_KEY
+ADMIN_REQUIRED
+INVALID_CONFIRMATION_NONCE
+ACTION_NOT_FOUND
+ACTION_IN_PROGRESS
+ACTION_STATE_CONFLICT
+ACTION_STALE
+ACTION_EXPIRED
+ACTION_INTERNAL_ERROR
+BUSINESS_RULE_VIOLATION
+BUSINESS_ACTIONS_DISABLED
+ACTION_CAPACITY_EXCEEDED
+```
 
 该接口是 Sandbox：不接真实 OA、不使用数据库，不支持中国法定节假日和调休。
 
@@ -304,7 +392,26 @@ Python AI 服务健康检查。
 
 LangGraph Agent 问答接口（实验链路）。
 
-请求和响应格式同 Java `POST /api/agent/langgraph/chat`。
+请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions` 和 `X-Business-Date`，不读取 Admin Token。
+
+完整 Action 的 Python 内部响应包含确定性 `action_proposal`：
+
+```json
+{
+  "route": "action",
+  "category": "business_action",
+  "action_proposal": {
+    "action_type": "ANNUAL_LEAVE_REQUEST",
+    "start_date": "2026-07-20",
+    "end_date": "2026-07-20",
+    "reason": "示例原因",
+    "half_day": "NONE"
+  },
+  "missing_fields": []
+}
+```
+
+缺字段时 `action_proposal=null`，`missing_fields` 按 `start_date`、`end_date`、`reason` 的固定顺序返回。`action_proposal` 是 Java/Python 内部契约，不能绕过 Java 权威校验直接执行。
 
 ---
 

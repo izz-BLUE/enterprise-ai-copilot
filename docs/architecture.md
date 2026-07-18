@@ -17,6 +17,9 @@ flowchart TD
         CC[ChatController]
         LAC[LangGraphAgentController]
         TID[TraceIdFilter]
+        BAS[BusinessActionService]
+        PA[PendingAction Repository]
+        LS[Leave Sandbox]
     end
 
     subgraph Python ["Python FastAPI :8000"]
@@ -41,6 +44,9 @@ flowchart TD
         RN[router_node]
         RAGN[rag_node]
         EN[eval_node]
+        AN[action_node]
+        ALI[AnnualLeaveInputService]
+        ZAT[Zero-Argument Native Tool]
         REFN[refuse_node]
     end
 
@@ -75,8 +81,12 @@ flowchart TD
     SN --> RN
     RN -->|rag| RAGN
     RN -->|eval| EN
+    RN -->|annual leave action| AN
     RN -->|refuse| REFN
     RAGN --> HR
+    AN --> ALI --> ZAT
+    ZAT --> BAS --> PA
+    PA -->|confirm| LS
 
     MD --> CK --> EM --> FI
     FI -.->|在线检索| FR
@@ -105,7 +115,7 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python `/agent/langgraph/chat`，透传 traceId；根据 `admin.token` / `X-Admin-Token` 判断管理员权限，通过 `X-Allow-Eval` header 传递给 Python（v0.3.2+：公网部署 ADMIN_TOKEN 必须非空）
+- **LangGraphAgentController**：转发 `/api/agent/langgraph/chat` 到 Python，透传 Java traceId、Evaluation/Business Action 许可和 Java 权威业务日期；Admin Token 不下传 Python。Python 返回 Proposal 后，在 Python permit 已释放的情况下调用 `BusinessActionService`
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
@@ -119,7 +129,7 @@ flowchart TD
 
 - **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
-- **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/refuse）
+- **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/action/refuse）
 - **safety_guard**：基于关键词的输入安全检查（5 类风险）
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重
@@ -128,7 +138,8 @@ flowchart TD
 - **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
 - **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
-- **tool_calling_service**：独立的单 Tool 年假规划 Adapter；固定 `tool_choice=required` 且仅该调用关闭 Thinking，不接入 LangGraph
+- **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表
+- **tool_calling_service**：接入 Action Node 的零参数 Native Tool Adapter；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
 
 受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
 
@@ -182,15 +193,25 @@ POST /api/agent/langgraph/chat
           │           └── safe → 继续
           ├── router_node
           │     ├── 评估类关键词 → route=eval
-          │     └── 其他 → route=rag
+          │     ├── 明确年假申请 → route=action
+          │     └── 其他（含年假政策/余额/流程）→ route=rag
           ├── rag_node
           │     └── rag_answer_tool()
           │           └── answer_with_langchain_rag()
           ├── eval_node
           │     └── eval_report_tool()
           │           └── read evaluation reports
+          ├── action_node
+          │     └── AnnualLeaveInputService
+          │           ├── 缺字段 → 固定 Clarification（Provider 0 次）
+          │           └── 字段完整 → Zero-Argument Native Tool
+          │                 └── Python 确定性 Proposal
           └── refuse_node
                 └── 返回安全拒答文案
+    → Java BusinessActionService 权威复核
+      → PendingAction
+        ├── confirm → Leave Sandbox
+        └── cancel → CANCELLED
 ```
 
 **特点**：LangGraph 状态图编排，规则路由，Safety Guard + Tools + 多分支。
@@ -388,14 +409,17 @@ graph TD
 - 基础 API 限流（2 req/s，burst 5）
 - Java/Python 双层有界并发（默认各 3 个槽，排队 500ms）
 
-## Agent 边界说明
+## Agent 与 Controlled Action 边界说明
 
 LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
 
-- LangGraph 状态图：safety → router → rag/eval/refuse
-- Router 基于关键词匹配（评估类 vs RAG 问答）
+- LangGraph 状态图：safety → router → rag/eval/action/refuse
+- Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
 - 不具有自主任务拆解、反思、多步规划能力
 - 不使用"自主 Agent""智能规划系统"等措辞
+- Native Tool 是零参数协议门禁，不提取字段、不执行写操作、不提供业务事实
+- 前端 PendingAction 确认卡尚未实现；当前 confirm/cancel 通过后端 API 使用
+- PendingAction、幂等结果和 Leave Sandbox 均为单进程内存状态，重启后清空，不支持分布式幂等，不接真实 OA，也不处理法定节假日和调休
 
 ## Embedding Runtime
 

@@ -1,44 +1,67 @@
 # Controlled Business Actions
 
-## 边界
+## 定位与边界
 
-该能力是 v0.5.0 的内存 Sandbox，仅支持 `ANNUAL_LEAVE_REQUEST`。它不接真实 OA，不新增数据库、Redis 或消息队列，服务重启后 PendingAction、模拟余额和 LeaveRequest 全部重置。
+该能力是内存 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。它不接真实 OA，不新增数据库、Redis 或消息队列；服务重启后 PendingAction、模拟余额和 LeaveRequest 全部清空。React 确认卡尚未实现，当前通过后端 API 验证 confirm/cancel 链路。
 
-当前使用共享 Admin Token 控制访问，不代表员工身份认证。Feature Flag `business.actions.enabled` 默认关闭，生产 Compose 同样保持关闭。React 确认卡与 Python LangGraph action 路由尚未实现。
+Feature Flag `business.actions.enabled` 默认关闭。共享 Admin Token 只用于演示访问控制，不代表员工身份认证。当前不支持分布式幂等，也不处理中国法定节假日与调休。
 
-## 调用链
+## 真实调用链
 
 ```mermaid
 flowchart LR
-    U[用户自然语言] --> P[Python Tool Planner]
-    P -->|单一无副作用 Tool| L[LLM]
-    L -->|Proposal / Clarification| P
-    P -. 尚未接入 LangGraph .-> J[Java Controller]
-    J --> V[Java 权威校验]
+    U[React / API Client] --> J[Java Trace / Admin / Feature Flag]
+    J --> S[Python Safety]
+    S --> R[Deterministic Action Router]
+    R --> I[AnnualLeaveInputService]
+    I --> G{Missing Field Gate}
+    G -->|缺字段| C[Deterministic Clarification]
+    G -->|字段完整| T[Zero-Argument Native Tool]
+    T --> P[Deterministic Proposal]
+    P --> V[Java BusinessActionService]
     V --> A[PendingAction]
-    A -->|nonce + 人工 confirm| S[Leave Sandbox]
-    A -->|cancel| C[CANCELLED]
-    S --> R[模拟 LeaveRequest]
+    A -->|confirm| L[Leave Sandbox]
+    A -->|cancel| X[CANCELLED]
 ```
 
-LLM 只看到 `plan_annual_leave_request`，没有 submit、approve、update、cancel 或 execute Tool。Python 不写业务状态，也不生成 actionId、nonce、requestId、余额或审批结果。
+Safety 先于 Evaluation，Evaluation 先于 Annual Leave Action，其他请求继续进入 RAG。年假政策、余额、结转和审批流程查询不会进入 Action Tool。
 
-Tool Planner 固定使用：
+## 零参数 Native Tool
+
+`plan_annual_leave_request` 是零参数受控协议节点，不是字段抽取器、业务事实来源或写操作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、traceId、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。
+
+最终契约：
 
 ```text
+tool_name=plan_annual_leave_request
 tool_count=1
-tool_choice=required
-thinking.type=disabled
-strict=false
+parameters=omitted
+tool_choice=Named
+thinking=disabled
+strict=omitted
+retry_policy=none
+max_attempts=1
+max_tokens=64
+provider_received_business_data=NO
 ```
 
-关闭 Thinking 仅应用于专用 Tool Planner，不影响普通 RAG 调用。
+Python 先确定性解析日期、明确原因表达和半天表达。缺少日期或原因时，Python 直接返回固定 Clarification，Provider 调用次数为 0。字段完整时，Provider 只需返回一个指定函数调用，且 `arguments` 必须能解析为严格空对象 `{}`；非空 Object、Array、非法 JSON、错误 Tool 名或多个 Tool Call 都会被拒绝。代码不读取 `message.content`，也不重试。
 
-## Java 控制面
+协议成功后，Proposal 的 `start_date`、`end_date`、`reason` 和 `half_day` 全部来自 Python 确定性分析结果。Provider 超时、连接失败、状态错误或 Tool 协议错误时不会生成草稿。
 
-Java 固定 Demo Actor 为 `DEMO-001 / Demo User / ANNUAL`，使用配置时区的可注入 `Clock` 计算权威业务日期。Java 重新校验日期、31 天跨度、reason、半天规则、工作日、余额与冲突；不信任模型提供的派生值。
+该设计的生产代价是：完整字段 Action 会额外依赖一次外部 Provider 调用；Provider 不可用时草稿生成失败；Native Tool 本身不增加业务语义，只提供可观测的协议门禁。
 
-整日申请只统计周一至周五，半天为 `0.5` 天且只能发生在单个工作日。不处理中国法定节假日和调休。
+## Java 权威控制面
+
+Java 使用入口 `TraceIdFilter` 生成的 traceId 作为 `PendingAction.originTraceId`，不信任 Python 响应中的 traceId。Admin Token 仅在 Java 内校验，不下传 Python。Java 使用配置时区的可注入 `Clock` 计算业务日期，并重新校验：
+
+- Action 类型、日期完整性和日期顺序；
+- 开始日期不得早于业务日期，跨度不超过 31 个日历日；
+- reason 为 1 到 200 个非控制字符；
+- 半天仅允许单个工作日；
+- 工作日天数、余额和已有申请冲突。
+
+整日申请只统计周一至周五，半天为 `0.5` 天。固定 Demo Actor 为 `DEMO-001 / Demo User / ANNUAL`。
 
 PendingAction 状态机：
 
@@ -50,9 +73,9 @@ PENDING_CONFIRMATION
   └─ timeout → EXPIRED
 ```
 
-确认 nonce 由至少 32 字节 `SecureRandom` 生成，明文只在创建响应返回一次；服务端只保存 SHA-256 摘要并使用常量时间比较。确认需要 UUID `Idempotency-Key`。状态转换以 PendingAction 为同步边界，Sandbox 在一个临界区内重新检查余额和冲突、扣减余额并创建 LeaveRequest，保证双击不会重复执行。
+确认 nonce 由 32 字节 `SecureRandom` 生成，明文只在创建响应返回；服务端只保存 SHA-256 摘要并使用常量时间比较。confirm 要求 UUID `Idempotency-Key`。状态转换以 PendingAction 为同步边界，Sandbox 在临界区内重新检查余额和冲突、扣减余额并创建 LeaveRequest，重复确认不会再次执行。
 
-仓库使用惰性过期和有界容量，不创建后台线程。达到 Pending 上限时拒绝新建，完成记录超过上限时删除最旧项。
+confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被拒绝。PendingAction、confirm、cancel 及 Action 错误响应均使用 `Cache-Control: no-store`。
 
 ## 配置
 
@@ -66,4 +89,4 @@ PENDING_CONFIRMATION
 | `business.actions.demo-annual-leave-balance` | `5.0` |
 | `business.actions.timezone` | `Asia/Shanghai` |
 
-所有动作响应禁止缓存。审计日志只记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、摘要或完整 reason。
+仓库使用惰性过期和有界容量，不创建后台线程。审计日志记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason。
