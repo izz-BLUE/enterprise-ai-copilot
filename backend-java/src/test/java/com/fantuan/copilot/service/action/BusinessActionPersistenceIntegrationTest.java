@@ -10,6 +10,8 @@ import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
+import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.service.demo.DemoRole;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,10 +40,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {
         "business.actions.enabled=true",
-        "business.actions.require-admin=false"
+        "business.actions.require-admin=false",
+        "demo.identity.enabled=true"
 })
 class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBase {
-    @Autowired BusinessActionService service;
+    private static final DemoIdentity USER_A = new DemoIdentity(
+            "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+
+    @Autowired BusinessActionService actionService;
+    TestActionService service;
     @Autowired PendingActionRepository actions;
     @Autowired LeaveAccountRepository accounts;
     @Autowired LeaveRequestRepository requests;
@@ -52,6 +59,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
 
     @BeforeEach
     void resetDatabase() {
+        service = new TestActionService(actionService);
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
@@ -308,4 +316,25 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     }
 
     private record ConnectionResult(Integer backendPid, Object result) {}
+
+    private record TestActionService(BusinessActionService delegate) {
+        PendingActionView createPending(AnnualLeaveActionProposal proposal, String traceId,
+                                        String adminToken) {
+            return delegate.createPending(proposal, traceId, adminToken, USER_A);
+        }
+
+        ActionExecutionResponse confirm(String actionId, String nonce, String idempotencyKey,
+                                        String adminToken, String traceId) {
+            return delegate.confirm(actionId, nonce, idempotencyKey, adminToken, traceId, USER_A);
+        }
+
+        ActionExecutionResponse cancel(String actionId, String nonce, String adminToken,
+                                       String traceId) {
+            return delegate.cancel(actionId, nonce, adminToken, traceId, USER_A);
+        }
+
+        LocalDate businessDate() {
+            return delegate.businessDate();
+        }
+    }
 }

@@ -4,15 +4,17 @@ import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.AnnualLeaveSummary;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.gateway.leave.LeaveExecutionGateway;
+import com.fantuan.copilot.gateway.leave.LeaveExecutionResult;
+import com.fantuan.copilot.gateway.leave.LeaveSubmission;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
-import com.fantuan.copilot.model.action.LeaveRequest;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
-import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
+import com.fantuan.copilot.service.demo.DemoIdentity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -25,8 +27,6 @@ import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.UUID;
@@ -41,7 +41,7 @@ public class BusinessActionService {
     private final AdminAccessService adminAccessService;
     private final PendingActionRepository actions;
     private final LeaveAccountRepository accounts;
-    private final LeaveRequestRepository requests;
+    private final LeaveExecutionGateway leaveExecutionGateway;
     private final ActionNonceService nonceService;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -50,14 +50,14 @@ public class BusinessActionService {
                                  AdminAccessService adminAccessService,
                                  PendingActionRepository actions,
                                  LeaveAccountRepository accounts,
-                                 LeaveRequestRepository requests,
+                                 LeaveExecutionGateway leaveExecutionGateway,
                                  ActionNonceService nonceService,
                                  Clock clock) {
         this.properties = properties;
         this.adminAccessService = adminAccessService;
         this.actions = actions;
         this.accounts = accounts;
-        this.requests = requests;
+        this.leaveExecutionGateway = leaveExecutionGateway;
         this.nonceService = nonceService;
         this.clock = clock;
     }
@@ -69,11 +69,17 @@ public class BusinessActionService {
                 && (!properties.isRequireAdmin() || adminAccessService.isAdmin(presentedToken));
     }
 
+    public void requireAccess(String presentedToken) {
+        requireEnabledAndAdmin(presentedToken);
+    }
+
     @Transactional
     public PendingActionView createPending(AnnualLeaveActionProposal proposal,
                                            String originTraceId,
-                                           String presentedToken) {
+                                           String presentedToken,
+                                           DemoIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
         ValidatedLeave validated = validate(proposal);
         Instant now = clock.instant();
 
@@ -84,9 +90,9 @@ public class BusinessActionService {
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
         }
 
-        BigDecimal balanceBefore = accounts.findBalanceForUpdate(DemoLeaveAccountInitializer.EMPLOYEE_ID)
+        BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
                 .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
-        if (requests.hasConflict(DemoLeaveAccountInitializer.EMPLOYEE_ID,
+        if (leaveExecutionGateway.hasConflict(identity.employeeId(),
                 proposal.startDate(), proposal.endDate())) {
             throw rule("日期范围与已提交的模拟申请冲突。");
         }
@@ -98,7 +104,7 @@ public class BusinessActionService {
         ActionNonceService.Nonce nonce = nonceService.create();
         PendingAction action = PendingAction.pending(randomActionId(),
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, originTraceId,
-                DemoLeaveAccountInitializer.EMPLOYEE_ID, DemoLeaveAccountInitializer.DISPLAY_NAME,
+                identity.employeeId(), identity.displayName(),
                 proposal.startDate(), proposal.endDate(), proposal.halfDay(), validated.reason(),
                 validated.days(), balanceBefore, balanceAfter, nonce.digest(), now,
                 now.plusSeconds(properties.getTtlSeconds()));
@@ -115,10 +121,12 @@ public class BusinessActionService {
     })
     public ActionExecutionResponse confirm(String actionId, String confirmationNonce,
                                            String idempotencyKey, String presentedToken,
-                                           String traceId) {
+                                           String traceId, DemoIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
-        UUID key = parseIdempotencyKey(idempotencyKey);
+        requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
+        verifyOwner(action, identity);
+        UUID key = parseIdempotencyKey(idempotencyKey);
         Instant now = clock.instant();
         expireIfNeeded(action, now);
         verifyNonce(action, confirmationNonce);
@@ -138,17 +146,18 @@ public class BusinessActionService {
                 .orElseThrow(() -> new IllegalStateException("Leave account unavailable"));
         if (currentBalance.compareTo(action.balanceBefore()) != 0
                 || currentBalance.compareTo(action.days()) < 0
-                || requests.hasConflict(action.employeeId(), action.startDate(), action.endDate())) {
+                || leaveExecutionGateway.hasConflict(action.employeeId(),
+                action.startDate(), action.endDate())) {
             actions.markFailed(action.actionId(), "ACTION_STALE", now);
             audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.FAILED,
                     "ACTION_STALE", null, now);
             throw new ActionStaleException(action.actionId());
         }
 
-        String requestId = requestId(requests.nextNumber());
-        LeaveRequest request = new LeaveRequest(requestId, action.employeeId(), "ANNUAL",
-                action.startDate(), action.endDate(), action.halfDay(), action.days(), now);
-        requests.save(action.actionId(), request);
+        LeaveExecutionResult execution = leaveExecutionGateway.submit(new LeaveSubmission(
+                action.actionId(), action.employeeId(), action.startDate(), action.endDate(),
+                action.halfDay(), action.days(), now));
+        String requestId = execution.requestId();
         accounts.updateBalance(action.employeeId(), currentBalance.subtract(action.days()), now);
         actions.markSucceeded(action.actionId(), requestId, SUCCESS_MESSAGE, now);
         audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
@@ -160,9 +169,12 @@ public class BusinessActionService {
 
     @Transactional(noRollbackFor = ActionExpiredAfterUpdateException.class)
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
-                                          String presentedToken, String traceId) {
+                                          String presentedToken, String traceId,
+                                          DemoIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
+        verifyOwner(action, identity);
         Instant now = clock.instant();
         expireIfNeeded(action, now);
         verifyNonce(action, confirmationNonce);
@@ -274,7 +286,20 @@ public class BusinessActionService {
 
     private PendingAction findForUpdate(String actionId) {
         return actions.findForUpdate(actionId).orElseThrow(() -> new ActionException(
-                HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", actionId, null));
+                HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", null, null));
+    }
+
+    private void requireIdentity(DemoIdentity identity) {
+        if (identity == null) {
+            throw new IllegalArgumentException("Verified demo identity is required");
+        }
+    }
+
+    private void verifyOwner(PendingAction action, DemoIdentity identity) {
+        if (!action.employeeId().equals(identity.employeeId())) {
+            throw new ActionException(HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND",
+                    "未找到申请草稿。", null, null);
+        }
     }
 
     private void verifyNonce(PendingAction action, String plaintext) {
@@ -290,11 +315,6 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_IDEMPOTENCY_KEY",
                     "Idempotency-Key必须是UUID。", null, null);
         }
-    }
-
-    private String requestId(long number) {
-        return "LR-" + YearMonth.now(clock).format(DateTimeFormatter.ofPattern("yyyyMM"))
-                + "-" + String.format("%06d", number);
     }
 
     private String randomActionId() {

@@ -9,6 +9,9 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
+import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.service.demo.DemoIdentityService;
+import com.fantuan.copilot.service.demo.DemoRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -23,6 +26,38 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
+    private static final DemoIdentity USER_A = new DemoIdentity(
+            "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+
+    @Test
+    void ownershipSurvivesRestartAndIsCheckedBeforeNonceConsumption() {
+        PendingActionView pending;
+        try (ConfigurableApplicationContext first = startContext("5.0")) {
+            reset(first);
+            BusinessActionService service = first.getBean(BusinessActionService.class);
+            DemoIdentity a = first.getBean(DemoIdentityService.class).requireIdentity("DEMO-001");
+            pending = service.createPending(proposal(nextWeekday(new TestActionService(service), 2)),
+                    "restart-owner", null, a);
+        }
+
+        try (ConfigurableApplicationContext second = startContext("9.0")) {
+            BusinessActionService service = second.getBean(BusinessActionService.class);
+            DemoIdentityService identities = second.getBean(DemoIdentityService.class);
+            ActionException denied = assertThrows(ActionException.class, () -> service.confirm(
+                    pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
+                    null, "restart-b", identities.requireIdentity("DEMO-002")));
+            assertEquals("ACTION_NOT_FOUND", denied.errorCode());
+            ActionExecutionResponse confirmed = service.confirm(pending.actionId(),
+                    pending.confirmationNonce(), UUID.randomUUID().toString(), null,
+                    "restart-a", identities.requireIdentity("DEMO-001"));
+            assertEquals(com.fantuan.copilot.model.action.ActionStatus.SUCCEEDED,
+                    confirmed.status());
+            assertEquals(new BigDecimal("4.0"), second.getBean(LeaveAccountRepository.class)
+                    .findBalance("DEMO-001").orElseThrow());
+            assertEquals(new BigDecimal("5.0"), second.getBean(LeaveAccountRepository.class)
+                    .findBalance("DEMO-002").orElseThrow());
+        }
+    }
 
     @Test
     void pendingSuccessReplayAndCancellationSurviveContextRestarts() {
@@ -30,14 +65,14 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
         String firstKey = UUID.randomUUID().toString();
         try (ConfigurableApplicationContext first = startContext("5.0")) {
             reset(first);
-            BusinessActionService service = first.getBean(BusinessActionService.class);
+            TestActionService service = service(first);
             pending = service.createPending(proposal(nextWeekday(service, 2)), "origin", null);
         }
 
         ActionExecutionResponse confirmed;
         PendingActionView cancelled;
         try (ConfigurableApplicationContext second = startContext("9.0")) {
-            BusinessActionService service = second.getBean(BusinessActionService.class);
+            TestActionService service = service(second);
             assertEquals(new BigDecimal("5.0"), second.getBean(LeaveAccountRepository.class)
                     .findBalance("DEMO-001").orElseThrow());
             confirmed = service.confirm(pending.actionId(), pending.confirmationNonce(),
@@ -47,7 +82,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
         }
 
         try (ConfigurableApplicationContext third = startContext("9.0")) {
-            BusinessActionService service = third.getBean(BusinessActionService.class);
+            TestActionService service = service(third);
             ActionExecutionResponse sameKeyReplay = service.confirm(pending.actionId(),
                     pending.confirmationNonce(), firstKey, null, "same-key-replay");
             ActionExecutionResponse differentKeyReplay = service.confirm(pending.actionId(),
@@ -75,7 +110,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
         PendingActionView expired;
         try (ConfigurableApplicationContext first = startContext("5.0")) {
             reset(first);
-            BusinessActionService service = first.getBean(BusinessActionService.class);
+            TestActionService service = service(first);
             PendingActionView successful = service.createPending(
                     proposal(nextWeekday(service, 2)), "successful-origin", null);
             failed = service.createPending(proposal(nextWeekday(service, 3)), "failed-origin", null);
@@ -101,7 +136,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
             assertEquals("ACTION_STALE", repository.find(failed.actionId()).orElseThrow().failureCode());
             assertEquals(com.fantuan.copilot.model.action.ActionStatus.EXPIRED,
                     repository.find(expired.actionId()).orElseThrow().status());
-            BusinessActionService service = second.getBean(BusinessActionService.class);
+            TestActionService service = service(second);
             assertEquals("ACTION_STATE_CONFLICT", assertThrows(ActionException.class, () -> service.confirm(
                     failed.actionId(), failed.confirmationNonce(), UUID.randomUUID().toString(),
                     null, "failed-retry")).errorCode());
@@ -120,6 +155,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
                         "--spring.datasource.password=" + POSTGRES.getPassword(),
                         "--business.actions.enabled=true",
                         "--business.actions.require-admin=false",
+                        "--demo.identity.enabled=true",
                         "--business.actions.demo-annual-leave-balance=" + configuredBalance,
                         "--logging.level.root=WARN");
     }
@@ -137,11 +173,36 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
                 date, date, "restart integration test", HalfDay.NONE);
     }
 
-    private LocalDate nextWeekday(BusinessActionService service, int offset) {
+    private TestActionService service(ConfigurableApplicationContext context) {
+        return new TestActionService(context.getBean(BusinessActionService.class));
+    }
+
+    private LocalDate nextWeekday(TestActionService service, int offset) {
         LocalDate date = service.businessDate().plusDays(offset);
         while (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
             date = date.plusDays(1);
         }
         return date;
+    }
+
+    private record TestActionService(BusinessActionService delegate) {
+        PendingActionView createPending(AnnualLeaveActionProposal proposal, String traceId,
+                                        String adminToken) {
+            return delegate.createPending(proposal, traceId, adminToken, USER_A);
+        }
+
+        ActionExecutionResponse confirm(String actionId, String nonce, String idempotencyKey,
+                                        String adminToken, String traceId) {
+            return delegate.confirm(actionId, nonce, idempotencyKey, adminToken, traceId, USER_A);
+        }
+
+        ActionExecutionResponse cancel(String actionId, String nonce, String adminToken,
+                                       String traceId) {
+            return delegate.cancel(actionId, nonce, adminToken, traceId, USER_A);
+        }
+
+        LocalDate businessDate() {
+            return delegate.businessDate();
+        }
     }
 }

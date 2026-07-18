@@ -8,6 +8,8 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.service.demo.DemoIdentityService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -36,23 +38,22 @@ public class LangGraphAgentController {
     private final PythonAgentBulkhead pythonAgentBulkhead;
     private final AdminAccessService adminAccessService;
     private final BusinessActionService businessActionService;
+    private final DemoIdentityService demoIdentityService;
 
     @Value("${python.agent.base-url}")
     private String agentBaseUrl;
-
-    public LangGraphAgentController(RestTemplate restTemplate, PythonAgentBulkhead pythonAgentBulkhead) {
-        this(restTemplate, pythonAgentBulkhead, new AdminAccessService(""), null);
-    }
 
     @Autowired
     public LangGraphAgentController(RestTemplate restTemplate,
                                     PythonAgentBulkhead pythonAgentBulkhead,
                                     AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService) {
+                                    BusinessActionService businessActionService,
+                                    DemoIdentityService demoIdentityService) {
         this.restTemplate = restTemplate;
         this.pythonAgentBulkhead = pythonAgentBulkhead;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
+        this.demoIdentityService = demoIdentityService;
     }
 
     /**
@@ -68,8 +69,20 @@ public class LangGraphAgentController {
                                                            HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
         String presentedToken = httpRequest.getHeader("X-Admin-Token");
+        String demoUserId = httpRequest.getHeader("X-Demo-User-Id");
+        DemoIdentity identity = null;
+        try {
+            if (demoIdentityService.isEnabled()) {
+                identity = demoIdentityService.requireIdentity(demoUserId);
+            } else if (demoUserId != null && !demoUserId.trim().isEmpty()) {
+                demoIdentityService.requireIdentity(demoUserId);
+            }
+        } catch (ActionException exception) {
+            return safeIdentityFailure(traceId, exception);
+        }
         boolean allowEval = adminAccessService.isAdmin(presentedToken);
         boolean allowBusinessActions = businessActionService != null
+                && identity != null
                 && businessActionService.isAllowed(presentedToken);
         log.info("[{}] 收到 LangGraph Agent 请求: allowEval={}, allowBusinessActions={}",
                 traceId, allowEval, allowBusinessActions);
@@ -122,7 +135,7 @@ public class LangGraphAgentController {
             }
             try {
                 pendingAction = businessActionService.createPending(
-                        pythonResponse.actionProposal(), traceId, presentedToken);
+                        pythonResponse.actionProposal(), traceId, presentedToken, identity);
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
@@ -172,6 +185,15 @@ public class LangGraphAgentController {
         AgentChatResponse response = new AgentChatResponse(message, "error", true,
                 "business_action", "", List.of(), false, traceId);
         return ResponseEntity.ok()
+                .cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(response);
+    }
+
+    private ResponseEntity<AgentChatResponse> safeIdentityFailure(String traceId,
+                                                                  ActionException exception) {
+        AgentChatResponse response = new AgentChatResponse(exception.getMessage(), "error", true,
+                "demo_identity", "", List.of(), false, traceId);
+        return ResponseEntity.status(exception.httpStatus())
                 .cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(response);
     }
