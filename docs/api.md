@@ -301,7 +301,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 ### POST /api/agent/actions/{actionId}/confirm
 
-确认并确定性执行一份 Java 内存中的模拟年假草稿。Feature Flag 默认关闭。
+确认并确定性执行一份 PostgreSQL 持久化的模拟年假草稿。Feature Flag 默认关闭。
 
 请求 Header：`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
 
@@ -309,7 +309,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 {"confirmationNonce": "<confirmation-nonce>"}
 ```
 
-成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。相同或不同幂等键在成功后重试均返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额。
+成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。成功终态、首个幂等键和执行结果均持久化；Java/PostgreSQL 重启后，相同或不同合法幂等键重试仍返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额或创建 LeaveRequest。
 
 前端首次 Confirm 使用 `crypto.randomUUID()` 生成并缓存该草稿的 Key。网络失败、HTTP 502/503 或其他可重试错误后，“重试确认”必须复用同一个 Key；快速双击由请求前同步锁拦截，只允许一个在途请求。请求体不会回传 summary、日期、原因、余额或状态。
 
@@ -334,6 +334,8 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 取消尚未确认的草稿。请求 Header 为 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
 
 React 根据 `expiresAt` 设置有界计时器，本地到期后禁用 Confirm/Cancel 并提示重新生成草稿；如果服务端返回 `ACTION_EXPIRED`，同样进入不可重试的过期终态。服务端时间与状态始终是权威来源。
+
+后端只持久化 confirmation nonce 的 SHA-256 摘要，不保存明文。明文只存在当前页面内存，因此浏览器刷新后无法恢复旧草稿的确认凭据，需要重新生成草稿。
 
 所有 PendingAction、confirm、cancel 和 Action 错误响应均包含：
 

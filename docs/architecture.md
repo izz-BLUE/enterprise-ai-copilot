@@ -18,8 +18,8 @@ flowchart TD
         LAC[LangGraphAgentController]
         TID[TraceIdFilter]
         BAS[BusinessActionService]
-        PA[PendingAction Repository]
-        LS[Leave Sandbox]
+        PA[JDBC Action Repository]
+        LS[JDBC Leave Repositories]
     end
 
     subgraph Python ["Python FastAPI :8000"]
@@ -28,6 +28,12 @@ flowchart TD
         EP2[/agent/langgraph/chat]
         SG[Safety Guard]
         RT[Router]
+    end
+
+    subgraph Database ["PostgreSQL 16"]
+        BA[(business_action)]
+        AC[(leave_account)]
+        LR[(leave_request)]
     end
 
     subgraph RAG ["RAG 管道"]
@@ -86,7 +92,10 @@ flowchart TD
     RAGN --> HR
     AN --> ALI --> ZAT
     ZAT --> BAS --> PA
-    PA -->|confirm| LS
+    PA --> BA
+    PA -->|confirm transaction| LS
+    LS --> AC
+    LS --> LR
 
     MD --> CK --> EM --> FI
     FI -.->|在线检索| FR
@@ -122,8 +131,9 @@ flowchart TD
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
-- **BusinessActionService**：Java 权威校验、PendingAction 状态机、幂等确认与审计
-- **LeaveSandboxService**：线程安全的内存年假余额与模拟 LeaveRequest，重启后重置
+- **BusinessActionService**：Java 权威校验、Spring 事务、PendingAction 状态机、持久化幂等确认与审计
+- **JdbcPendingActionRepository / JdbcLeaveAccountRepository / JdbcLeaveRequestRepository**：明确 SQL、Action/Account 行锁、唯一申请关联和原子余额扣减
+- **Flyway / PostgreSQL 16**：版本化结构迁移，并持久化 Action、余额、申请及执行结果
 
 ## Python AI Service 职责
 
@@ -211,7 +221,7 @@ POST /api/agent/langgraph/chat
     → Java BusinessActionService 权威复核
       → PendingAction
         → React 脱敏确认卡
-          ├── confirm + 稳定 Idempotency-Key → Leave Sandbox
+          ├── confirm + 稳定 Idempotency-Key → PostgreSQL事务、Account行锁、LeaveRequest
           └── cancel（无 Idempotency-Key）→ CANCELLED
 ```
 
@@ -421,7 +431,8 @@ LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
 - Native Tool 是零参数协议门禁，不提取字段、不执行写操作、不提供业务事实
 - React 展示 PendingAction 确认卡；confirmationNonce 和 Confirm 幂等 Key 仅存在页面内存，双击由同步锁拦截，网络失败重试 Confirm 时复用原 Key
 - 客户端按 `expiresAt` 提前禁用过期草稿，服务端 Action 状态和错误码仍是权威来源；确认/取消执行期间禁用清空会话和模式切换
-- PendingAction、幂等结果和 Leave Sandbox 均为单进程内存状态，重启后清空，不支持分布式幂等，不接真实 OA，也不处理法定节假日和调休
+- PendingAction、幂等结果、余额和 LeaveRequest 均持久化到 PostgreSQL；Action/Account 行锁和唯一 `source_action_id` 保证并发确认只执行一次，Java 或数据库重启后可恢复和重放
+- 仍不接真实 OA、不使用 Redis，也不处理法定节假日和调休；浏览器刷新不会恢复只存在页面内存的 nonce 明文
 
 ## Embedding Runtime
 

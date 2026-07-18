@@ -2,9 +2,9 @@
 
 ## 定位与边界
 
-该能力是内存 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。它不接真实 OA，不新增数据库、Redis 或消息队列；服务重启后 PendingAction、模拟余额和 LeaveRequest 全部清空。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
+该能力是 PostgreSQL 持久化的受控 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。PostgreSQL 是生产强依赖，数据库不可用时应用启动失败且不会降级到内存。它不接真实 OA、不使用 Redis 或消息队列。PendingAction、模拟余额和 LeaveRequest 可跨 Java/PostgreSQL 重启恢复。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
 
-Feature Flag `business.actions.enabled` 默认关闭。共享 Admin Token 只用于演示访问控制，不代表员工身份认证。当前不支持分布式幂等，也不处理中国法定节假日与调休。
+Feature Flag `business.actions.enabled` 默认关闭。共享 Admin Token 只用于演示访问控制，不代表员工身份认证。数据库终态和唯一 `source_action_id` 支持多 Java 实例间的确认重放；当前仍不处理中国法定节假日与调休。
 
 ## 真实调用链
 
@@ -19,9 +19,9 @@ flowchart LR
     G -->|字段完整| T[Zero-Argument Native Tool]
     T --> P[Deterministic Proposal]
     P --> V[Java BusinessActionService]
-    V --> A[PendingAction]
+    V --> A[(PostgreSQL PendingAction)]
     A --> R[React PendingAction Card]
-    R -->|confirm + stable idempotency key| L[Leave Sandbox]
+    R -->|confirm + stable idempotency key| L[(Leave Account + LeaveRequest)]
     R -->|cancel| X[CANCELLED]
 ```
 
@@ -74,7 +74,11 @@ PENDING_CONFIRMATION
   └─ timeout → EXPIRED
 ```
 
-确认 nonce 由 32 字节 `SecureRandom` 生成，明文只在创建响应返回；服务端只保存 SHA-256 摘要并使用常量时间比较。confirm 要求 UUID `Idempotency-Key`。状态转换以 PendingAction 为同步边界，Sandbox 在临界区内重新检查余额和冲突、扣减余额并创建 LeaveRequest，重复确认不会再次执行。
+确认 nonce 由 32 字节 `SecureRandom` 生成，明文只在创建响应返回；数据库只保存 32 字节 SHA-256 摘要，Java 使用常量时间比较。浏览器刷新后 nonce 不会恢复，因为明文仅存在页面内存。confirm 要求 UUID `Idempotency-Key`。
+
+`createPending` 先锁定 `business_action_control`，并发安全地执行过期转换、容量检查和历史清理；随后锁定 Demo `leave_account`。confirm/cancel 使用 `SELECT ... FOR UPDATE` 锁定 Action 行；confirm 再锁定 Account 行，在一个事务内复查余额与日期冲突、插入唯一 `source_action_id` 的 LeaveRequest、扣减余额并写入成功结果。任何数据库异常会整体回滚，草稿保持可重试；成功后无论使用相同或不同合法幂等 Key，均从持久化终态返回同一 requestId。
+
+LeaveRequest 编号由 PostgreSQL Sequence 生成。事务回滚时 Sequence 已取出的编号不会回收，因此编号允许出现间隙，但不会因服务或数据库重启而重复。
 
 confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被拒绝。PendingAction、confirm、cancel 及 Action 错误响应均使用 `Cache-Control: no-store`。
 
@@ -98,4 +102,4 @@ Confirm 首次点击使用 `crypto.randomUUID()` 生成幂等 Key，并按消息
 | `business.actions.demo-annual-leave-balance` | `5.0` |
 | `business.actions.timezone` | `Asia/Shanghai` |
 
-仓库使用惰性过期和有界容量，不创建后台线程。审计日志记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason。
+仓库使用事务内惰性过期和数据库有界容量，不创建后台线程。`maxCompleted` 只清理未被 LeaveRequest 引用的 `CANCELLED / EXPIRED / FAILED`；成功 Action 保留，以满足外键和重放要求。审计日志记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason。
