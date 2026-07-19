@@ -4,7 +4,11 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from openai import APIConnectionError, APIStatusError, APITimeoutError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
+
+from app.schemas.action_schema import ProposalPlanningResult
+from app.services.annual_leave_input_service import AnnualLeaveInputAnalysis
+from app.services import llm_service, tool_calling_service
 
 from app.services.tool_calling_service import (
     SYSTEM_MESSAGE,
@@ -107,6 +111,213 @@ def test_complete_request_calls_provider_once_with_fixed_zero_argument_contract(
         "strict",
     ):
         assert omitted not in request
+
+
+def test_controlled_client_disables_sdk_retries(monkeypatch):
+    monkeypatch.setattr(llm_service, "DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(llm_service, "DEEPSEEK_BASE_URL", "https://provider.test/v1")
+    monkeypatch.setattr(llm_service, "DEEPSEEK_MODEL", "test-model")
+    monkeypatch.setattr(llm_service, "_controlled_tool_client", None)
+
+    client = llm_service._get_controlled_tool_client()
+
+    assert client.max_retries == 0
+
+
+@pytest.mark.parametrize("failure", ["status", "connection"])
+def test_real_sdk_transport_makes_one_http_attempt(monkeypatch, failure):
+    attempts = 0
+
+    def handler(request):
+        nonlocal attempts
+        attempts += 1
+        if failure == "connection":
+            raise httpx.ConnectError("test connection failure", request=request)
+        return httpx.Response(500, json={"error": {"message": "test failure"}})
+
+    transport = httpx.MockTransport(handler)
+    real_openai = OpenAI
+
+    def openai_with_mock_transport(**kwargs):
+        return real_openai(
+            **kwargs,
+            http_client=httpx.Client(transport=transport),
+        )
+
+    monkeypatch.setattr(llm_service, "OpenAI", openai_with_mock_transport)
+    monkeypatch.setattr(llm_service, "DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr(llm_service, "DEEPSEEK_BASE_URL", "https://provider.test/v1")
+    monkeypatch.setattr(llm_service, "DEEPSEEK_MODEL", "test-model")
+    monkeypatch.setattr(llm_service, "_controlled_tool_client", None)
+    monkeypatch.setattr(tool_calling_service, "DEEPSEEK_MODEL", "test-model")
+
+    result = plan_annual_leave_action(
+        COMPLETE,
+        business_date=BUSINESS_DATE,
+    )
+
+    assert result.error_code == "provider_unavailable"
+    assert attempts == 1
+
+
+def test_real_sdk_serialized_request_contains_only_protocol_data(monkeypatch):
+    request_count = 0
+    tool_arguments = "{}"
+    question = (
+        "question-canary-annual-leave "
+        "2026-11-17 2026-11-18 "
+        "reason-canary-private-family-event "
+        "duration-canary-2-days "
+        "employee-canary-DEMO-002 "
+        "display-name-canary-user-b "
+        "demo-user-canary-DEMO-002 "
+        "balance-canary-7.5 "
+        "admin-token-canary-private "
+        "nonce-canary-private "
+        "idempotency-canary-private"
+    )
+    forbidden_keys = {
+        "startDate", "start_date", "endDate", "end_date", "reason",
+        "halfDay", "half_day", "days", "employeeId", "employee_id",
+        "displayName", "display_name", "demoUserId", "demo_user_id",
+        "balance", "leaveBalance", "leave_balance", "traceId", "trace_id",
+        "adminToken", "admin_token", "confirmationNonce", "confirmation_nonce",
+        "idempotencyKey", "idempotency_key", "actionId", "action_id",
+        "requestId", "request_id",
+    }
+    forbidden_values = [
+        "question-canary-annual-leave",
+        "2026-11-17",
+        "2026-11-18",
+        "reason-canary-private-family-event",
+        "duration-canary-2-days",
+        "employee-canary-DEMO-002",
+        "display-name-canary-user-b",
+        "demo-user-canary-DEMO-002",
+        "balance-canary-7.5",
+        "policy-context-business-canary",
+        "trace-canary-private",
+        "admin-token-canary-private",
+        "nonce-canary-private",
+        "idempotency-canary-private",
+    ]
+
+    def collect_keys(value):
+        keys = set()
+        if isinstance(value, dict):
+            for key, child in value.items():
+                keys.add(key)
+                keys.update(collect_keys(child))
+        elif isinstance(value, list):
+            for child in value:
+                keys.update(collect_keys(child))
+        return keys
+
+    def handler(request):
+        nonlocal request_count
+        request_count += 1
+        raw_body = request.content.decode("utf-8")
+        payload = json.loads(raw_body)
+
+        assert request.method == "POST"
+        assert request.url.path.endswith("/chat/completions")
+        assert payload["model"] == "test-model"
+        assert payload["messages"] == [
+            {"role": "system", "content": tool_calling_service.SYSTEM_MESSAGE},
+            {"role": "user", "content": tool_calling_service.USER_MESSAGE},
+        ]
+        assert payload["tools"] == [tool_calling_service.ANNUAL_LEAVE_TOOL]
+        function = payload["tools"][0]["function"]
+        assert function["name"] == tool_calling_service.TOOL_NAME
+        assert "description" in function
+        assert "parameters" not in function
+        assert "strict" not in function
+        assert payload["tool_choice"] == (
+            tool_calling_service.FORCED_ANNUAL_LEAVE_TOOL_CHOICE
+        )
+        assert payload["thinking"] == {"type": "disabled"}
+        assert payload["max_tokens"] == 64
+        assert collect_keys(payload).isdisjoint(forbidden_keys)
+        for value in forbidden_values:
+            assert value not in raw_body
+        assert tool_calling_service.SYSTEM_MESSAGE in raw_body
+        assert tool_calling_service.USER_MESSAGE in raw_body
+        assert tool_calling_service.TOOL_NAME in raw_body
+
+        return httpx.Response(
+            status_code=200,
+            json={
+                "id": "chatcmpl-controlled-tool-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call-controlled-tool-test",
+                            "type": "function",
+                            "function": {
+                                "name": tool_calling_service.TOOL_NAME,
+                                "arguments": tool_arguments,
+                            },
+                        }],
+                    },
+                    "finish_reason": "tool_calls",
+                }],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    analysis = AnnualLeaveInputAnalysis(
+        normalized_question=question,
+        date_evidence=["2026-11-17", "2026-11-18"],
+        start_date=date(2026, 11, 17),
+        end_date=date(2026, 11, 18),
+        reason_evidence="reason-canary-private-family-event",
+        half_day="NONE",
+        missing_fields=[],
+    )
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as http_client:
+        client = OpenAI(
+            api_key="test-controlled-tool-key",
+            base_url="https://controlled-tool.test/v1",
+            max_retries=0,
+            timeout=1.0,
+            http_client=http_client,
+        )
+        monkeypatch.setattr(
+            tool_calling_service,
+            "_get_controlled_tool_client",
+            lambda: client,
+        )
+        monkeypatch.setattr(tool_calling_service, "DEEPSEEK_MODEL", "test-model")
+        monkeypatch.setattr(
+            tool_calling_service,
+            "analyze_annual_leave_input",
+            lambda *_args, **_kwargs: analysis,
+        )
+
+        result = plan_annual_leave_action(
+            question,
+            business_date=date(2026, 11, 16),
+            policy_context="policy-context-business-canary",
+            trace_id="trace-canary-private",
+        )
+
+    assert isinstance(result, ProposalPlanningResult)
+    assert request_count == 1
+    assert json.loads(tool_arguments) == {}
+    assert result.proposal.start_date == date(2026, 11, 17)
+    assert result.proposal.end_date == date(2026, 11, 18)
+    assert result.proposal.reason == "reason-canary-private-family-event"
 
 
 @pytest.mark.parametrize(

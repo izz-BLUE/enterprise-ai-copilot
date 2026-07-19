@@ -36,6 +36,15 @@ class _FakePrompt:
 
 
 class ShadowGenerationPathsTest(unittest.TestCase):
+    def setUp(self):
+        self._model_patch = patch(
+            'app.services.rag_service.DEEPSEEK_MODEL', 'test-model',
+        )
+        self._model_patch.start()
+
+    def tearDown(self):
+        self._model_patch.stop()
+
     @patch('app.services.rag_service.log_gate_event')
     @patch('app.services.rag_service.call_llm', return_value='unchanged answer')
     @patch('app.services.rag_service.build_rag_prompt', return_value='prompt')

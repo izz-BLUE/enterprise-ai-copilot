@@ -20,7 +20,7 @@ from app.services.annual_leave_input_service import (
     analyze_annual_leave_input,
     clarification_question,
 )
-from app.services.llm_service import _get_client
+from app.services.llm_service import _get_controlled_tool_client
 
 
 for logger_name in ("httpx", "httpcore", "openai", "openai._base_client"):
@@ -107,7 +107,7 @@ def plan_annual_leave_action(
             )
         )
 
-    create = completion_create or _get_client().chat.completions.create
+    create = completion_create or _get_controlled_tool_client().chat.completions.create
     try:
         response = create(
             model=DEEPSEEK_MODEL,

@@ -6,19 +6,44 @@ from app.core.config import (
 )
 
 _client: OpenAI | None = None
+_controlled_tool_client: OpenAI | None = None
+
+
+def _build_client(*, max_retries: int | None = None) -> OpenAI:
+    missing = [
+        name for name, value in (
+            ('DEEPSEEK_API_KEY', DEEPSEEK_API_KEY),
+            ('DEEPSEEK_BASE_URL', DEEPSEEK_BASE_URL),
+            ('DEEPSEEK_MODEL', DEEPSEEK_MODEL),
+        ) if not value
+    ]
+    if missing:
+        raise RuntimeError(f"缺少必需的 Provider 环境变量: {', '.join(missing)}")
+
+    options = {
+        'api_key': DEEPSEEK_API_KEY,
+        'base_url': DEEPSEEK_BASE_URL,
+        'timeout': float(LLM_TIMEOUT),
+    }
+    if max_retries is not None:
+        options['max_retries'] = max_retries
+    return OpenAI(**options)
 
 
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        if not DEEPSEEK_API_KEY:
-            raise RuntimeError('环境变量 DEEPSEEK_API_KEY 未配置，无法调用 LLM')
-        _client = OpenAI(
-            api_key=DEEPSEEK_API_KEY,
-            base_url=DEEPSEEK_BASE_URL,
-            timeout=float(LLM_TIMEOUT),
-        )
+        # Preserve the SDK's existing retry behavior for standard RAG calls.
+        _client = _build_client()
     return _client
+
+
+def _get_controlled_tool_client() -> OpenAI:
+    global _controlled_tool_client
+    if _controlled_tool_client is None:
+        # Controlled business actions must make exactly one HTTP attempt.
+        _controlled_tool_client = _build_client(max_retries=0)
+    return _controlled_tool_client
 
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:

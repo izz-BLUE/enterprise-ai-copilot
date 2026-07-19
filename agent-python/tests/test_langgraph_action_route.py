@@ -68,7 +68,7 @@ def test_missing_date_and_reason_return_action_clarification_without_provider():
         ("申请2026-07-20一天年假", ["reason"]),
     ):
         with patch(
-            "app.services.tool_calling_service._get_client",
+            "app.services.tool_calling_service._get_controlled_tool_client",
             side_effect=AssertionError("provider must not be called"),
         ):
             result = action_node(state(question))
