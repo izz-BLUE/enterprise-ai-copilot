@@ -31,7 +31,7 @@ Safety 先于 Evaluation，Evaluation 先于 Annual Leave Action，其他请求�
 
 ## 零参数 Native Tool
 
-`plan_annual_leave_request` 是零参数受控协议节点，不是字段抽取器、业务事实来源或写操作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、traceId、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。
+`plan_annual_leave_request` 是零参数受控协议节点，不是字段抽取器、业务事实来源或写操作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、traceId、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。受控 Tool Calling 使用独立 OpenAI SDK 客户端并显式设置 `max_retries=0`；应用层不递归、不循环重试，因此一次规划最多产生一次 Provider HTTP 请求。普通 RAG 客户端保持既有 SDK 行为。
 
 最终契约：
 
@@ -91,6 +91,8 @@ confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被
 前端收到 PendingAction 后立即把 `confirmationNonce` 从可渲染响应中拆出，仅保存到当前页面生命周期内的 `useRef(Map)`；公开消息状态和 `PendingActionCard` props 中不包含 nonce。nonce、Admin Token 和幂等 Key 都不会写入 DOM、URL、日志、`localStorage` 或 `sessionStorage`。
 
 Confirm 首次点击使用 `crypto.randomUUID()` 生成幂等 Key，并按消息保存在页面内存。网络失败、HTTP 502/503 或可重试服务端错误后，重试确认复用原 Key，避免服务端已成功但客户端未收到结果时重复执行。Cancel 不发送 `Idempotency-Key`。同步 `Set` 锁在 React 状态更新前生效，防止确认或取消的快速双击产生多个请求。
+
+Confirm 首次成功后，Action 的持久化成功结果成为权威结果。后续使用相同或不同的格式合法 UUID `Idempotency-Key` 再次确认，均重放原 `requestId` 并返回 `replayed=true`，不会再次创建 LeaveRequest 或扣减余额。
 
 卡片状态为 `pending → confirming → succeeded` 或 `pending → cancelling → cancelled`；过期草稿进入 `expired`，可重试错误进入 `error` 并且只显示与上一次决定一致的重试按钮。客户端到期计时用于提前禁用交互，服务端 `ACTION_EXPIRED` 仍是权威结果。执行中的动作会禁用清空会话、模式切换和身份选择。切换身份前对未处理草稿二次确认，确认后清空消息、nonce、Action UI、幂等 Key 和同步锁。身份只保存在 React state，不写入 localStorage、sessionStorage、Cookie 或 URL。
 

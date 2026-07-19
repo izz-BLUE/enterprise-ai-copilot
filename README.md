@@ -66,7 +66,7 @@ Cross Encoder 精排和 Retrieval Shadow Gate 均做过实验，但在当前数�
 | [Quality Assurance](docs/quality-assurance.md) | CI、检索评估、安全检查、发布验证与已知边界 |
 | [v0.4.0 Release Notes](docs/releases/v0.4.0.md) | 有界并发、目标服务器验收摘要、升级与回滚说明 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
-| [Demo Guide](docs/demo-guide.md) | 多用户请假演示、越权拒绝和重启恢复脚本 |
+| [Demo Guide](docs/demo-guide.md) | 多用户请假演示、越权拒绝、幂等与持久化恢复操作手册 |
 | [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
 | [Contributing](CONTRIBUTING.md) | 本地检查、变更规范与 PR 清单 |
 
