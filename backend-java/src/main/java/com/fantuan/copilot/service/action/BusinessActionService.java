@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.DayOfWeek;
@@ -29,6 +32,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.UUID;
 
 @Service
@@ -333,12 +337,25 @@ public class BusinessActionService {
         return new ActionException(status, code, message, action.actionId(), action.status());
     }
 
-    private void audit(String traceId, PendingAction action, ActionStatus from,
-                       ActionStatus to, String resultCode, String requestId, Instant completedAt) {
-        log.info("action_audit traceId={} originTraceId={} actionId={} actionType={} "
-                        + "statusFrom={} statusTo={} resultCode={} requestId={} createdAt={} completedAt={}",
-                traceId, action.originTraceId(), action.actionId(), action.actionType(), from, to,
-                resultCode, requestId, action.createdAt(), completedAt);
+    void audit(String traceId, PendingAction action, ActionStatus from,
+               ActionStatus to, String resultCode, String requestId, Instant completedAt) {
+        log.info("action_audit traceId={} originTraceId={} actionRef={} actionType={} "
+                        + "statusFrom={} statusTo={} resultCode={} requestRef={} createdAt={} completedAt={}",
+                traceId, action.originTraceId(), auditRef(action.actionId()), action.actionType(), from, to,
+                resultCode, auditRef(requestId), action.createdAt(), completedAt);
+    }
+
+    static String auditRef(String rawId) {
+        if (rawId == null) {
+            return "-";
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(rawId.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 6);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
     }
 
     private record ValidatedLeave(String reason, BigDecimal days) {}
