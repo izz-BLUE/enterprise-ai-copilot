@@ -41,6 +41,7 @@ LangGraph 路由是并行的实验链路；上图展示稳定 RAG 主流程。�
 | Isolation | Nginx → localhost Java → Docker 内网 Python；模型和数据只读挂载 |
 | Overload control | Nginx 限流 + Java/Python 各 3 个并发槽；超限返回 JSON 429 |
 | Verification | Java/Python 单测、检索评估、前端 lint/build、Playwright、分层 k6 场景 |
+| Controlled actions | 三个白名单 Demo 身份、PostgreSQL 数据隔离、HITL 确认与 `LeaveExecutionGateway` |
 
 ## Design decisions and trade-offs
 
@@ -65,6 +66,7 @@ Cross Encoder 精排和 Retrieval Shadow Gate 均做过实验，但在当前数�
 | [Quality Assurance](docs/quality-assurance.md) | CI、检索评估、安全检查、发布验证与已知边界 |
 | [v0.4.0 Release Notes](docs/releases/v0.4.0.md) | 有界并发、目标服务器验收摘要、升级与回滚说明 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
+| [Demo Guide](docs/demo-guide.md) | 多用户请假演示、越权拒绝、幂等与持久化恢复操作手册 |
 | [Roadmap](docs/roadmap.md) | 已完成 / 计划中 / 未来功能 |
 | [Contributing](CONTRIBUTING.md) | 本地检查、变更规范与 PR 清单 |
 

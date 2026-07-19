@@ -199,6 +199,7 @@ graph LR
     H[Host localhost] --> J[Java Backend<br/>127.0.0.1:8080]
     J --> N[Docker bridge<br/>ai-copilot-net]
     N --> P[Python Agent<br/>expose 8000]
+    N --> PG[PostgreSQL 16<br/>expose 5432]
     P --> M[models/:ro]
     P --> D[data/processed/:ro]
 ```
@@ -209,6 +210,7 @@ graph LR
 |------|----------|------|
 | Python | 512 MiB | Uvicorn 单 Worker |
 | Java | 512 MiB | JVM -Xms64m -Xmx256m |
+| PostgreSQL | Compose 管理 | 独立命名 Volume，Flyway 自动迁移 |
 
 ### 端口绑定
 
@@ -216,6 +218,7 @@ graph LR
 |------|------|------|
 | Python | 8000 | 仅 Docker 内网（expose） |
 | Java | 8080 | 127.0.0.1（localhost only） |
+| PostgreSQL | 5432 | 仅 Docker 内网（expose，不映射宿主机） |
 
 ### 环境变量
 
@@ -233,8 +236,17 @@ graph LR
 | PYTHON_AGENT_CONNECT_TIMEOUT | ${PYTHON_AGENT_CONNECT_TIMEOUT:-3000}（毫秒） |
 | PYTHON_AGENT_READ_TIMEOUT | ${PYTHON_AGENT_READ_TIMEOUT:-40000}（毫秒） |
 | PYTHON_AGENT_MAX_CONCURRENT_REQUESTS | ${PYTHON_AGENT_MAX_CONCURRENT_REQUESTS:-3} |
+| POSTGRES_DB | PostgreSQL 数据库名 |
+| POSTGRES_USER | PostgreSQL 用户名 |
+| POSTGRES_PASSWORD | 必填，无默认生产密码 |
+| SPRING_DATASOURCE_URL | Java 到 Compose PostgreSQL 的 JDBC 地址 |
 | PYTHON_AGENT_ACQUIRE_TIMEOUT_MS | ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500} |
 | ADMIN_TOKEN | ${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}（必填） |
+| DEMO_IDENTITY_ENABLED | false；仅受控演示环境显式设置 true |
+
+PostgreSQL 是 Java 受控业务动作的生产强依赖：Java 等待数据库健康后启动，Flyway 自动迁移；数据库不可用时启动或健康检查失败，不会降级为内存存储。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
+
+本地或受控请假演示需同时设置 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
 
 ## Secret 管理
 

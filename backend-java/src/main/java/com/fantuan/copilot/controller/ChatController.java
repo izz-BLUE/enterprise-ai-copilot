@@ -39,7 +39,8 @@ public class ChatController {
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request,
                                              HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
-        log.info("[{}] 收到普通 RAG 请求: {}", traceId, request.message());
+        log.info("[{}] 收到普通 RAG 请求: messageLength={}",
+                traceId, request.message().length());
 
         PythonAgentBulkhead.Permit permit = pythonAgentBulkhead.tryAcquire(traceId);
         if (permit == null) {
@@ -64,8 +65,8 @@ public class ChatController {
                 log.warn("[{}] Python 并发已满", traceId);
                 return busy(traceId);
             }
-            log.error("[{}] Python 返回 HTTP 4xx: status={}, body={}",
-                    traceId, e.getStatusCode(), e.getResponseBodyAsString(), e);
+            log.error("[{}] Python 返回 HTTP 4xx: status={}",
+                    traceId, e.getStatusCode());
             return ResponseEntity.ok(new ChatResponse(
                     "当前 AI 服务暂时不可用，请稍后重试。",
                     "unknown",

@@ -189,16 +189,76 @@ Java 代理 Python 健康检查。
 }
 ```
 
+**响应**（完整年假申请，Java 公网契约）
+
+Agent 模式必须携带 `X-Demo-User-Id`，其值只能来自服务端演示身份目录。该请求头仅用于本地或受控演示环境，不是真实认证；Java 不会把它、employeeId、角色、余额或申请历史发送给 Python/模型。
+
+Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权限、日期、工作日、余额和冲突校验；校验通过后，公网响应只暴露可确认的 `pendingAction`：
+
+```json
+{
+  "answer": "我已生成一份模拟年假申请草稿，请确认后提交。",
+  "route": "action",
+  "safe": true,
+  "category": "business_action",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "...",
+  "pendingAction": {
+    "actionId": "...",
+    "type": "ANNUAL_LEAVE_REQUEST",
+    "status": "PENDING_CONFIRMATION",
+    "title": "提交模拟年假申请",
+    "summary": {
+      "displayName": "Demo User",
+      "startDate": "2026-07-20",
+      "endDate": "2026-07-20",
+      "halfDay": "NONE",
+      "days": 1.0,
+      "reason": "示例原因",
+      "balanceBefore": 5.0,
+      "balanceAfter": 4.0
+    },
+    "confirmationNonce": "仅在本次响应返回的确认凭据",
+    "expiresAt": "2026-07-20T10:10:00Z",
+    "confirmationRequired": true
+  }
+}
+```
+
+该响应使用 `Cache-Control: no-store`。`traceId` 来自 Java 入口；它同时作为 PendingAction 的权威 `originTraceId`，不采用 Python 响应中的 traceId。
+
+React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公开消息状态和确认卡只保留草稿摘要；nonce 仅保存在页面内存 `Map` 中，不进入 DOM、日志或浏览器持久化存储。
+
+**响应**（年假申请缺字段）
+
+缺少日期或原因时，Python 返回确定性 Clarification，Provider 调用次数为 0，Java 不创建 PendingAction：
+
+```json
+{
+  "answer": "请提供明确的年假日期。",
+  "route": "action",
+  "safe": true,
+  "category": "business_action",
+  "reason": "",
+  "sources": [],
+  "success": true,
+  "traceId": "..."
+}
+```
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `refuse` / `busy` / `error` |
+| route | string | 路由结果：`rag` / `eval` / `action` / `refuse` / `busy` / `error` |
 | safe | bool | 安全守卫是否通过 |
 | category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `overloaded` / `error` |
 | reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功 |
 | traceId | string | 请求追踪 ID |
+| pendingAction | object/null | Java 权威校验后创建的待确认动作；仅完整 Action 返回 |
 
 **权限行为（v0.3.2+）：**
 
@@ -241,6 +301,83 @@ Java 代理 Python 健康检查。
 
 ---
 
+### POST /api/agent/actions/{actionId}/confirm
+
+确认并确定性执行一份 PostgreSQL 持久化的模拟年假草稿。Feature Flag 默认关闭。
+
+请求 Header：`X-Demo-User-Id: <demo-user-id>`、`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
+
+```json
+{"confirmationNonce": "<confirmation-nonce>"}
+```
+
+成功返回 `SUCCEEDED`、唯一 `requestId`、`originTraceId` 和本次确认 `traceId`。成功终态、首个幂等键和执行结果均持久化；Java/PostgreSQL 重启后，相同或不同合法幂等键重试仍返回原 `requestId`，并设置 `replayed=true`，不会重复扣减余额或创建 LeaveRequest。
+
+前端首次 Confirm 使用 `crypto.randomUUID()` 生成并缓存该草稿的 Key。网络失败、HTTP 502/503 或其他可重试错误后，“重试确认”必须复用同一个 Key；快速双击由请求前同步锁拦截，只允许一个在途请求。请求体不会回传 summary、日期、原因、余额或状态。
+
+首次成功示意：
+
+```json
+{
+  "actionId": "...",
+  "type": "ANNUAL_LEAVE_REQUEST",
+  "status": "SUCCEEDED",
+  "requestId": "...",
+  "message": "模拟年假申请已提交。",
+  "replayed": false,
+  "completedAt": "...",
+  "originTraceId": "...",
+  "traceId": "..."
+}
+```
+
+### POST /api/agent/actions/{actionId}/cancel
+
+取消尚未确认的草稿。请求 Header 为 `X-Demo-User-Id` 和 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
+
+Confirm/Cancel 都会在锁定 Action 后先校验员工归属，再检查 nonce、过期和状态。其他身份即使持有正确 actionId、nonce、Admin Token 和幂等键，也只得到与不存在 Action 完全相同的 `404 ACTION_NOT_FOUND`，且不会改变草稿、余额或申请记录。
+
+React 根据 `expiresAt` 设置有界计时器，本地到期后禁用 Confirm/Cancel 并提示重新生成草稿；如果服务端返回 `ACTION_EXPIRED`，同样进入不可重试的过期终态。服务端时间与状态始终是权威来源。
+
+后端只持久化 confirmation nonce 的 SHA-256 摘要，不保存明文。明文只存在当前页面内存，因此浏览器刷新后无法恢复旧草稿的确认凭据，需要重新生成草稿。
+
+所有 PendingAction、confirm、cancel 和 Action 错误响应均包含：
+
+```http
+Cache-Control: no-store
+```
+
+Action 错误使用独立契约，错误码包括：
+
+```text
+INVALID_REQUEST
+INVALID_IDEMPOTENCY_KEY
+ADMIN_REQUIRED
+INVALID_CONFIRMATION_NONCE
+ACTION_NOT_FOUND
+ACTION_IN_PROGRESS
+ACTION_STATE_CONFLICT
+ACTION_STALE
+ACTION_EXPIRED
+ACTION_INTERNAL_ERROR
+BUSINESS_RULE_VIOLATION
+BUSINESS_ACTIONS_DISABLED
+ACTION_CAPACITY_EXCEEDED
+DEMO_IDENTITY_REQUIRED
+DEMO_IDENTITY_INVALID
+DEMO_IDENTITY_DISABLED
+```
+
+该接口是 PostgreSQL Sandbox：不接真实 OA，不支持中国法定节假日和调休。
+
+### GET /api/demo/identities
+
+仅在 `demo.identity.enabled=true` 时返回三个固定演示身份的 `userId`、`displayName` 和 `role`，响应为 `Cache-Control: no-store`。不返回 employeeId、余额、申请、nonce、Action 或数据库主键。关闭时返回 `503 DEMO_IDENTITY_DISABLED`。
+
+`X-Demo-User-Id` 不是登录或认证机制，任何公开生产环境都不得依赖它建立用户身份。
+
+---
+
 ## Python AI Service API（端口 8000）
 
 ### GET /agent/health
@@ -276,7 +413,26 @@ Python AI 服务健康检查。
 
 LangGraph Agent 问答接口（实验链路）。
 
-请求和响应格式同 Java `POST /api/agent/langgraph/chat`。
+请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions` 和 `X-Business-Date`，不读取 Admin Token。
+
+完整 Action 的 Python 内部响应包含确定性 `action_proposal`：
+
+```json
+{
+  "route": "action",
+  "category": "business_action",
+  "action_proposal": {
+    "action_type": "ANNUAL_LEAVE_REQUEST",
+    "start_date": "2026-07-20",
+    "end_date": "2026-07-20",
+    "reason": "示例原因",
+    "half_day": "NONE"
+  },
+  "missing_fields": []
+}
+```
+
+缺字段时 `action_proposal=null`，`missing_fields` 按 `start_date`、`end_date`、`reason` 的固定顺序返回。`action_proposal` 是 Java/Python 内部契约，不能绕过 Java 权威校验直接执行。
 
 ---
 

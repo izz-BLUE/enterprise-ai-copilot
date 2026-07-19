@@ -4,6 +4,9 @@ import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
 import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.ChatResponse;
+import com.fantuan.copilot.service.AdminAccessService;
+import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.service.demo.DemoIdentityService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -46,7 +49,8 @@ class ControllerConcurrencyTest {
 
         HttpServletRequest servletRequest = requestWithTraceId("trace-agent");
         LangGraphAgentController controller = new LangGraphAgentController(
-                mock(RestTemplate.class), bulkhead);
+                mock(RestTemplate.class), bulkhead, mock(AdminAccessService.class),
+                mock(BusinessActionService.class), mock(DemoIdentityService.class));
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
                 new ChatRequest("几点上班？"), servletRequest);
 

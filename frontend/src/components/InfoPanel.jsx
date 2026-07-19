@@ -21,7 +21,18 @@ const CAPABILITIES = [
   { icon: '🔗', title: '混合检索', desc: '向量检索 + BM25 关键词检索融合排序' },
   { icon: '🛡', title: 'Safety Guard', desc: '规则路由安全检查，拦截违规请求' },
   { icon: '📊', title: '评估体系', desc: '确定性规则评分，衡量回答质量' },
+  { icon: '✅', title: '受控业务动作', desc: '人工确认后执行模拟写操作' },
 ]
+
+const ACTION_STATUS_LABELS = {
+  pending: '等待确认',
+  confirming: '正在提交',
+  cancelling: '正在取消',
+  succeeded: '已提交',
+  cancelled: '已取消',
+  expired: '已过期',
+  error: '处理失败',
+}
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false)
@@ -56,7 +67,7 @@ function MetaItem({ label, value, mono, copyable }) {
   )
 }
 
-export default function InfoPanel({ result, resultMode }) {
+export default function InfoPanel({ result, resultMode, actionUi }) {
   const pipeline = PIPELINE_MAP[resultMode] || PIPELINE_MAP.rag
 
   return (
@@ -93,6 +104,11 @@ export default function InfoPanel({ result, resultMode }) {
             <MetaItem label="状态" value={result.success ? '成功' : '失败'} />
             <MetaItem label="模式" value={resultMode === 'agent' ? '智能体' : '标准 RAG'} />
             <MetaItem label="路由" value={result.route} />
+            <MetaItem
+              label="动作类型"
+              value={result.pendingAction?.type === 'ANNUAL_LEAVE_REQUEST' ? '年假申请' : undefined}
+            />
+            <MetaItem label="动作状态" value={ACTION_STATUS_LABELS[actionUi?.phase]} />
             <MetaItem label="安全" value={result.safe !== undefined ? (result.safe ? '通过' : '拦截') : undefined} />
             <MetaItem label="模型" value={result.model} mono />
             <MetaItem label="traceId" value={result.traceId} mono copyable />

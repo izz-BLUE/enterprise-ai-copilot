@@ -6,6 +6,7 @@ langgraph_agent.py —— LangGraph Agent 核心模块
 """
 
 import json
+from datetime import date
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -13,6 +14,8 @@ from langgraph.graph import END, START, StateGraph
 from app.core.config import REWRITE_MODE, logger
 from app.guards.safety_guard import check_user_query_safety
 from app.retrieval.query_rewriter import rewrite_query
+from app.services.annual_leave_input_service import is_annual_leave_action_intent
+from app.services.tool_calling_service import plan_annual_leave_action
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
 EVAL_KEYWORDS = ['评估', '通过率', 'pass_rate', '命中率', 'baseline', '回归', 'flaky']
@@ -28,7 +31,11 @@ class AgentState(TypedDict):
     reason: str
     category: str
     allow_eval: bool
+    allow_business_actions: bool
+    business_date: date | None
     trace_id: str
+    action_proposal: dict | None
+    missing_fields: list[str]
 
 
 def safety_node(state: AgentState) -> dict:
@@ -60,6 +67,22 @@ def router_node(state: AgentState) -> dict:
             "category": "access_control",
             "reason": "",
         }
+    if is_annual_leave_action_intent(question):
+        if not state.get("allow_business_actions", False):
+            return {
+                "route": "refuse",
+                "answer": "业务动作功能未启用，或当前请求无执行权限。",
+                "category": "access_control",
+                "reason": "",
+            }
+        if state.get("business_date") is None:
+            return {
+                "route": "refuse",
+                "answer": "当前业务日期不可用。",
+                "category": "business_action",
+                "reason": "",
+            }
+        return {"route": "action"}
     return {"route": "rag"}
 
 
@@ -138,6 +161,50 @@ def eval_node(state: AgentState) -> dict:
     }
 
 
+def action_node(state: AgentState) -> dict:
+    business_date = state.get("business_date")
+    if business_date is None:
+        return {
+            "route": "error",
+            "answer": "当前业务日期不可用。",
+            "category": "business_action",
+            "reason": "",
+            "missing_fields": [],
+            "action_proposal": None,
+        }
+    result = plan_annual_leave_action(
+        state["question"],
+        business_date=business_date,
+        trace_id=state.get("trace_id", ""),
+    )
+    if result.kind == "clarification":
+        return {
+            "route": "action",
+            "answer": result.clarification.question,
+            "category": "business_action",
+            "reason": "",
+            "missing_fields": result.clarification.missing_fields,
+            "action_proposal": None,
+        }
+    if result.kind == "proposal":
+        return {
+            "route": "action",
+            "answer": "我已生成一份模拟年假申请草稿，请确认后提交。",
+            "category": "business_action",
+            "reason": "",
+            "missing_fields": [],
+            "action_proposal": result.proposal.model_dump(),
+        }
+    return {
+        "route": "error",
+        "answer": "暂时无法生成申请草稿，请检查信息后重试。",
+        "category": "business_action",
+        "reason": "",
+        "missing_fields": [],
+        "action_proposal": None,
+    }
+
+
 def refuse_node(state: AgentState) -> dict:
     answer = state.get("answer", "")
     if not answer:
@@ -152,6 +219,7 @@ def build_agent_graph():
     graph.add_node("router_node", router_node)
     graph.add_node("rag_node", rag_node)
     graph.add_node("eval_node", eval_node)
+    graph.add_node("action_node", action_node)
     graph.add_node("refuse_node", refuse_node)
 
     graph.add_edge(START, "safety_node")
@@ -160,18 +228,28 @@ def build_agent_graph():
     graph.add_conditional_edges(
         "router_node",
         lambda state: state.get("route", "rag"),
-        {"rag": "rag_node", "eval": "eval_node", "refuse": "refuse_node"},
+        {
+            "rag": "rag_node",
+            "eval": "eval_node",
+            "action": "action_node",
+            "refuse": "refuse_node",
+        },
     )
 
     graph.add_edge("rag_node", END)
     graph.add_edge("eval_node", END)
+    graph.add_edge("action_node", END)
     graph.add_edge("refuse_node", END)
 
     return graph.compile()
 
 
 def run_langgraph_agent(
-    question: str, allow_eval: bool = False, trace_id: str = '',
+    question: str,
+    allow_eval: bool = False,
+    allow_business_actions: bool = False,
+    business_date: date | None = None,
+    trace_id: str = '',
 ) -> dict:
     graph = build_agent_graph()
     initial: AgentState = {
@@ -179,6 +257,10 @@ def run_langgraph_agent(
         "answer": "", "tool_result": {}, "sources": [],
         "reason": "", "category": "",
         "allow_eval": allow_eval,
+        "allow_business_actions": allow_business_actions,
+        "business_date": business_date,
         "trace_id": trace_id,
+        "action_proposal": None,
+        "missing_fields": [],
     }
     return dict(graph.invoke(initial))

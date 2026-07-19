@@ -289,10 +289,46 @@ class TestDirectOnnxNoTorchImport(unittest.TestCase):
             [sys.executable, '-c', '''
 import sys
 import os
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+
 os.environ["EMBEDDING_BACKEND"] = "onnx_direct"
-os.environ["EMBEDDING_MODEL_PATH"] = "models/embedding/bge-small-zh-v1.5-onnx"
-from app.retrieval.direct_onnx_embedding import encode
-_ = encode("test")
+with tempfile.TemporaryDirectory() as tmpdir:
+    model = Path(tmpdir)
+    (model / "onnx").mkdir()
+    (model / "onnx" / "model.onnx").write_bytes(b"test-placeholder")
+    os.environ["EMBEDDING_MODEL_PATH"] = tmpdir
+
+    import app.retrieval.direct_onnx_embedding as direct
+
+    session = MagicMock()
+    session.get_inputs.return_value = [
+        SimpleNamespace(name="input_ids"),
+        SimpleNamespace(name="attention_mask"),
+        SimpleNamespace(name="token_type_ids"),
+    ]
+    session.get_outputs.return_value = [SimpleNamespace(name="last_hidden_state")]
+    session.run.return_value = [np.ones((1, 3, 512), dtype=np.float32)]
+    tokenizer = MagicMock()
+    tokenizer.encode_batch.return_value = [SimpleNamespace(ids=[101, 100, 102])]
+    tokenizer_info = {
+        "tokenizer": tokenizer,
+        "max_length": 512,
+        "cls_token_id": 101,
+        "sep_token_id": 102,
+        "pad_token_id": 0,
+    }
+
+    with patch.object(direct.ort, "InferenceSession", return_value=session), \\
+         patch.object(direct, "_load_tokenizer", return_value=tokenizer_info), \\
+         patch.object(direct, "_load_pooling_config", return_value={"pooling_mode": "cls"}):
+        result = direct.encode("test")
+
+    assert result.shape == (512,)
 assert "torch" not in sys.modules, "torch was imported!"
 assert "sentence_transformers" not in sys.modules, "sentence_transformers was imported!"
 assert "optimum" not in sys.modules, "optimum was imported!"

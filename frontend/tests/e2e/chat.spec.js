@@ -13,6 +13,20 @@ const agentResponse = (overrides = {}) => ({
   ...overrides,
 })
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/demo/identities', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      identities: [
+        { userId: 'DEMO-001', displayName: 'Demo User', role: 'EMPLOYEE' },
+        { userId: 'DEMO-002', displayName: 'Demo User B', role: 'EMPLOYEE' },
+        { userId: 'DEMO-MGR-001', displayName: 'Demo Manager', role: 'MANAGER' },
+      ],
+    }),
+  }))
+})
+
 async function mockAgent(page, response) {
   await page.route('**/api/agent/langgraph/chat', async route => {
     await route.fulfill({

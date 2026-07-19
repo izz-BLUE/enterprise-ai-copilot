@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import PendingActionCard from './PendingActionCard'
 import './ChatMessage.css'
 
 const CATEGORY_LABELS = {
@@ -11,6 +12,7 @@ const CATEGORY_LABELS = {
   'unauthorized_access': '越权访问 / 数据窃取',
   'access_control': 'Evaluation 权限受限',
   'overloaded': '服务繁忙',
+  'business_action': '受控业务动作',
 }
 
 const ROUTE_LABELS = {
@@ -18,6 +20,7 @@ const ROUTE_LABELS = {
   eval: { label: '评估查询', cls: 'tag-purple' },
   refuse: { label: '安全拒答', cls: 'tag-red' },
   busy: { label: '并发保护', cls: 'tag-orange' },
+  action: { label: '业务动作', cls: 'tag-purple' },
 }
 
 function getStatusInfo(result) {
@@ -86,8 +89,18 @@ function MessageTags({ result, resultMode }) {
   )
 }
 
-export default function ChatMessage({ result, resultMode }) {
+export default function ChatMessage({
+  result,
+  resultMode,
+  actionUi,
+  onActionConfirm,
+  onActionCancel,
+  onActionExpire,
+}) {
   const status = getStatusInfo(result)
+  const pendingAction = result?.pendingAction
+  const supportedAction = pendingAction?.type === 'ANNUAL_LEAVE_REQUEST'
+    && pendingAction?.confirmationRequired === true
 
   return (
     <div className="chat-message assistant">
@@ -122,6 +135,22 @@ export default function ChatMessage({ result, resultMode }) {
             {result?.answer || '暂无回答内容'}
           </Markdown>
         </div>
+
+        {pendingAction && supportedAction && actionUi && (
+          <PendingActionCard
+            action={pendingAction}
+            actionUi={actionUi}
+            onConfirm={onActionConfirm}
+            onCancel={onActionCancel}
+            onExpire={onActionExpire}
+          />
+        )}
+
+        {pendingAction && !supportedAction && (
+          <div className="unsupported-action" role="alert">
+            不支持此操作类型，未提供任何执行按钮。
+          </div>
+        )}
 
         <div className="message-actions">
           <CopyButton text={result?.answer || ''} />
