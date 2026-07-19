@@ -59,13 +59,13 @@ jobs:
         working-directory: agent-python
         run: uv sync --group dev
 
-      - name: Run concurrency unit tests
+      - name: Run full Python test suite
         working-directory: agent-python
-        run: uv run python -m pytest -q tests/test_concurrency_limiter.py tests/test_concurrency_response.py
-
-      - name: Run native tool planner unit tests
-        working-directory: agent-python
-        run: uv run python -m pytest -q tests/test_tool_calling_service.py
+        env:
+          DEEPSEEK_API_KEY: ""
+          DEEPSEEK_BASE_URL: ""
+          DEEPSEEK_MODEL: ""
+        run: uv run python -m pytest -q
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python
