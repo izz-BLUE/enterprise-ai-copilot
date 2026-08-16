@@ -21,8 +21,10 @@ from app.schemas.planner_schema import (
 )
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
-# 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）
-MAX_TOOL_CALLS = 5
+# 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
+# 小于 MAX_PLANNER_STEPS(5)，使 Tool 预算成为独立防线：连续请求 Tool 时
+# 由 Executor 先拦截，而不是永远被 Planner 步骤预算遮蔽。
+MAX_TOOL_CALLS = 3
 
 # 异常转 Observation 的稳定错误结构：完整异常只进内部日志，不给 Planner
 _ERROR_MESSAGES = {

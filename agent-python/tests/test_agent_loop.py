@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from app.agents.langgraph_agent import run_langgraph_agent
 from app.agents.planner_node import MAX_PLANNER_STEPS
+from app.agents.tool_executor_node import MAX_TOOL_CALLS
 from app.schemas.action_schema import (
     AnnualLeaveActionProposal,
     ProposalPlanningResult,
@@ -155,7 +156,8 @@ class TestFailureRecovery:
 
     def test_step_budget_exhausted_terminates(self):
         """Planner 决策预算耗尽后必须终止，不能无限循环。"""
-        # 每次决策使用不同参数，避免连续重复检测干扰预算测试
+        # 每次决策使用不同参数，避免连续重复检测干扰预算测试；
+        # Tool 执行次数受 MAX_TOOL_CALLS 独立约束，最终由步骤预算终止
         decisions = [
             _tool('rag_answer_tool', {'question': f'问题{i}'}, 'need_knowledge')
             for i in range(MAX_PLANNER_STEPS + 1)
@@ -165,7 +167,7 @@ class TestFailureRecovery:
             rag.invoke.return_value = RAG_RESULT
             result = run_langgraph_agent('年假制度', use_planner=True)
         assert result['stop_reason'] == 'step_budget_exhausted'
-        assert rag.invoke.call_count == MAX_PLANNER_STEPS
+        assert rag.invoke.call_count == MAX_TOOL_CALLS
         assert result['step_count'] == MAX_PLANNER_STEPS + 1
 
 
