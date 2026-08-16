@@ -142,7 +142,7 @@ flowchart TD
 - **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
 - **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/action/refuse）
-- **safety_guard**：基于关键词的输入安全检查（5 类风险）
+- **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重
   - `hybrid`（默认）：Faiss + BM25 + RRF 融合排序
@@ -189,7 +189,7 @@ POST /api/chat
 
 **特点**：手写全链路，不依赖 LangChain/LangGraph。Safety Guard 在检索前检查输入，高风险问题直接拒答，不进入检索。
 
-> **注意：** Safety Guard 是规则版基础防护（5 类风险关键词匹配），不是完整安全系统。
+> **注意：** Safety Guard Lite 是启发式纵深防御过滤器（heuristic defense-in-depth filter），不是 authorization / trust / tool permission / business validation 边界。真正安全边界由认证、授权、工具能力、业务校验、租户/数据隔离、事务/状态机、人工确认承担。Lite 只做输入规范化 + 五族高置信确定性规则，明确攻击拦截、咨询放行，不承诺完整 prompt injection 检测 / 完整 Unicode confusable 保护 / 完整自然语言意图理解。
 
 ### 链路二：/api/agent/langgraph/chat（Agent 实验链路）
 
@@ -360,7 +360,7 @@ agent-python/app/
 ├── chains/        # langchain_rag_chain.py — LangChain RAG 封装
 ├── tools/         # rag_answer_tool, eval_report_tool — LangChain @tool
 ├── agents/        # langgraph_agent.py — LangGraph Agent 状态图
-├── guards/        # safety_guard.py — 输入安全边界控制
+├── guards/        # input_normalizer + safety_rules + safety_guard — Safety Guard Lite（规范化 + 五族规则）
 └── main.py        # FastAPI 应用入口 + trace_id_middleware
 ```
 

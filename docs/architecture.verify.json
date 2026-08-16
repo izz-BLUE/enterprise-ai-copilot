@@ -1,0 +1,34 @@
+{
+  "file": "architecture.drawio",
+  "tool": "drawio-skill/validate.py",
+  "pages": [
+    {
+      "name": "系统架构",
+      "node_count": 46,
+      "edge_count": 21,
+      "overlap_count": 0,
+      "dangling_edge_count": 0,
+      "orphan_node_count": 6,
+      "out_of_bounds_count": 0,
+      "min_spacing_violations": 0,
+      "label_clip_count": 0,
+      "flow_direction_violations": 1,
+      "structural_result": "PASS",
+      "visual_qa": "skipped: structural/geometry validation only"
+    },
+    {
+      "name": "部署拓扑",
+      "node_count": 9,
+      "edge_count": 5,
+      "overlap_count": 0,
+      "dangling_edge_count": 0,
+      "orphan_node_count": 0,
+      "out_of_bounds_count": 0,
+      "min_spacing_violations": 0,
+      "label_clip_count": 0,
+      "flow_direction_violations": 0,
+      "structural_result": "PASS",
+      "visual_qa": "skipped: structural/geometry validation only"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "file": "architecture.drawio",
+  "tool": "drawio-skill/render_geometry.py",
+  "stage": "render-geometry (playwright, no vision)",
+  "pages": [
+    {
+      "name": "系统架构",
+      "rendered_node_count": 46,
+      "overlap_count": 0,
+      "min_spacing_violations": 0,
+      "deviation_count": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "部署拓扑",
+      "rendered_node_count": 9,
+      "overlap_count": 0,
+      "min_spacing_violations": 0,
+      "deviation_count": 0,
+      "result": "PASS"
+    }
+  ]
+}
