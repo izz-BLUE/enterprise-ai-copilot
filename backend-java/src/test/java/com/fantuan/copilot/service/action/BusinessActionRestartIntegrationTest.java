@@ -157,7 +157,9 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
                         "--business.actions.require-admin=false",
                         "--demo.identity.enabled=true",
                         "--business.actions.demo-annual-leave-balance=" + configuredBalance,
-                        "--logging.level.root=WARN");
+                        "--logging.level.org.springframework=WARN",
+                        "--logging.level.org.flywaydb=WARN",
+                        "--logging.level.com.zaxxer.hikari=WARN");
     }
 
     private void reset(ConfigurableApplicationContext context) {

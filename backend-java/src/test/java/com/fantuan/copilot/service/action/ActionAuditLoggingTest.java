@@ -1,5 +1,6 @@
 package com.fantuan.copilot.service.action;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -53,6 +54,8 @@ class ActionAuditLoggingTest {
                 java.time.Clock.systemUTC());
 
         Logger logger = (Logger) LoggerFactory.getLogger(BusinessActionService.class);
+        Level previousLevel = logger.getLevel();
+        logger.setLevel(Level.INFO);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
@@ -62,6 +65,7 @@ class ActionAuditLoggingTest {
         } finally {
             logger.detachAppender(appender);
             appender.stop();
+            logger.setLevel(previousLevel);
         }
 
         String joined = appender.list.stream()
