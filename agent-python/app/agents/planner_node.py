@@ -109,6 +109,21 @@ def _refuse_decision(answer: str, reason_code: str) -> dict:
     }
 
 
+def _decision_result(state: dict, decision: dict, stop_reason: str) -> dict:
+    """组装 Planner 节点输出：决策、终止原因、决策计数（每次决策 +1）。
+
+    finish/refuse 决策把 answer 同步进 state，供图结束后返回。
+    """
+    result = {
+        'planner_decision': decision,
+        'stop_reason': stop_reason,
+        'step_count': state.get('step_count', 0) + 1,
+    }
+    if decision.get('action') in ('finish', 'refuse'):
+        result['answer'] = decision.get('answer', '')
+    return result
+
+
 def planner_node(state: dict) -> dict:
     """Planner 节点：根据用户任务、可用工具与执行状态输出一个下一步决策。
 
@@ -116,6 +131,8 @@ def planner_node(state: dict) -> dict:
       planner_decision — PlannerDecision 的 dict 形式（模型决策或明确拒绝）
       stop_reason      — continue | task_complete | refused | invalid_decision
                          | not_allowed | step_budget_exhausted | provider_error
+      step_count       — Planner 已完成决策次数 + 1（Finish/Refuse 也算一次）
+      answer           — finish/refuse 决策时同步的最终回答
     """
     trace_id = state.get('trace_id', '')
     question = state.get('question', '')
@@ -135,37 +152,41 @@ def planner_node(state: dict) -> dict:
         raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
     except Exception:
         logger.exception('[%s] planner LLM 调用失败', trace_id)
-        return {
-            'planner_decision': _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
-            'stop_reason': 'provider_error',
-        }
+        return _decision_result(
+            state,
+            _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+            'provider_error',
+        )
 
     try:
         decision = PlannerDecision.model_validate(json.loads(raw))
         decision.validate_decision()
     except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
         logger.warning('[%s] planner 决策非法: %s', trace_id, exc)
-        return {
-            'planner_decision': _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
-            'stop_reason': 'invalid_decision',
-        }
+        return _decision_result(
+            state,
+            _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
+            'invalid_decision',
+        )
 
     # 权限边界：即使 Prompt 未暴露该 Tool，程序层仍必须验证
     if decision.action == 'tool' and decision.tool_name == EVAL_TOOL_NAME and not allow_eval:
         logger.warning('[%s] planner 越权要求 %s 被拒绝', trace_id, EVAL_TOOL_NAME)
-        return {
-            'planner_decision': _refuse_decision('该问题涉及内部评估诊断能力，仅管理员可访问。', 'not_allowed'),
-            'stop_reason': 'not_allowed',
-        }
+        return _decision_result(
+            state,
+            _refuse_decision('该问题涉及内部评估诊断能力，仅管理员可访问。', 'not_allowed'),
+            'not_allowed',
+        )
 
     # 步骤预算：模型无权超出预算调用工具
     if decision.action == 'tool' and steps_left <= 0:
         logger.warning('[%s] planner 步骤预算耗尽', trace_id)
-        return {
-            'planner_decision': _refuse_decision('步骤预算已耗尽，无法继续调用工具。', 'cannot_complete'),
-            'stop_reason': 'step_budget_exhausted',
-        }
+        return _decision_result(
+            state,
+            _refuse_decision('步骤预算已耗尽，无法继续调用工具。', 'cannot_complete'),
+            'step_budget_exhausted',
+        )
 
     stop_reason = {'tool': 'continue', 'finish': 'task_complete', 'refuse': 'refused'}[decision.action]
     logger.info('[%s] planner 决策 action=%s reason_code=%s', trace_id, decision.action, decision.reason_code)
-    return {'planner_decision': decision.model_dump(), 'stop_reason': stop_reason}
+    return _decision_result(state, decision.model_dump(), stop_reason)
