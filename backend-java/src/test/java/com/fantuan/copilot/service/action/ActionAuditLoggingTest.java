@@ -67,6 +67,13 @@ class ActionAuditLoggingTest {
         String joined = appender.list.stream()
                 .map(ILoggingEvent::getFormattedMessage)
                 .reduce("", (left, right) -> left + "\n" + right);
+        if (!joined.contains("actionRef=" + BusinessActionService.auditRef(actionId))) {
+            System.err.println("[DIAG] action_audit capture failed: events=" + appender.list.size()
+                    + " effectiveLevel=" + logger.getEffectiveLevel()
+                    + " isInfoEnabled=" + logger.isInfoEnabled()
+                    + " mdcTraceId=" + org.slf4j.MDC.get("traceId")
+                    + " joined=[" + joined + "]");
+        }
         assertFalse(joined.contains(actionId));
         assertFalse(joined.contains(requestId));
         assertFalse(joined.contains("private reason"));
