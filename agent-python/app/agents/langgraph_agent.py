@@ -36,6 +36,16 @@ class AgentState(TypedDict):
     trace_id: str
     action_proposal: dict | None
     missing_fields: list[str]
+    # Agent Loop P0 预留：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
+    # tool_call_count = 通过执行前校验后，实际发起 Tool 执行的次数——
+    # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数；
+    # （本阶段无 Tool Executor，保持 0，不递增）
+    step_count: int
+    tool_call_count: int
+    tool_history: list
+    observation: str
+    planner_decision: dict | None
+    stop_reason: str
 
 
 def safety_node(state: AgentState) -> dict:
@@ -262,5 +272,11 @@ def run_langgraph_agent(
         "trace_id": trace_id,
         "action_proposal": None,
         "missing_fields": [],
+        "step_count": 0,
+        "tool_call_count": 0,
+        "tool_history": [],
+        "observation": "",
+        "planner_decision": None,
+        "stop_reason": "",
     }
     return dict(graph.invoke(initial))
