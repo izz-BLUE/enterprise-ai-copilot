@@ -84,6 +84,10 @@ if AI_MAX_CONCURRENT_REQUESTS < 1:
 if AI_QUEUE_TIMEOUT_MS < 1:
     raise ValueError('AI_QUEUE_TIMEOUT_MS 必须大于等于 1')
 
+# Agent Loop 开关（默认关闭）：/agent/langgraph/chat 使用 Planner ⇄ Tool Executor
+# Loop；关闭时保持旧确定性 Graph（safety → router → rag|eval|action|refuse）。
+AGENT_LOOP_ENABLED = os.getenv('AGENT_LOOP_ENABLED', 'false').strip().lower() == 'true'
+
 # Input Validation
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
 

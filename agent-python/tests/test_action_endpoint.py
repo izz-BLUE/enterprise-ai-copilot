@@ -37,7 +37,8 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         "missing_fields": ["start_date", "end_date"],
         "action_proposal": None,
     }
-    with patch("app.main.run_langgraph_agent", return_value=result) as run:
+    with patch("app.main.run_langgraph_agent", return_value=result) as run, \
+            patch("app.main.AGENT_LOOP_ENABLED", False):
         response = langgraph_chat(ChatRequest(message="申请一天年假，原因为私事"), req)
     run.assert_called_once_with(
         "申请一天年假，原因为私事",
@@ -45,6 +46,7 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         allow_business_actions=True,
         business_date=date(2026, 7, 16),
         trace_id="java-trace",
+        use_planner=False,
     )
     assert response.traceId == "java-trace"
     assert response.missing_fields == ["start_date", "end_date"]
