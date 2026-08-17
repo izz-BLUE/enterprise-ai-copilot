@@ -54,6 +54,8 @@ class PlannerDecision(BaseModel):
                 raise PlannerDecisionError('action=tool 必须提供 tool_name')
             if not isinstance(self.arguments, dict) or not self.arguments:
                 raise PlannerDecisionError('action=tool 必须提供非空 arguments')
+            if self.answer is not None:
+                raise PlannerDecisionError('action=tool 不得携带 answer')
             if self.tool_name == RAG_TOOL_NAME:
                 if set(self.arguments) != _RAG_TOOL_ARG_KEYS:
                     raise PlannerDecisionError(
@@ -62,6 +64,8 @@ class PlannerDecision(BaseModel):
                 question = self.arguments['question']
                 if not isinstance(question, str) or not question.strip():
                     raise PlannerDecisionError('rag_answer_tool 必须提供非空 question 参数')
+                if self.reason_code != 'need_knowledge':
+                    raise PlannerDecisionError('rag_answer_tool 的 reason_code 必须是 need_knowledge')
             else:
                 if set(self.arguments) != _EVAL_TOOL_ARG_KEYS:
                     raise PlannerDecisionError(
@@ -71,9 +75,19 @@ class PlannerDecision(BaseModel):
                     raise PlannerDecisionError(
                         f'eval_report_tool 的 report_type 必须是 {VALID_REPORT_TYPES} 之一'
                     )
+                if self.reason_code != 'need_eval':
+                    raise PlannerDecisionError('eval_report_tool 的 reason_code 必须是 need_eval')
         else:
             if self.tool_name is not None:
                 raise PlannerDecisionError(f'action={self.action} 不得携带 tool_name')
+            if self.arguments is not None:
+                raise PlannerDecisionError(f'action={self.action} 不得携带 arguments')
             if not self.answer or not self.answer.strip():
                 raise PlannerDecisionError(f'action={self.action} 必须提供非空 answer')
+            if self.action == 'finish' and self.reason_code != 'task_complete':
+                raise PlannerDecisionError('finish 的 reason_code 必须是 task_complete')
+            if self.action == 'refuse' and self.reason_code not in ('not_allowed', 'cannot_complete'):
+                raise PlannerDecisionError(
+                    'refuse 的 reason_code 只能是 not_allowed 或 cannot_complete'
+                )
         return self

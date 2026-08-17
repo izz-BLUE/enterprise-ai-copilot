@@ -116,10 +116,22 @@ class TestFailurePaths:
         assert result['stop_reason'] == 'provider_error'
 
     def test_step_budget_exhausted_blocks_tool(self):
-        with patch('app.agents.planner_node.call_llm', return_value=RAG_RAW):
+        """预算耗尽时不再调用 LLM，直接终止，step_count 保持上限。"""
+        with patch('app.agents.planner_node.call_llm', return_value=RAG_RAW) as llm:
             result = planner_node(state(step_count=MAX_PLANNER_STEPS))
         assert result['planner_decision']['action'] == 'refuse'
         assert result['stop_reason'] == 'step_budget_exhausted'
+        assert result['step_count'] == MAX_PLANNER_STEPS  # 不再 +1
+        assert '预算已耗尽' in result['answer']
+        llm.assert_not_called()  # 不发起第 MAX+1 次 LLM 调用
+
+    def test_step_budget_not_exhausted_still_calls_llm(self):
+        """step_count < MAX_PLANNER_STEPS 时仍正常调用 LLM 决策。"""
+        with patch('app.agents.planner_node.call_llm', return_value=RAG_RAW) as llm:
+            result = planner_node(state(step_count=MAX_PLANNER_STEPS - 1))
+        assert result['stop_reason'] == 'continue'
+        assert result['step_count'] == MAX_PLANNER_STEPS
+        llm.assert_called_once()
 
 
 class TestUntrustedDataBoundary:

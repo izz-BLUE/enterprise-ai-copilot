@@ -171,14 +171,28 @@ def planner_node(state: dict) -> dict:
       planner_decision — PlannerDecision 的 dict 形式（模型决策或明确拒绝）
       stop_reason      — continue | task_complete | refused | invalid_decision
                          | not_allowed | step_budget_exhausted | provider_error
-      step_count       — Planner 已完成决策次数 + 1（Finish/Refuse 也算一次）
+      step_count       — Planner 已完成决策次数 + 1（Finish/Refuse 也算一次）；
+                         预算耗尽终止时不增加，保持 MAX_PLANNER_STEPS
       answer           — finish/refuse 决策时同步的最终回答
     """
     trace_id = state.get('trace_id', '')
     question = state.get('question', '')
     allow_eval = state.get('allow_eval', False)
-    # 剩余决策预算：step_count = Planner 已完成决策次数（Finish/Refuse 也算一次）
-    steps_left = max(0, MAX_PLANNER_STEPS - state.get('step_count', 0))
+    step_count = state.get('step_count', 0)
+
+    # 步骤预算前置检查：预算耗尽时不再调用 LLM，直接终止，step_count 保持上限
+    if step_count >= MAX_PLANNER_STEPS:
+        logger.info('[%s] planner 步骤预算耗尽，终止决策 (step_count=%d)', trace_id, step_count)
+        decision = _refuse_decision(
+            '步骤预算已耗尽，无法继续处理当前任务，请重试或调整问题。', 'cannot_complete')
+        return {
+            'planner_decision': decision,
+            'stop_reason': 'step_budget_exhausted',
+            'step_count': step_count,
+            'answer': decision['answer'],
+        }
+
+    steps_left = MAX_PLANNER_STEPS - step_count
 
     user_prompt = build_planner_prompt(
         question,
@@ -216,15 +230,6 @@ def planner_node(state: dict) -> dict:
             state,
             _refuse_decision('该问题涉及内部评估诊断能力，仅管理员可访问。', 'not_allowed'),
             'not_allowed',
-        )
-
-    # 步骤预算：模型无权超出预算调用工具
-    if decision.action == 'tool' and steps_left <= 0:
-        logger.warning('[%s] planner 步骤预算耗尽', trace_id)
-        return _decision_result(
-            state,
-            _refuse_decision('步骤预算已耗尽，无法继续调用工具。', 'cannot_complete'),
-            'step_budget_exhausted',
         )
 
     stop_reason = {'tool': 'continue', 'finish': 'task_complete', 'refuse': 'refused'}[decision.action]

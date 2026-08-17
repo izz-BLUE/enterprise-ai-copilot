@@ -162,13 +162,15 @@ class TestFailureRecovery:
             _tool('rag_answer_tool', {'question': f'问题{i}'}, 'need_knowledge')
             for i in range(MAX_PLANNER_STEPS + 1)
         ]
-        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
                 patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
             rag.invoke.return_value = RAG_RESULT
             result = run_langgraph_agent('年假制度', use_planner=True)
         assert result['stop_reason'] == 'step_budget_exhausted'
         assert rag.invoke.call_count == MAX_TOOL_CALLS
-        assert result['step_count'] == MAX_PLANNER_STEPS + 1
+        assert llm.call_count == MAX_PLANNER_STEPS  # 不越界调用第 MAX+1 次
+        assert result['step_count'] == MAX_PLANNER_STEPS  # 不再 +1
+        assert '预算已耗尽' in result['answer']
 
 
 class TestHistoryRendering:

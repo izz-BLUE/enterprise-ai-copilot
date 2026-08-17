@@ -278,10 +278,10 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         question='年假制度',
         expected_stop_reason='step_budget_exhausted',
         expected_tool_sequence=('rag_answer_tool',) * 3,
-        max_step_count=6,
+        max_step_count=5,
         max_tool_call_count=3,
         description='Planner 决策预算耗尽终止：Tool 调用先被 tool budget（3）约束，'
-                    '最终由步骤预算（5 次决策）终止回环',
+                    '最终由步骤预算（5 次决策）终止回环，step_count 不越界',
         planner_responses=tuple(
             _tool('rag_answer_tool', {'question': f'问题{i}'}, 'need_knowledge')
             for i in range(6)

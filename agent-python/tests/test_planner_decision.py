@@ -111,6 +111,18 @@ class TestToolDecisionConsistency:
         with pytest.raises(PlannerDecisionError):
             PlannerDecision.model_validate(_eval(arguments={'report_type': 'secret'})).validate_decision()
 
+    def test_tool_with_answer_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_rag(answer='模型不该带答案')).validate_decision()
+
+    def test_rag_tool_without_need_knowledge_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_rag(reason_code='need_eval')).validate_decision()
+
+    def test_eval_tool_without_need_eval_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_eval(reason_code='need_knowledge')).validate_decision()
+
 
 class TestFinishRefuseConsistency:
     def test_finish_with_tool_name_rejected(self):
@@ -136,6 +148,33 @@ class TestFinishRefuseConsistency:
     def test_refuse_blank_answer_rejected(self):
         with pytest.raises(PlannerDecisionError):
             PlannerDecision.model_validate(_refuse(answer='')).validate_decision()
+
+    def test_finish_with_arguments_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _finish(arguments={'question': 'x'})
+            ).validate_decision()
+
+    def test_finish_without_task_complete_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_finish(reason_code='not_allowed')).validate_decision()
+
+    def test_refuse_with_arguments_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _refuse(arguments={'report_type': 'all'})
+            ).validate_decision()
+
+    def test_refuse_with_task_complete_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_refuse(reason_code='task_complete')).validate_decision()
+
+    def test_refuse_cannot_complete_allowed(self):
+        decision = PlannerDecision.model_validate(
+            _refuse(reason_code='cannot_complete')
+        ).validate_decision()
+        assert decision.action == 'refuse'
+        assert decision.reason_code == 'cannot_complete'
 
 
 class TestArgumentsWhitelist:
