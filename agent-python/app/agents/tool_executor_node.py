@@ -71,27 +71,30 @@ def _blocked(state: dict, stop_reason: str, message: str,
     }
 
 
-def _same_call(decision: PlannerDecision, last: dict | None) -> bool:
-    """连续重复检测：上一条历史与当前决策相同 tool + 相同 arguments。"""
-    if last is None:
-        return False
-    return (
-        last.get('tool_name') == decision.tool_name
-        and last.get('arguments') == decision.arguments
-    )
+def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
+    """成功签名去重：历史中存在相同 tool + 相同 arguments 且 status=success
+    时阻止再次执行；error / timeout / blocked 历史不阻止，允许合理重试。"""
+    for item in tool_history:
+        if (
+            item.get('tool_name') == decision.tool_name
+            and item.get('arguments') == decision.arguments
+            and item.get('status') == 'success'
+        ):
+            return True
+    return False
 
 
 def tool_executor_node(state: dict) -> dict:
     """Tool 执行节点。
 
     校验顺序：结构（tool_name/arguments）→ 权限 → Tool 调用预算 →
-    连续重复调用 → 计数并真正执行。任何执行前拦截都不计数。
+    成功签名去重 → 计数并真正执行。任何执行前拦截都不计数。
     返回更新 state 的字段：
       tool_call_count — 更新后的 Tool 调用次数
       tool_history    — 追加本条调用记录（success/error/blocked）
       observation     — 结构化观察（Tool 原始结果、错误或阻止原因）
       stop_reason     — tool_executed | invalid_decision | not_allowed
-                        | tool_call_budget_exhausted | repeated_call
+                        | tool_call_budget_exhausted | already_completed
     """
     trace_id = state.get('trace_id', '')
     decision_raw = state.get('planner_decision')
@@ -122,10 +125,11 @@ def tool_executor_node(state: dict) -> dict:
                         'Tool 调用预算已耗尽，无法继续执行工具。',
                         tool_name=decision.tool_name, arguments=decision.arguments)
 
-    # 4. 连续重复调用检测（相同 tool + 相同 arguments）
-    if _same_call(decision, tool_history[-1] if tool_history else None):
-        return _blocked(state, 'repeated_call',
-                        '检测到与上一次相同的 Tool 调用（相同工具与相同参数），已阻止重复执行。',
+    # 4. 成功签名去重：相同 tool + 相同 arguments 且已成功完成 → 阻止；
+    #    error / timeout 历史不阻止，允许合理重试
+    if _already_completed(decision, tool_history):
+        return _blocked(state, 'already_completed',
+                        '该 Tool 调用已成功完成（相同工具与相同参数），不重复执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments)
 
     # 5. 执行前计数：真正发起执行即消耗一次调用预算（成功/超时/异常都计数）

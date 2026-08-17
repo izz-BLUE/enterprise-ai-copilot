@@ -187,7 +187,9 @@ class TestExceptionSanitization:
         assert 'boom' not in result['observation']
 
 
-class TestRepeatedCall:
+class TestSuccessDedup:
+    """成功签名去重：相同 tool + 相同 arguments 且已成功 → 阻止；否则允许。"""
+
     def test_same_tool_and_arguments_blocked(self):
         with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
             rag.invoke.return_value = RAG_RESULT
@@ -196,9 +198,10 @@ class TestRepeatedCall:
                 tool_call_count=first['tool_call_count'],
                 tool_history=first['tool_history'],
             ))
-        assert second['stop_reason'] == 'repeated_call'
+        assert second['stop_reason'] == 'already_completed'
         assert second['tool_call_count'] == 1  # 未增加
         rag.invoke.assert_called_once()
+        assert '"reason": "already_completed"' in second['observation']
         assert '重复' in second['observation']
         assert second['tool_history'][1]['status'] == 'blocked'
 
@@ -214,3 +217,18 @@ class TestRepeatedCall:
         assert second['stop_reason'] == 'tool_executed'
         assert second['tool_call_count'] == 2
         rag.invoke.assert_called()
+
+    def test_error_then_same_signature_allowed_retry(self):
+        """历史为 error 的相同签名不阻止，允许合理重试。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.side_effect = [RuntimeError('provider timeout'), RAG_RESULT]
+            first = tool_executor_node(state())
+            second = tool_executor_node(state(
+                tool_call_count=first['tool_call_count'],
+                tool_history=first['tool_history'],
+            ))
+        assert first['tool_history'][0]['status'] == 'error'
+        assert second['stop_reason'] == 'tool_executed'
+        assert second['tool_call_count'] == 2  # 重试计数
+        assert rag.invoke.call_count == 2
+        assert second['tool_history'][1]['status'] == 'success'

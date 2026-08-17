@@ -156,7 +156,7 @@ class TestFailureRecovery:
 
     def test_step_budget_exhausted_terminates(self):
         """Planner 决策预算耗尽后必须终止，不能无限循环。"""
-        # 每次决策使用不同参数，避免连续重复检测干扰预算测试；
+        # 每次决策使用不同参数，避免成功签名去重干扰预算测试；
         # Tool 执行次数受 MAX_TOOL_CALLS 独立约束，最终由步骤预算终止
         decisions = [
             _tool('rag_answer_tool', {'question': f'问题{i}'}, 'need_knowledge')
@@ -169,6 +169,105 @@ class TestFailureRecovery:
         assert result['stop_reason'] == 'step_budget_exhausted'
         assert rag.invoke.call_count == MAX_TOOL_CALLS
         assert result['step_count'] == MAX_PLANNER_STEPS + 1
+
+
+class TestHistoryRendering:
+    """历史 Tool 结果必须真实进入 Planner Prompt（渲染键与 Executor 写入键一致）。"""
+
+    def test_planner_sees_both_tool_results_in_history(self):
+        """RAG(A) + Eval(B) 成功后，下一轮 Prompt 同时包含两个历史成功结果。"""
+        captured = {}
+        responses = iter([
+            _tool('rag_answer_tool', {'question': '年假制度'}, 'need_knowledge'),
+            _tool('eval_report_tool', {'report_type': 'all'}, 'need_eval'),
+            _finish('完成。'),
+        ])
+
+        def fake_llm(system_prompt, user_prompt):
+            captured['user_prompt'] = user_prompt
+            return next(responses)
+
+        with patch('app.agents.planner_node.call_llm', side_effect=fake_llm) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag, \
+                patch('app.agents.tool_executor_node.eval_report_tool') as evl:
+            rag.invoke.return_value = RAG_RESULT
+            evl.invoke.return_value = EVAL_RESULT
+            result = run_langgraph_agent(
+                '先查年假制度，再查评估。',
+                allow_eval=True,
+                use_planner=True,
+            )
+        assert result['stop_reason'] == 'task_complete'
+        prompt = captured['user_prompt']
+        # 两个 Tool 的实际结果都进入历史渲染
+        assert '年假制度：入职满1年5天。' in prompt  # RAG(A) 结果
+        assert 'final_pass_rate' in prompt          # Eval(B) 结果
+        assert 'status=success' in prompt
+        # 历史行不再以"冒号后空"的旧格式出现（工具描述段不受影响）
+        assert 'rag_answer_tool: \n' not in prompt
+        assert 'eval_report_tool: \n' not in prompt
+
+
+class TestSuccessDedup:
+    """成功签名去重：相同 tool + 相同 arguments 且已成功 → 阻止；否则允许。"""
+
+    def test_rag_a_then_eval_then_rag_a_blocked(self):
+        """RAG(A) 成功 → Eval(B) → 再 RAG(A)：已成功签名被阻止，不计数。"""
+        decisions = [
+            _tool('rag_answer_tool', {'question': '公司的年假制度是什么'}, 'need_knowledge'),
+            _tool('eval_report_tool', {'report_type': 'all'}, 'need_eval'),
+            _tool('rag_answer_tool', {'question': '公司的年假制度是什么'}, 'need_knowledge'),
+            _finish('完成。'),
+        ]
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag, \
+                patch('app.agents.tool_executor_node.eval_report_tool') as evl:
+            rag.invoke.return_value = RAG_RESULT
+            evl.invoke.return_value = EVAL_RESULT
+            result = run_langgraph_agent(
+                '先查年假制度，再查评估，最后再确认年假制度。',
+                allow_eval=True,
+                use_planner=True,
+            )
+        assert rag.invoke.call_count == 1  # 第二次 RAG(A) 被阻止
+        assert evl.invoke.call_count == 1
+        assert result['tool_call_count'] == 2  # 阻止不计数
+        assert result['step_count'] == 4
+        assert result['stop_reason'] == 'task_complete'
+        blocked = result['tool_history'][2]
+        assert blocked['status'] == 'blocked'
+        assert '"reason": "already_completed"' in blocked['observation']
+
+    def test_rag_a_then_rag_c_allowed(self):
+        """相同 Tool、不同 arguments → 允许。"""
+        decisions = [
+            _tool('rag_answer_tool', {'question': '年假制度'}, 'need_knowledge'),
+            _tool('rag_answer_tool', {'question': '报销流程'}, 'need_knowledge'),
+            _finish('完成。'),
+        ]
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
+            result = run_langgraph_agent('先查年假制度，再查报销流程', use_planner=True)
+        assert rag.invoke.call_count == 2
+        assert result['tool_call_count'] == 2
+        assert result['stop_reason'] == 'task_complete'
+
+    def test_rag_a_error_then_rag_a_retry_allowed(self):
+        """相同签名但历史为 error → 允许重试。"""
+        decisions = [
+            _tool('rag_answer_tool', {'question': '年假制度'}, 'need_knowledge'),
+            _tool('rag_answer_tool', {'question': '年假制度'}, 'need_knowledge'),
+            _finish('完成。'),
+        ]
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.side_effect = [RuntimeError('provider timeout'), RAG_RESULT]
+            result = run_langgraph_agent('年假制度', use_planner=True)
+        assert rag.invoke.call_count == 2  # 失败后相同签名重试被允许
+        assert result['tool_call_count'] == 2
+        assert [e['status'] for e in result['tool_history']] == ['error', 'success']
+        assert result['stop_reason'] == 'task_complete'
 
 
 class TestGuardsPreserved:
