@@ -34,6 +34,7 @@ docs/interview/ai-backend-interview-summary.md
 
 # eval reports (auto-generated)
 data/eval/reports/
+agent-python/data/eval/reports/
 
 # load test raw results (summarize verified numbers in docs instead)
 load-tests/results/
