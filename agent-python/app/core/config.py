@@ -65,6 +65,15 @@ REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
 # LLM Timeout (seconds)
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
 
+# LangSmith Observability（默认关闭）。关闭时零侵入、行为与不接入完全一致；
+# 开启后 LangGraph / LangChain / OpenAI SDK 调用自动进入 LangSmith Trace。
+LANGSMITH_TRACING = os.getenv('LANGSMITH_TRACING', 'false').strip().lower() == 'true'
+LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
+LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', 'enterprise-ai-copilot')
+
+if LANGSMITH_TRACING and not LANGSMITH_API_KEY:
+    logger.warning('LANGSMITH_TRACING=true 但未配置 LANGSMITH_API_KEY，Trace 将无法上传到 LangSmith')
+
 # Bounded concurrency for AI endpoints. This protects the single-worker demo
 # from admitting more retrieval / LLM work than the small host can sustain.
 AI_MAX_CONCURRENT_REQUESTS = int(os.getenv('AI_MAX_CONCURRENT_REQUESTS', '3'))

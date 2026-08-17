@@ -335,4 +335,7 @@ def run_langgraph_agent(
         "planner_decision": None,
         "stop_reason": "",
     }
-    return dict(graph.invoke(initial))
+    # LangSmith metadata：业务 trace_id 仅用于关联定位，不覆盖 LangSmith 自身 Trace ID；
+    # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
+    config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
+    return dict(graph.invoke(initial, config=config))
