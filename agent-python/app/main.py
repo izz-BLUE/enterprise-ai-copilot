@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.agents.langgraph_agent import run_langgraph_agent
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
-from app.core.config import DEEPSEEK_MODEL, MAX_MESSAGE_LENGTH, logger
+from app.core.config import AGENT_LOOP_ENABLED, DEEPSEEK_MODEL, MAX_MESSAGE_LENGTH, logger
 from app.schemas.chat_schema import AgentResponse, ChatRequest, ChatResponse
 from app.schemas.version_schema import VersionResponse
 from app.services.rag_service import process_chat
@@ -146,6 +146,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             allow_business_actions=allow_business_actions,
             business_date=business_date,
             trace_id=trace_id,
+            use_planner=AGENT_LOOP_ENABLED,
         )
         return AgentResponse(
             answer=result.get('answer', ''),

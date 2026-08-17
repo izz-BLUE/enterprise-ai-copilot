@@ -2,7 +2,7 @@ from openai import APIConnectionError, APITimeoutError, OpenAI
 
 from app.core.config import (
     DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL,
-    DEEPSEEK_TEMPERATURE, LLM_TIMEOUT, logger,
+    DEEPSEEK_TEMPERATURE, LANGSMITH_TRACING, LLM_TIMEOUT, logger,
 )
 
 _client: OpenAI | None = None
@@ -27,7 +27,12 @@ def _build_client(*, max_retries: int | None = None) -> OpenAI:
     }
     if max_retries is not None:
         options['max_retries'] = max_retries
-    return OpenAI(**options)
+    client = OpenAI(**options)
+    if LANGSMITH_TRACING:
+        # 统一插桩：Planner / 旧 SDK RAG / 受控业务动作的裸 SDK 调用都经此 client
+        from langsmith.wrappers import wrap_openai
+        return wrap_openai(client)
+    return client
 
 
 def _get_client() -> OpenAI:

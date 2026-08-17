@@ -18,6 +18,9 @@ from app.services.annual_leave_input_service import is_annual_leave_action_inten
 from app.services.tool_calling_service import plan_annual_leave_action
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
+from app.agents.planner_node import planner_node
+from app.agents.tool_executor_node import tool_executor_node
+
 EVAL_KEYWORDS = ['评估', '通过率', 'pass_rate', '命中率', 'baseline', '回归', 'flaky']
 
 
@@ -36,6 +39,16 @@ class AgentState(TypedDict):
     trace_id: str
     action_proposal: dict | None
     missing_fields: list[str]
+    # Agent Loop P0 预留：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
+    # tool_call_count = 通过执行前校验后，实际发起 Tool 执行的次数——
+    # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数；
+    # （本阶段无 Tool Executor，保持 0，不递增）
+    step_count: int
+    tool_call_count: int
+    tool_history: list
+    observation: str
+    planner_decision: dict | None
+    stop_reason: str
 
 
 def safety_node(state: AgentState) -> dict:
@@ -244,14 +257,67 @@ def build_agent_graph():
     return graph.compile()
 
 
+def build_agent_loop_graph():
+    """最小有限 Agent Loop：safety → router → planner ⇄ tool_executor。
+
+    rag/eval 分支接入 Planner；action（受控业务动作）与 refuse 分支保留
+    原有确定性逻辑，Agent 不自主执行业务 Action。
+    planner 输出 tool 决策（stop_reason=continue）→ tool_executor；
+    finish/refuse/任何失败路径 → END。
+    """
+    graph = StateGraph(AgentState)
+
+    graph.add_node("safety_node", safety_node)
+    graph.add_node("router_node", router_node)
+    graph.add_node("planner_node", planner_node)
+    graph.add_node("tool_executor_node", tool_executor_node)
+    graph.add_node("action_node", action_node)
+    graph.add_node("refuse_node", refuse_node)
+
+    graph.add_edge(START, "safety_node")
+    graph.add_edge("safety_node", "router_node")
+
+    graph.add_conditional_edges(
+        "router_node",
+        lambda state: state.get("route", "rag"),
+        {
+            "rag": "planner_node",
+            "eval": "planner_node",
+            "action": "action_node",
+            "refuse": "refuse_node",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "planner_node",
+        lambda state: "tool_executor_node" if state.get("stop_reason") == "continue" else END,
+        {
+            "tool_executor_node": "tool_executor_node",
+            END: END,
+        },
+    )
+
+    graph.add_edge("tool_executor_node", "planner_node")
+    graph.add_edge("action_node", END)
+    graph.add_edge("refuse_node", END)
+
+    return graph.compile()
+
+
 def run_langgraph_agent(
     question: str,
     allow_eval: bool = False,
     allow_business_actions: bool = False,
     business_date: date | None = None,
     trace_id: str = '',
+    use_planner: bool = False,
 ) -> dict:
-    graph = build_agent_graph()
+    """运行 LangGraph Agent。
+
+    use_planner=True 时启用最小 Agent Loop（planner → tool_executor → planner），
+    rag/eval 请求由 Planner 决策驱动；默认保持确定性路由不变。
+    """
+    graph = build_agent_loop_graph() if use_planner else build_agent_graph()
     initial: AgentState = {
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
@@ -262,5 +328,14 @@ def run_langgraph_agent(
         "trace_id": trace_id,
         "action_proposal": None,
         "missing_fields": [],
+        "step_count": 0,
+        "tool_call_count": 0,
+        "tool_history": [],
+        "observation": "",
+        "planner_decision": None,
+        "stop_reason": "",
     }
-    return dict(graph.invoke(initial))
+    # LangSmith metadata：业务 trace_id 仅用于关联定位，不覆盖 LangSmith 自身 Trace ID；
+    # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
+    config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
+    return dict(graph.invoke(initial, config=config))
