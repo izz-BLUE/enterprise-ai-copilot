@@ -242,18 +242,24 @@ POST /api/agent/langgraph/chat
           └── action_node: plan_annual_leave_action
                 ├─ 字段完整：
                 │     action_proposal
-                │     → Java BusinessActionService.createPending
-                │     → PendingAction
+                │     → BusinessActionService.createPending
+                │        → Java 权威 Proposal 校验
+                │        → Java 生成 confirmationNonce
+                │        → 持久化 PendingAction
                 └─ 缺字段：
                       missing_fields
                       → Clarification response
                       → END
                       （不得进入 BusinessActionService / PendingAction）
     → 已创建 PendingAction
-      → Java BusinessActionService 权威复核与 owner 校验
-        → React 脱敏确认卡
-          ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL 事务
-          └── cancel（无 Idempotency-Key）→ CANCELLED
+      → React 脱敏确认卡
+        ├── confirm
+        │  → BusinessActionService confirm
+        │  → owner / nonce / 状态机 / TTL / 幂等校验
+        │  → LeaveExecutionGateway
+        │  → PostgreSQL 事务
+        └── cancel
+           → CANCELLED
 ```
 
 **Planner-first**（`AGENT_LOOP_ENABLED=true`）：
@@ -288,18 +294,24 @@ POST /api/agent/langgraph/chat
           │           └── 其他拦截 → tool_history 记录 blocked，不计数
           ├── leave_proposal_tool（Planner-first 下）：
           │     ├─ action_proposal（字段完整）
-          │     │     → Java createPending
-          │     │     → PendingAction
+          │     │     → BusinessActionService.createPending
+          │     │        → Java 权威 Proposal 校验
+          │     │        → Java 生成 confirmationNonce
+          │     │        → 持久化 PendingAction
           │     └─ missing_fields（Clarification）
           │           → Clarification response
           │           → 不创建 PendingAction
           ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
           └── 终止后：_finalize_action_proposal + _finalize_response_contract 收敛 route / category / reason
     → 已创建 PendingAction
-      → Java BusinessActionService 权威复核与 owner 校验（Java 产 confirmationNonce）
-        → React 脱敏确认卡
-          ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL 事务
-          └── cancel（无 Idempotency-Key）→ CANCELLED
+      → React 脱敏确认卡
+        ├── confirm
+        │  → BusinessActionService confirm
+        │  → owner / nonce / 状态机 / TTL / 幂等校验
+        │  → LeaveExecutionGateway
+        │  → PostgreSQL 事务
+        └── cancel
+           → CANCELLED
 ```
 
 **特点**：两套互斥图共用同一 Java 控制面；Python `run_langgraph_agent` 仅在 `use_planner=True` 时启用 `_finalize_action_proposal` 与 `_finalize_response_contract` 两层 finalization。
