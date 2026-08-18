@@ -239,7 +239,16 @@ POST /api/agent/langgraph/chat
           │     ├── 明确年假申请 → route=action
           │     └── 其他（含年假政策/余额/流程）→ route=rag
           ├── rag_node / eval_node / action_node / refuse_node → END
-          └── action_node: plan_annual_leave_action → action_proposal / missing_fields
+          └── action_node: plan_annual_leave_action
+                ├─ 字段完整：
+                │     action_proposal
+                │     → Java BusinessActionService.createPending
+                │     → PendingAction
+                └─ 缺字段：
+                      missing_fields
+                      → Clarification response
+                      → END
+                      （不得进入 BusinessActionService / PendingAction）
     → Java BusinessActionService 权威复核与 owner 校验
       → PendingAction
         → React 脱敏确认卡
@@ -262,16 +271,28 @@ POST /api/agent/langgraph/chat
           │     └── PlannerDecision（Pydantic 严格白名单，MAX_PLANNER_STEPS=5）
           │           ├── action=tool → tool_executor_node
           │           ├── action=finish / refuse → END
-          │           ├── step budget exhausted → stop_reason=step_budget_exhausted → route=error
-          │           └── Tool / permission boundary not allowed → stop_reason=not_allowed → route=refuse
+          │           └── step budget exhausted
+          │                 → stop_reason=step_budget_exhausted
+          │                 → route=error
+          │                 （Planner 只能规划，不能授权 —— 权限边界在 tool_executor_node）
           ├── tool_executor_node
           │     └── 校验：结构 → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
           │           ├── 通过 → 执行 Tool；Tool 可见性由程序层按权限动态收缩（模型不能自行扩大 Tool 权限）：
           │           │     默认 rag_answer_tool / leave_balance_tool / leave_request_tool；
           │           │     allow_eval=true 追加 eval_report_tool；
           │           │     allow_business_actions=true 追加 leave_proposal_tool
-          │           └── 拦截 → tool_history 记录 blocked，不计数
-          ├── leave_proposal_tool：生成 action_proposal / missing_fields（**不执行写操作**）
+          │           ├── 权限 / Tool boundary 拦截
+          │           │     → stop_reason=not_allowed
+          │           │     → route=refuse
+          │           │     → Tool 不执行
+          │           └── 其他拦截 → tool_history 记录 blocked，不计数
+          ├── leave_proposal_tool（Planner-first 下）：
+          │     ├─ action_proposal（字段完整）
+          │     │     → Java createPending
+          │     │     → PendingAction
+          │     └─ missing_fields（Clarification）
+          │           → Clarification response
+          │           → 不创建 PendingAction
           ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
           └── 终止后：_finalize_action_proposal + _finalize_response_contract 收敛 route / category / reason
     → Java BusinessActionService 权威复核与 owner 校验

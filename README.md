@@ -389,12 +389,18 @@ Java 注入 business_date（X-Business-Date header）
   → Python Planner 决定调用 leave_proposal_tool
   → Tool Executor 注入 question / business_date / trace_id
   → Python tool_calling_service.plan_annual_leave_action
-  → 生成 action_proposal（完整字段）或 missing_fields（Clarification）
-  → Java LangGraphAgentController.createPending
-  → PostgreSQL PendingAction
-  → React 确认卡（用户 Confirm/Cancel）
-  → Java BusinessActionController /confirm 或 /cancel
-  → BusinessActionService → LeaveExecutionGateway → PostgreSQL 事务
+  → 生成结果：
+       ├─ action_proposal（字段完整）
+       │    → Java LangGraphAgentController
+       │    → BusinessActionService.createPending
+       │    → PendingAction
+       │    → React Confirm/Cancel
+       │    → Java BusinessActionController /confirm 或 /cancel
+       │    → LeaveExecutionGateway → PostgreSQL 事务
+       └─ missing_fields（Clarification）
+            → Clarification response
+            → 用户补充信息
+            → 不创建 PendingAction
 ```
 
 安全边界：
