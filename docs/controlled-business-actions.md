@@ -29,12 +29,12 @@ flowchart LR
     S --> G{AGENT_LOOP_ENABLED}
     G -->|false 默认| RT[Deterministic Router]
     G -->|true 显式开启| P[Planner ⇄ Tool Executor]
-    RT --> A1[action_node<br/>plan_annual_leave_action]
+    RT -->|字段完整| APP[action_proposal]
+    RT -->|缺字段| CL[Clarification response]
     P -->|PlannerDecision| T[leave_proposal_tool]
-    T --> A2[tool_calling_service.plan_annual_leave_action]
-    A1 --> AP[action_proposal / missing_fields]
-    A2 --> AP
-    AP --> V[Java BusinessActionService]
+    T -->|字段完整| APP
+    T -->|缺字段| CL
+    APP --> V[Java BusinessActionService]
     V -->|Java 产 confirmationNonce| DB[(PostgreSQL PendingAction)]
     DB --> CARD[React PendingAction Card]
     CARD -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]

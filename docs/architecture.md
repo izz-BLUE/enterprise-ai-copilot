@@ -18,6 +18,7 @@ flowchart TD
         LAC[LangGraphAgentController]
         TID[TraceIdFilter]
         BAS[BusinessActionService]
+        LRC[Java LeaveReadController]
         PA[JDBC Action Repository]
         LS[JDBC Leave Repositories]
     end
@@ -27,9 +28,6 @@ flowchart TD
         EP1[/agent/chat]
         EP2[/agent/langgraph/chat]
         SG[Safety Guard]
-        LG{AGENT_LOOP_ENABLED}
-        RT[Router]
-        PL[Planner ⇄ Tool Executor]
     end
 
     subgraph Database ["PostgreSQL 16"]
@@ -47,21 +45,36 @@ flowchart TD
         LLM[DeepSeek LLM]
     end
 
+    subgraph Reports ["Evaluation Reports"]
+        EVR[Evaluation Reports]
+    end
+
     subgraph Agent ["LangGraph Agent（两套互斥）"]
         SN[safety_node]
+        LG{AGENT_LOOP_ENABLED}
+        RN[router_node]
+        PLN[planner_node]
+        TEN[tool_executor_node]
+        RAGN[rag_node]
+        EN[eval_node]
+        AN[action_node]
+        REFN[refuse_node]
+        APP[action_proposal]
+        CL[Clarification response]
         SN --> LG
-        LG -->|false 默认| RN[router_node]
-        LG -->|true 显式开启| PLN[planner_node]
-        PLN --> TEN[tool_executor_node]
-        RN --> RAGN[rag_node]
-        RN --> EN[eval_node]
-        RN --> AN[action_node]
-        RN --> REFN[refuse_node]
+        LG -->|false 默认| RN
+        LG -->|true 显式开启| PLN
+        PLN <-->|PlannerDecision / Tool Result| TEN
+        RN -->|rag| RAGN
+        RN -->|eval| EN
+        RN -->|annual leave action| AN
+        RN -->|refuse| REFN
+        AN -->|字段完整| APP
+        AN -->|缺字段| CL
         TEN -->|rag_answer_tool| HR
-        TEN -->|eval_report_tool| EV
-        TEN -->|leave_balance_tool / leave_request_tool| IR
-        TEN -->|leave_proposal_tool| AP[action_proposal / missing_fields]
-        AP -->|Java createPending| PEND[(PendingAction)]
+        TEN -->|eval_report_tool| EVR
+        TEN -->|leave_balance_tool / leave_request_tool| LRC
+        TEN -->|leave_proposal_tool| APP
     end
 
     subgraph KB ["知识库离线构建"]
@@ -92,18 +105,14 @@ flowchart TD
     PP --> LLM
 
     EP2 --> SN
-    SN --> LG
-    LG -->|false 默认| RN
-    LG -->|true 显式开启| PLN
-    RN -->|rag| RAGN
-    RN -->|eval| EN
-    RN -->|annual leave action| AN
-    RN -->|refuse| REFN
-    PLN <-->|PlannerDecision / Tool Result| TEN
     RAGN --> HR
-    AN --> BAS --> PA
+    EN --> EVR
+    APP -->|Java createPending| LAC
+    CL -->|Clarification response| EP2
+    LRC --> LS
+    LAC --> BAS --> PA
     PA --> BA
-    PA -->|confirm transaction| LS
+    BAS -->|confirm transaction| LS
     LS --> AC
     LS --> LR
 
@@ -253,7 +262,8 @@ POST /api/agent/langgraph/chat
           │     └── PlannerDecision（Pydantic 严格白名单，MAX_PLANNER_STEPS=5）
           │           ├── action=tool → tool_executor_node
           │           ├── action=finish / refuse → END
-          │           └── 预算 / 鉴权失败 → refuse / step_budget_exhausted
+          │           ├── step budget exhausted → stop_reason=step_budget_exhausted → route=error
+          │           └── Tool / permission boundary not allowed → stop_reason=not_allowed → route=refuse
           ├── tool_executor_node
           │     └── 校验：结构 → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
           │           ├── 通过 → 执行 Tool；Tool 可见性由程序层按权限动态收缩（模型不能自行扩大 Tool 权限）：
@@ -475,7 +485,7 @@ LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 
 - **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
   - 状态图：`safety → router → rag|eval|action|refuse`
-  - Router 基于保守规则匹配；只有明确年假申请进入 Action，方案，余额，结转，审批流程继续走 RAG
+  - Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
   - 不使用"自主 Agent""智能规划系统"等措辞
   - legacy Router-first 不暴露 Planner-first 的 Tool 可见性集合；`leave_proposal_tool` 仅在 Planner-first 下被 Planner 决策调用
 
