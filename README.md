@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/izz-BLUE/enterprise-ai-copilot)](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/latest)
 [![License](https://img.shields.io/github/license/izz-BLUE/enterprise-ai-copilot)](LICENSE)
 
-面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。当前 Agent 已支持企业请假领域的只读 Tool，业务写操作仍保留 Java 权威校验和用户确认边界。
+面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。仓库部署默认走 legacy Router-first 状态图；Planner-first 是已实装的另一套互斥状态图，需通过 `AGENT_LOOP_ENABLED=true` 显式启用。Python Planner 拥有规划权但没有最终业务执行授权；受控业务动作仍保留 Java 权威校验和用户确认边界。
 
 - 在线演示：<https://copilot.jintianchi.cn>
 - 当前版本：[v0.4.0](docs/releases/v0.4.0.md)
@@ -19,12 +19,16 @@ flowchart LR
     J -->|/api/chat| P[Python Agent]
     J -->|/api/agent/langgraph/chat| P
     P --> SG[Safety Guard]
-    SG --> RT[Router]
-    RT -->|RAG| HR[Hybrid Retrieval]
-    RT -->|Agent Loop 可选| PL[Planner]
-    PL --> EX[Tool Executor]
+    SG --> LG{AGENT_LOOP_ENABLED}
+    LG -->|false 默认| RT[Router]
+    LG -->|true 显式开启| PL[Planner ⇄ Tool Executor]
+    RT -->|RAG / Eval / Action / Refuse| HR[Hybrid Retrieval]
+    PL -->|Tool| EX[Tool Executor]
     EX -->|rag_answer_tool| HR
+    EX -->|eval_report_tool| EV[Eval Reports]
     EX -->|leave_balance_tool / leave_request_tool| IR[Java Internal Read API]
+    EX -->|leave_proposal_tool| AP[action_proposal / missing_fields]
+    AP -->|Java createPending| PA[(PendingAction)]
     IR --> DB[(PostgreSQL leave_account / leave_request)]
     HR --> FA[FAISS]
     HR --> BM[BM25]
@@ -35,9 +39,9 @@ flowchart LR
     J --> U
 ```
 
-稳定 RAG 走 `Java → Python /agent/chat → Hybrid Retrieval`；LangGraph 走 `Safety Guard → Router`，可按配置进入确定性 RAG/Evaluation/Action 路由，或进入 `Planner → Tool Executor` 的最小 Agent Loop。公网请求经过 Nginx 和 Java，Python 不映射宿主机端口。
+稳定 RAG 走 `Java → Python /agent/chat → Hybrid Retrieval`；LangGraph 走 `Safety Guard` 后按 `AGENT_LOOP_ENABLED` 进入两套互斥图之一（legacy Router-first 或 Planner-first）。公网请求经过 Nginx 和 Java，Python 不映射宿主机端口。
 
-企业请假只读 Tool 的链路是：Java 侧完成身份解析后，将可信 `employee_id` 注入 Python AgentState；Python Tool Executor 再通过最小 HTTP client 调用 Java `/api/internal/leave/*`，Java 使用 `JAVA_INTERNAL_TOKEN` 鉴权并严格按员工身份查询 PostgreSQL。`employee_id` 和 `trace_id` 不属于 LLM 可控 arguments。
+企业请假只读 Tool（`leave_balance_tool` / `leave_request_tool`）的链路是：Java 侧完成身份解析后，将可信 `employee_id` 注入 Python AgentState；Python Tool Executor 再通过最小 HTTP client 调用 Java `/api/internal/leave/*`，Java 使用 `JAVA_INTERNAL_TOKEN` 鉴权并严格按员工身份查询 PostgreSQL。`employee_id` 和 `trace_id` 不属于 LLM 可控 arguments。`leave_proposal_tool` 只生成 `action_proposal` / `missing_fields`（Clarification），**不执行写操作**，且不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限与最终数据库写入全部由 Java 完成。
 
 ## What this project demonstrates
 
@@ -61,7 +65,7 @@ flowchart LR
 | RRF 融合 FAISS 与 BM25 | 两种检索分数尺度不同，按排名融合无需手工归一化 | 融合参数仍基于小型领域数据集 |
 | 规则 Query Rewrite | 延迟和成本可预测，可确定性回归 | 只能覆盖已知口语表达 |
 | 双层并发槽而非长队列 | 小规格机器过载时快速失败，避免线程和内存持续堆积 | 单机吞吐上限较低，尚未验证水平扩容 |
-| LangGraph 保持实验链路 | 便于比较显式 RAG 与图编排，不影响稳定接口 | 不是自主规划型 Agent |
+| LangGraph 两套互斥状态图 | 便于比较 legacy Router-first 与 Planner-first，不影响稳定接口 | 具有有限自主规划能力，但受 Tool 白名单、权限校验、`MAX_PLANNER_STEPS=5`、`MAX_TOOL_CALLS=3` 和 Java 最终授权边界约束 |
 
 Cross Encoder 精排和 Retrieval Shadow Gate 均做过实验，但在当前数据集上没有形成足够收益，因此未作为生产演示默认路径。
 
@@ -313,32 +317,33 @@ uv run python scripts/experiments/langchain_rag_demo.py "病假需要提供哪�
 
 ### 9. LangGraph Agent
 
-**实验模块：**
+**模块：**
 
 ```
 app/agents/langgraph_agent.py
 ```
 
-**默认确定性状态图：**
+**两套互斥状态图（由 `AGENT_LOOP_ENABLED` 切换）：**
 
-```
-safety → router → rag / eval / refuse
-```
-
-当 `AGENT_LOOP_ENABLED=true` 时，RAG/企业只读查询会进入可选的最小 Agent Loop：
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
 
 ```text
-safety → router → planner ⇄ tool_executor → finish / refuse
+safety → router → rag | eval | action | refuse
 ```
 
-**能力：**
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）
 
-- Safety Guard 输入安全检查
-- 规则路由
-- RAG 问答
-- Evaluation 查询
-- 安全拒答
-- Tool 调用封装与有界预算
+```text
+safety → planner ⇄ tool_executor
+```
+
+Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
+
+- 默认可见：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`
+- `allow_eval=true` 时追加：`eval_report_tool`
+- `allow_business_actions=true` 时追加：`leave_proposal_tool`
+
+Planner 拥有规划权但没有最终业务执行授权；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验；可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`。`leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部在 Java 侧完成。
 
 **接口：**
 
@@ -349,16 +354,17 @@ POST /api/agent/langgraph/chat
 
 **说明：** LangGraph Agent 与 RAG 主链路并行运行，不替换 `/agent/chat` 稳定接口。
 
-### 10. Enterprise Leave Read Tools
+### 10. Enterprise Leave Tools (Planner-first)
 
-Agent Loop 提供两个只读企业 Tool：
+Planner-first 最多支持 5 个 Tool；本节聚焦企业相关 Tool。Tool 可见性由程序层按权限动态收缩，模型不能自行扩大 Tool 权限：
 
-| Tool | 用途 | LLM 可控参数 |
-|------|------|-------------|
-| `leave_balance_tool` | 查询当前登录用户自己的年假余额 | 无 |
-| `leave_request_tool` | 查询当前登录用户最近已成功提交的请假记录 | `limit`，范围 `1..50`，默认 `20` |
+| Tool | 用途 | LLM 可控参数 | 是否依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` |
+|------|------|-------------|---------------------------------------------------|
+| `leave_balance_tool` | 查询当前登录用户自己的年假余额（默认可见） | 无 | 是（Python → Java 内部只读） |
+| `leave_request_tool` | 查询当前登录用户最近已成功提交的请假记录（默认可见） | `limit`（1..50，默认 20） | 是（Python → Java 内部只读） |
+| `leave_proposal_tool` | 生成年假申请草稿（Proposal）或 Clarification（`allow_business_actions=true` 时追加） | 无 | **否** —— 不依赖 `JAVA_INTERNAL_TOKEN`；只生成 `action_proposal` / `missing_fields`，不执行写操作 |
 
-调用链路：
+只读 Tool 调用链路：
 
 ```text
 Java 身份解析
@@ -370,12 +376,27 @@ Java 身份解析
   → PostgreSQL 按 employee_id 严格查询
 ```
 
+`leave_proposal_tool` 调用链路：
+
+```text
+Java 注入 business_date（X-Business-Date header）
+  → Python Planner 决定调用 leave_proposal_tool
+  → Tool Executor 注入 question / business_date / trace_id
+  → Python tool_calling_service.plan_annual_leave_action
+  → 生成 action_proposal（完整字段）或 missing_fields（Clarification）
+  → Java LangGraphAgentController.createPending
+  → PostgreSQL PendingAction
+  → React 确认卡（用户 Confirm/Cancel）
+  → Java BusinessActionController /confirm 或 /cancel
+  → BusinessActionService → LeaveExecutionGateway → PostgreSQL 事务
+```
+
 安全边界：
 
-- Planner arguments 使用严格白名单，模型不能传入 `employee_id` 或 `trace_id`；
-- Python 只读客户端通过 `JAVA_INTERNAL_TOKEN` 调用 Java 内部接口，不做 retry 或 fallback；
+- Planner arguments 使用严格白名单，模型不能传入 `employee_id` / `business_date` / `trace_id` 等可信系统字段；
+- 只读 Tool 通过 `JAVA_INTERNAL_TOKEN` 调用 Java 内部接口，不做 retry 或 fallback；
 - Java 内部接口默认关闭，启用后仍只接受可信链路注入的员工身份；
-- 请假写操作不由这些 Tool 执行，仍走 PendingAction、nonce、幂等确认和 Java 最终业务校验。
+- `confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部由 Java 完成；`leave_proposal_tool` 不执行写操作。
 
 ## API Endpoints
 
@@ -659,20 +680,20 @@ Current evaluation cases cover scenarios such as:
 - **TopK comparison**: evaluation across TopK=3/5/8 to balance recall quality and cost
 - **Cross Encoder Re-rank**: hybrid_rerank mode with BAAI/bge-reranker-base for precision reranking
 
-## Stable RAG vs Experimental Agent
+## Stable RAG vs LangGraph Agent
 
 | Feature | `/api/chat` | `/api/agent/langgraph/chat` |
 |---------|------------|---------------------------|
 | Python API | `/agent/chat` | `/agent/langgraph/chat` |
 | Implementation | Hand-written RAG | LangGraph Agent |
 | Safety Guard | Yes | Yes |
-| Intent Routing | No | Yes |
-| Tool Calling | No | Rule-based tools |
-| Stability | Stable main pipeline | Experimental |
-| Use Case | Knowledge QA | Agent workflow exploration |
+| State graph | N/A | 两套互斥：legacy Router-first（默认） / Planner-first（`AGENT_LOOP_ENABLED=true`） |
+| Tool calling | No | legacy Router-first：规则工具；Planner-first：最多 5 个 Tool（默认 3 + `allow_eval` 追加 1 + `allow_business_actions` 追加 1），实际可见集合由程序层按权限动态收缩，模型不能自行扩大 |
+| Stability | Stable main pipeline | 仓库部署默认 legacy；Planner-first 是已实装能力，需显式开关 |
+| Use case | Knowledge QA | Agent workflow（含受控业务动作生成草稿） |
 
 `/api/chat` is the **stable RAG main pipeline**.
-`/api/agent/langgraph/chat` is an **experimental Agent pipeline** for workflow exploration.
+`/api/agent/langgraph/chat` 仓库部署默认走 legacy Router-first；启用 Planner-first 不替换稳定接口。
 
 ## RAG Quality Engineering
 

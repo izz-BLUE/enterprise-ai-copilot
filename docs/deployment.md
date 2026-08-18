@@ -99,7 +99,20 @@
 model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 ```
 
-## 公网部署（copilot.jintianchi.cn）
+## 代码能力 vs 仓库部署默认 vs 公网实际状态
+
+> 本节是本仓库对当前部署能力的唯一事实口径。**公网实际状态仓库无证据** —— 公网是否启用 Planner-first / 受控业务动作 / 只读企业 Tool，以运维 `.env` 与服务器实际环境变量为准，本文不据此做能力宣称。
+
+| 维度 | main 代码能力（已实装） | 仓库部署默认（`deploy/docker-compose.prod.yml` + `agent-python/.env.example`） | 公网实际状态 |
+|------|------------------------|------------------------------------------------------------------------|--------------|
+| Python Agent 状态图 | 两套互斥图：`safety → router → rag|eval|action|refuse`（legacy Router-first）和 `safety → planner ⇄ tool_executor`（Planner-first），由 `AGENT_LOOP_ENABLED` 切换 | `AGENT_LOOP_ENABLED` 在 compose 中 **未注入**；镜像内 `.env.example` 与 `app/core/config.py` 默认 `false` ⇒ 走 legacy Router-first | 仓库无证据 |
+| Planner-first 可见 Tool（最多 5 个，按权限动态收缩） | 默认 3 个：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 追加 `leave_proposal_tool`；模型不能自行扩大 Tool 权限 | Planner-first 默认关闭 ⇒ 默认部署下整个 Tool 集合不可见；Java 端的 `allow_eval` / `allow_business_actions` 也受 `ADMIN_TOKEN` / `BUSINESS_ACTIONS_ENABLED` 约束 | 仓库无证据 |
+| `leave_balance_tool` / `leave_request_tool`（Python → Java 只读） | 通过 `JavaReadClient` 调 `/api/internal/leave/*`，依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | compose **未注入** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` / `JAVA_TIMEOUT_SECONDS` ⇒ 端点默认返回 `LEAVE_READ_DISABLED` | 仓库无证据 |
+| `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认关闭 ⇒ Tool 在默认部署下不可见；即使开启 Planner-first，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
+| `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
+| Admin Token / Evaluation 权限 | Java 后端校验 `X-Admin-Token`，通过 `X-Allow-Eval` 内部 header 告知 Python | compose `:?` 强制 `ADMIN_TOKEN` 非空 ⇒ 生产必填 | 仓库无证据 |
+
+**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署会让 Planner-first、受控业务动作、只读企业 Tool **全部关闭**。任何对外宣称的"Planner-first 公网演示"必须在服务器 `.env` 显式打开 `AGENT_LOOP_ENABLED=true` / `BUSINESS_ACTIONS_ENABLED=true` / `JAVA_INTERNAL_TOKEN` / `JAVA_BASE_URL` / `DEMO_IDENTITY_ENABLED=true` 后才能生效，**且这些事实仓库不掌握**。
 
 ### 域名和证书
 
@@ -242,11 +255,18 @@ graph LR
 | SPRING_DATASOURCE_URL | Java 到 Compose PostgreSQL 的 JDBC 地址 |
 | PYTHON_AGENT_ACQUIRE_TIMEOUT_MS | ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500} |
 | ADMIN_TOKEN | ${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}（必填） |
-| DEMO_IDENTITY_ENABLED | false；仅受控演示环境显式设置 true |
+| DEMO_IDENTITY_ENABLED | compose 默认未注入；仅受控演示环境显式设置 true |
+| BUSINESS_ACTIONS_ENABLED | compose 默认 `${:-false}`；启用后 Java 才接收 Proposal 并创建 PendingAction |
+| JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时 `leave_balance_tool` / `leave_request_tool` 返回 `LEAVE_READ_FORBIDDEN` |
+| JAVA_BASE_URL | compose 默认未注入；缺值时上述两个 Tool 返回 `LEAVE_READ_DISABLED` |
+| JAVA_TIMEOUT_SECONDS | compose 默认未注入；Python 端 `.env.example` 默认 5 |
+| AGENT_LOOP_ENABLED | compose 默认未注入；Python 端镜像内默认 `false` ⇒ 走 legacy Router-first |
 
 PostgreSQL 是 Java 受控业务动作的生产强依赖：Java 等待数据库健康后启动，Flyway 自动迁移；数据库不可用时启动或健康检查失败，不会降级为内存存储。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
 本地或受控请假演示需同时设置 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
+
+启用 Planner-first 的完整链路需要在 `python-agent` 容器环境变量中追加 `AGENT_LOOP_ENABLED=true`（且 Planner-first 下的 `leave_proposal_tool` 还需要 `BUSINESS_ACTIONS_ENABLED=true` 才能落地），仅读企业 Tool 还需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN`。上述任何一项缺失时，对应能力按各自 Tool 的稳定错误码降级（`LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` / `BUSINESS_ACTIONS_DISABLED`），不会伪造成功。
 
 ## Secret 管理
 
