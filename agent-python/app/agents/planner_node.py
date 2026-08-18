@@ -21,7 +21,7 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
-from app.services.llm_service import call_llm
+from app.services.llm_service import LLMProviderError, call_llm
 
 # 单次任务允许的最大 Planner 决策次数（预算基于决策次数，而非 Tool 调用次数）
 MAX_PLANNER_STEPS = 5
@@ -232,6 +232,18 @@ def planner_node(state: dict) -> dict:
 
     try:
         raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
+    except LLMProviderError as exc:
+        # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
+        # 不引入 timeout/5xx 应用层 retry。
+        logger.error(
+            '[%s] planner LLM Provider 错误: code=%s message=%s',
+            trace_id, exc.code, exc,
+        )
+        return _decision_result(
+            state,
+            _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+            'provider_error',
+        )
     except Exception:
         logger.exception('[%s] planner LLM 调用失败', trace_id)
         return _decision_result(
@@ -242,10 +254,21 @@ def planner_node(state: dict) -> dict:
 
     # 偶发空响应恢复：None / 空字符串 / 纯空白属于 Provider 偶发问题，
     # 在同一次 Planner 决策内部重试 1 次；非空但 JSON 非法不重试，走 invalid_decision。
+    # Model Reliability P0：仅在空响应时重试，不针对 timeout/5xx。
     if raw is None or not str(raw).strip():
         logger.warning('[%s] planner LLM 首次返回空响应，进行 1 次内部重试', trace_id)
         try:
             raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
+        except LLMProviderError as exc:
+            logger.error(
+                '[%s] planner LLM 重试 Provider 错误: code=%s message=%s',
+                trace_id, exc.code, exc,
+            )
+            return _decision_result(
+                state,
+                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+                'provider_error',
+            )
         except Exception:
             logger.exception('[%s] planner LLM 重试调用失败', trace_id)
             return _decision_result(

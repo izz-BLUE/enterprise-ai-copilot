@@ -65,6 +65,22 @@ def process_chat(message: str, trace_id: str = '', top_k: int = 3,
         logger.info('[%s] 开始调用 LLM', trace_id)
         llm_called = True
         answer = call_llm(SYSTEM_PROMPT, user_prompt)
+
+        # Model Reliability P0：Provider 偶发空响应在应用层内部重试 1 次；
+        # Provider 网络错误（LLMProviderError）不额外重试，直接抛给外层兜底。
+        if not (answer or '').strip():
+            logger.warning('[%s] LLM 首次返回空响应，进行 1 次内部重试', trace_id)
+            answer = call_llm(SYSTEM_PROMPT, user_prompt)
+            if not (answer or '').strip():
+                # 重试仍空：明确走服务不可用兜底，避免返回空答案给用户。
+                logger.warning('[%s] LLM 重试后仍返回空响应，走失败兜底', trace_id)
+                return ChatResponse(
+                    answer='当前 AI 服务暂时不可用，请稍后重试。',
+                    model=DEEPSEEK_MODEL,
+                    traceId=trace_id,
+                    success=False,
+                )
+
         logger.info('[%s] LLM 调用完成', trace_id)
 
         return ChatResponse(
