@@ -17,12 +17,14 @@ ToolName = Literal[
     'eval_report_tool',
     'leave_balance_tool',
     'leave_request_tool',
+    'leave_proposal_tool',
 ]
 ReasonCode = Literal[
     'need_knowledge',
     'need_eval',
     'need_balance',
     'need_leave_history',
+    'need_proposal',
     'task_complete',
     'not_allowed',
     'cannot_complete',
@@ -32,15 +34,19 @@ RAG_TOOL_NAME = 'rag_answer_tool'
 EVAL_TOOL_NAME = 'eval_report_tool'
 LEAVE_BALANCE_TOOL_NAME = 'leave_balance_tool'
 LEAVE_REQUEST_TOOL_NAME = 'leave_request_tool'
+LEAVE_PROPOSAL_TOOL_NAME = 'leave_proposal_tool'
 VALID_REPORT_TYPES = ('retrieval', 'generation', 'all')
 LEAVE_REQUEST_MIN_LIMIT = 1
 LEAVE_REQUEST_MAX_LIMIT = 50
 
-# Tool arguments 严格白名单:模型只能生成业务参数,不能夹带系统控制字段
+# Tool arguments 严格白名单:模型只能生成业务参数,不能夹带系统控制字段。
+# leave_proposal_tool 不接受任何 LLM 入参:原始问题 / business_date / trace_id
+# 等系统字段均由 Executor 注入;模型不可在 arguments 中夹带日期 / 原因等。
 _RAG_TOOL_ARG_KEYS = frozenset({'question'})
 _EVAL_TOOL_ARG_KEYS = frozenset({'report_type'})
 _LEAVE_BALANCE_ARG_KEYS = frozenset()  # 无 LLM 入参;身份全部由 Executor 注入
 _LEAVE_REQUEST_ARG_KEYS = frozenset({'limit'})
+_LEAVE_PROPOSAL_ARG_KEYS = frozenset()  # 不接受 LLM 入参;由 Executor 从原始问题解析
 
 
 class PlannerDecisionError(ValueError):
@@ -77,6 +83,8 @@ class PlannerDecision(BaseModel):
                 self._validate_leave_balance()
             elif self.tool_name == LEAVE_REQUEST_TOOL_NAME:
                 self._validate_leave_request()
+            elif self.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+                self._validate_leave_proposal()
             else:
                 raise PlannerDecisionError(f'未知 tool_name: {self.tool_name}')
         else:
@@ -158,4 +166,22 @@ class PlannerDecision(BaseModel):
         if self.reason_code != 'need_leave_history':
             raise PlannerDecisionError(
                 'leave_request_tool 的 reason_code 必须是 need_leave_history'
+            )
+
+    def _validate_leave_proposal(self) -> None:
+        # leave_proposal_tool 不接受任何 LLM 入参:日期 / 原因 / 半天的解析由
+        # Executor 基于用户原始问题交给受控业务动作链路完成,模型不能夹带这些
+        # 字段绕过校验或注入业务身份 / 系统控制信息。
+        if not isinstance(self.arguments, dict):
+            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
+        if self.answer is not None:
+            raise PlannerDecisionError('action=tool 不得携带 answer')
+        if set(self.arguments) != _LEAVE_PROPOSAL_ARG_KEYS:
+            raise PlannerDecisionError(
+                'leave_proposal_tool 不接受任何 LLM 参数;'
+                '日期 / 原因 / 半天等由程序层基于用户原始问题解析'
+            )
+        if self.reason_code != 'need_proposal':
+            raise PlannerDecisionError(
+                'leave_proposal_tool 的 reason_code 必须是 need_proposal'
             )

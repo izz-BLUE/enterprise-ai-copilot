@@ -30,6 +30,8 @@ _LEGAL_EXAMPLES = [
      "reason_code": "task_complete"},
     {"action": "refuse", "answer": "该请求不允许处理。",
      "reason_code": "not_allowed"},
+    {"action": "tool", "tool_name": "leave_proposal_tool",
+     "arguments": {}, "reason_code": "need_proposal"},
 ]
 
 _FIELD_NAMES = ('action', 'tool_name', 'arguments', 'answer', 'reason_code')

@@ -1,7 +1,10 @@
-"""enterprise_tools.py —— 只读企业 Tool 实现
+"""enterprise_tools.py —— 企业 Tool 实现
 
+leave_balance_tool / leave_request_tool 为只读 Tool;leave_proposal_tool
+复用受控业务动作链路(plan_annual_leave_action)生成待确认的申请草稿,
+不会提交任何写操作。
 仅供 Tool Executor 调用。Planner 看到的 arguments 不允许携带 employee_id /
-trace_id,这些字段统一由 Executor 从 AgentState 注入。
+trace_id 等系统字段,这些字段统一由 Executor 从 AgentState 注入。
 所有结果都通过 json.dumps 返回结构化字符串,与 rag_answer_tool / eval_report_tool
 风格一致。
 """
@@ -109,4 +112,64 @@ def leave_request_tool(
         },
         None,
         None,
+    )
+
+
+@tool
+def leave_proposal_tool(
+    question: str = '',
+    business_date: str = '',
+    trace_id: str = '',
+) -> str:
+    """生成年假申请草稿(Proposal)供用户确认;不提交任何写操作。
+
+    该 Tool 无 LLM 入参;question / business_date / trace_id 由 Tool Executor
+    从 AgentState 注入,模型不得在 arguments 中提供这些字段,也不得提供
+    employee_id / start_date / end_date / reason / half_day 等业务参数。
+    返回 JSON 字符串:proposal 时携带 action_proposal 与 missing_fields=[];
+    clarification 时 action_proposal 为 null 并携带 missing_fields。
+    """
+    from datetime import date
+
+    from app.services import tool_calling_service
+
+    if not question:
+        return _payload(False, None, 'QUESTION_REQUIRED', '缺少原始问题，无法生成申请草稿。')
+    if not business_date:
+        return _payload(False, None, 'BUSINESS_DATE_REQUIRED', '当前业务日期不可用。')
+
+    result = tool_calling_service.plan_annual_leave_action(
+        question,
+        business_date=date.fromisoformat(business_date),
+        trace_id=trace_id,
+    )
+    if result.kind == 'proposal':
+        return _payload(
+            True,
+            {
+                'kind': 'proposal',
+                'action_proposal': result.proposal.model_dump(mode='json'),
+                'missing_fields': [],
+                'message': '已生成年假申请草稿，请确认后提交。',
+            },
+            None,
+            None,
+        )
+    if result.kind == 'clarification':
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': result.clarification.missing_fields,
+                'message': result.clarification.question,
+            },
+            None,
+            None,
+        )
+    return _payload(
+        False,
+        None,
+        result.error_code,
+        '暂时无法生成申请草稿，请检查信息后重试。',
     )
