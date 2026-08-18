@@ -20,7 +20,11 @@ from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
 from app.agents.planner_node import planner_node
 from app.agents.tool_executor_node import tool_executor_node
-from app.schemas.planner_schema import LEAVE_PROPOSAL_TOOL_NAME
+from app.schemas.planner_schema import (
+    EVAL_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
+    RAG_TOOL_NAME,
+)
 
 EVAL_KEYWORDS = ['评估', '通过率', 'pass_rate', '命中率', 'baseline', '回归', 'flaky']
 
@@ -327,6 +331,102 @@ def _finalize_action_proposal(state: dict) -> dict:
     return state
 
 
+# Agent Loop 公共响应契约收敛：仅 use_planner=True 时生效，确定性派生 route / category。
+# 不依赖 Planner / LLM；输入只是 AgentState 的最终字段。
+# route 取值集合：rag / eval / action / agent / refuse / error
+# category 取值集合：normal / business_action / access_control / safety 类别 / error / overloaded / input_error
+# reason 仅在安全 / 权限场景保留；正常 / 业务动作场景清空，避免泄漏 prompt 内调试字段。
+#
+# 程序层（planner_node / tool_executor_node）在 not_allowed 分支会显式写入 state['category']
+# （access_control / business_action），本函数优先保留；仅当程序层未写时，才按 stop_reason 兜底。
+
+
+def _finalize_response_contract(state: dict) -> dict:
+    """Agent Loop 公共响应契约：基于 safe / stop_reason / tool_history
+    确定性收敛 route / category / reason；不改变 agent / planner / executor 内部行为。
+
+    优先级：
+    1. safe=False（Safety 前置拦截）→ route=refuse，保留 Safety 的 category/reason。
+    2. stop_reason=task_complete：
+       - 最后成功 Tool=leave_proposal_tool → route=action, category=business_action
+       - 实际执行 Tool 全部是 rag_answer_tool → route=rag
+       - 实际执行 Tool 全部是 eval_report_tool → route=eval
+       - 无 Tool / 仅企业只读 Tool / 混合 Tool / 其他正常情况 → route=agent, category=normal
+    3. stop_reason=refused → route=refuse, category=normal。
+    4. stop_reason=not_allowed → route=refuse；category 优先取程序层已写入的
+       access_control / business_action（planner_node / tool_executor_node 显式标注），
+       缺省按 access_control。
+    5. provider_error / invalid_decision / step_budget_exhausted
+       以及任何未识别的 stop_reason → route=error, category=error。
+
+    安全规则不放松：仅确定性地按上述规则改写 route / category / reason；
+    action_proposal / missing_fields 是否清空由 _finalize_action_proposal 决定，
+    本函数不在此基础上放宽。
+    """
+    safe = state.get('safe', True)
+    stop_reason = state.get('stop_reason', '')
+
+    # 1. Safety 前置拦截：保留 Safety 节点写入的 category / reason，不覆盖。
+    if not safe:
+        state['route'] = 'refuse'
+        state['reason'] = state.get('reason', '')
+        return state
+
+    # 2. task_complete：根据 tool_history 收敛 route。
+    if stop_reason == 'task_complete':
+        executed = [
+            entry.get('tool_name')
+            for entry in (state.get('tool_history') or [])
+            if entry.get('tool_name')
+        ]
+        last_success: str | None = None
+        for entry in (state.get('tool_history') or []):
+            if entry.get('status') == 'success':
+                last_success = entry.get('tool_name')
+
+        if last_success == LEAVE_PROPOSAL_TOOL_NAME:
+            state['route'] = 'action'
+            state['category'] = 'business_action'
+        elif executed and all(name == RAG_TOOL_NAME for name in executed):
+            state['route'] = 'rag'
+            state['category'] = 'normal'
+        elif executed and all(name == EVAL_TOOL_NAME for name in executed):
+            state['route'] = 'eval'
+            state['category'] = 'normal'
+        else:
+            # 无 Tool / 仅企业只读 Tool / 混合 Tool / 其他正常情况
+            state['route'] = 'agent'
+            state['category'] = 'normal'
+        # 正常完成路径：reason 不暴露 prompt 内部字段；业务动作缺字段是合法语义。
+        if state['route'] != 'action':
+            state['reason'] = ''
+        return state
+
+    # 3. refused：route=refuse, category=normal。
+    if stop_reason == 'refused':
+        state['route'] = 'refuse'
+        state['category'] = 'normal'
+        state['reason'] = state.get('reason', '')
+        return state
+
+    # 4. not_allowed：route=refuse；category 优先保留程序层已显式写入的语义。
+    if stop_reason == 'not_allowed':
+        existing_category = state.get('category', '')
+        state['route'] = 'refuse'
+        if existing_category in ('access_control', 'business_action'):
+            # planner_node / tool_executor_node 已显式标注，保留语义
+            return state
+        # 兜底：程序层未显式标注时，按 access_control（与权限拒绝语义一致）
+        state['category'] = 'access_control'
+        return state
+
+    # 5. provider_error / invalid_decision / step_budget_exhausted / 未识别异常 → error。
+    state['route'] = 'error'
+    state['category'] = 'error'
+    state['reason'] = ''
+    return state
+
+
 def run_langgraph_agent(
     question: str,
     allow_eval: bool = False,
@@ -342,8 +442,10 @@ def run_langgraph_agent(
     use_planner=True 时启用 Agent Loop：safety → planner ⇄ tool_executor，
     Planner 自行决定工具调用与完成；业务动作通过 leave_proposal_tool
     走受控链路生成待确认草稿，不再使用 router_node 与 action_node；
-    返回前应用 action_proposal finalization（仅 Agent Loop 路径，
-    deterministic graph 保持原行为不变）。
+    返回前应用两层 finalization（仅 Agent Loop 路径，
+    deterministic graph 保持原行为不变）：
+      1. _finalize_action_proposal  — action_proposal / missing_fields 合法收口
+      2. _finalize_response_contract — route / category / reason 公共响应契约收敛
     employee_id 由 Java 侧身份校验后注入，仅供只读企业 Tool 使用；Planner 不可见。
     """
     graph = build_agent_loop_graph() if use_planner else build_agent_graph()
@@ -371,4 +473,5 @@ def run_langgraph_agent(
     result = dict(graph.invoke(initial, config=config))
     if use_planner:
         result = _finalize_action_proposal(result)
+        result = _finalize_response_contract(result)
     return result

@@ -251,12 +251,12 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `action` / `refuse` / `busy` / `error` |
+| route | string | 路由结果：`rag` / `eval` / `action` / `agent` / `refuse` / `busy` / `error`；其中 `agent` 表示 Planner-first 模式下混合 / 多步 / 仅企业只读 Tool 等智能体任务（Planner-first 启用时新增） |
 | safe | bool | 安全守卫是否通过 |
-| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `overloaded` / `error` |
-| reason | string | 拒答原因（安全问题时）。异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
+| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `business_action` / `overloaded` / `error` |
+| reason | string | 拒答原因（安全 / 权限场景）。正常完成 / 业务动作场景为空字符串；异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
-| success | bool | 是否成功 |
+| success | bool | 是否成功；语义：`route != 'error'` ⇒ `success=true`，合法拒绝 / 权限拒绝均视为成功（系统已正确处理），仅技术 / 规划失败返回 `false` |
 | traceId | string | 请求追踪 ID |
 | pendingAction | object/null | Java 权威校验后创建的待确认动作；仅完整 Action 返回 |
 
