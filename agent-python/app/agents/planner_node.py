@@ -14,6 +14,7 @@ from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_MAX_LIMIT,
     LEAVE_REQUEST_MIN_LIMIT,
     LEAVE_REQUEST_TOOL_NAME,
@@ -37,6 +38,11 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         f'查询当前登录用户自己已成功提交的最近请假记录(按提交时间倒序)。'
         f'参数: limit({LEAVE_REQUEST_MIN_LIMIT}..{LEAVE_REQUEST_MAX_LIMIT},默认 20);'
         f'身份由程序层注入;暂不暴露 pending/cancelled 等状态。'
+    ),
+    LEAVE_PROPOSAL_TOOL_NAME: (
+        '进入受控年假申请草稿链路:程序层基于用户原始问题确定性解析'
+        '日期 / 原因 / 半天等信息,生成待用户确认的申请草稿(Proposal),'
+        '不会真正提交任何写操作。无参数。'
     ),
 }
 
@@ -79,14 +85,17 @@ PLANNER_SYSTEM_PROMPT = (
     '"refuse"(拒绝)\n'
     '- tool_name: action 为 "tool" 时必填,取值只能是 "rag_answer_tool"'
     '(企业知识库问答)、"eval_report_tool"(评估报告查询)、'
-    '"leave_balance_tool"(查询当前登录用户的年假余额)或'
-    '"leave_request_tool"(查询当前登录用户的请假记录);'
+    '"leave_balance_tool"(查询当前登录用户的年假余额)、'
+    '"leave_request_tool"(查询当前登录用户的请假记录)或'
+    '"leave_proposal_tool"(生成年假申请草稿供用户确认);'
     'action 为 "finish" 或 "refuse" 时必须省略\n'
     '- arguments: action 为 "tool" 时必填,且只允许该工具声明的参数:\n'
     '    rag_answer_tool 只允许 {"question": "用户问题"};\n'
     '    eval_report_tool 只允许 {"report_type": "retrieval"|"generation"|"all"};\n'
     '    leave_balance_tool 必须为空对象 {};\n'
     '    leave_request_tool 只允许 {"limit": 1..50};\n'
+    '    leave_proposal_tool 必须为空对象 {},任何日期 / 原因 / 半天等业务参数'
+    '均由程序层基于用户原始问题确定性解析,不得出现在 arguments 中;\n'
     '    action 为 "finish" 或 "refuse" 时必须省略\n'
     '- answer: action 为 "finish" 或 "refuse" 时必填,必须是非空字符串;'
     'action 为 "tool" 时必须省略\n'
@@ -95,8 +104,17 @@ PLANNER_SYSTEM_PROMPT = (
     '    tool + eval_report_tool → "need_eval"\n'
     '    tool + leave_balance_tool → "need_balance"\n'
     '    tool + leave_request_tool → "need_leave_history"\n'
+    '    tool + leave_proposal_tool → "need_proposal"\n'
     '    finish → "task_complete"\n'
     '    refuse → "not_allowed" 或 "cannot_complete"\n'
+    '\n'
+    'leave_proposal_tool 的使用规则:\n'
+    '- 当用户目标明确包含"申请 / 提交 / 准备 / 帮我办"年假业务动作,且所需信息'
+    '(日期、原因等)已由用户原始问题提供或已通过已有工具结果确认时,\n'
+    '  调用 leave_proposal_tool 生成申请草稿。\n'
+    '- 该 Tool 不会提交任何写操作,只生成待用户确认的草稿(Proposal)。\n'
+    '- 缺少必要信息(如余额不足或用户未提供日期/原因)时,优先 finish '
+    '告知用户补充信息或当前不可申请,不要调用 leave_proposal_tool。\n'
     '\n'
     '合法示例:\n'
     '1. {"action": "tool", "tool_name": "rag_answer_tool", '
@@ -111,6 +129,8 @@ PLANNER_SYSTEM_PROMPT = (
     '"reason_code": "task_complete"}\n'
     '6. {"action": "refuse", "answer": "该请求不允许处理。", '
     '"reason_code": "not_allowed"}\n'
+    '7. {"action": "tool", "tool_name": "leave_proposal_tool", '
+    '"arguments": {}, "reason_code": "need_proposal"}\n'
     '\n'
     '禁止出现以下任何字段:decision、call_tool、thought、reasoning、plan,'
     '以及上述五个字段之外的任何其他字段;出现即视为非法输出。\n'
@@ -119,15 +139,18 @@ PLANNER_SYSTEM_PROMPT = (
 
 
 
-def visible_tools(allow_eval: bool) -> list[str]:
+def visible_tools(allow_eval: bool, allow_business_actions: bool = False) -> list[str]:
     """当前用户可见的 Tool 名称列表;权限判断不交给模型。
 
     只读企业 Tool 默认对所有用户可见;运行时若 AgentState.employee_id 为空,
     Tool Executor 会直接拒,Planner 无需感知。
+    leave_proposal_tool 只在受控业务动作授权开启时暴露。
     """
     tools = [RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME]
     if allow_eval:
         tools.append(EVAL_TOOL_NAME)
+    if allow_business_actions:
+        tools.append(LEAVE_PROPOSAL_TOOL_NAME)
     return tools
 
 
@@ -206,6 +229,7 @@ def planner_node(state: dict) -> dict:
     trace_id = state.get('trace_id', '')
     question = state.get('question', '')
     allow_eval = state.get('allow_eval', False)
+    allow_business_actions = state.get('allow_business_actions', False)
     step_count = state.get('step_count', 0)
 
     # 步骤预算前置检查：预算耗尽时不再调用 LLM，直接终止，step_count 保持上限
@@ -224,7 +248,7 @@ def planner_node(state: dict) -> dict:
 
     user_prompt = build_planner_prompt(
         question,
-        visible_tools(allow_eval),
+        visible_tools(allow_eval, allow_business_actions),
         state.get('tool_history', []),
         state.get('observation', ''),
         steps_left,
@@ -304,6 +328,31 @@ def planner_node(state: dict) -> dict:
             'not_allowed',
         )
 
-    stop_reason = {'tool': 'continue', 'finish': 'task_complete', 'refuse': 'refused'}[decision.action]
+    # leave_proposal_tool 权限边界：受控业务动作授权 + Java 业务日期是前置条件，
+    # 任一缺失都直接 refuse（程序层决策，模型不能绕过）
+    if (
+        decision.action == 'tool'
+        and decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME
+    ):
+        if not allow_business_actions:
+            logger.warning('[%s] planner 越权要求 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            return _decision_result(
+                state,
+                _refuse_decision('业务动作功能未启用，或当前请求无执行权限。', 'not_allowed'),
+                'not_allowed',
+            )
+        if state.get('business_date') is None:
+            logger.warning('[%s] planner %s 在无业务日期时被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            return _decision_result(
+                state,
+                _refuse_decision('当前业务日期不可用。', 'cannot_complete'),
+                'not_allowed',
+            )
+
+    stop_reason = {
+        'tool': 'continue',
+        'finish': 'task_complete',
+        'refuse': 'refused',
+    }[decision.action]
     logger.info('[%s] planner 决策 action=%s reason_code=%s', trace_id, decision.action, decision.reason_code)
     return _decision_result(state, decision.model_dump(), stop_reason)

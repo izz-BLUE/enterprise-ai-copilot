@@ -16,16 +16,28 @@ from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
 )
-from app.tools.enterprise_tools import leave_balance_tool, leave_request_tool
+from app.tools.enterprise_tools import (
+    leave_balance_tool,
+    leave_proposal_tool,
+    leave_request_tool,
+)
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
 # 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key
 _LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
+
+# leave_proposal_tool 的系统字段与业务字段:全部由 Executor 从 AgentState 注入,
+# 模型 arguments 中不得夹带任何一项(业务参数由受控链路基于原始问题解析)
+_PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
+    'employee_id', 'trace_id', 'business_date',
+    'start_date', 'end_date', 'reason', 'half_day',
+})
 
 # 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
 # 小于 MAX_PLANNER_STEPS(5)，使 Tool 预算成为独立防线：连续请求 Tool 时
@@ -56,6 +68,8 @@ def _get_tool(tool_name: str):
         return leave_balance_tool
     if tool_name == LEAVE_REQUEST_TOOL_NAME:
         return leave_request_tool
+    if tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+        return leave_proposal_tool
     raise ValueError(f'Unknown tool: {tool_name}')
 
 
@@ -130,6 +144,16 @@ def tool_executor_node(state: dict) -> dict:
         logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, EVAL_TOOL_NAME)
         return _blocked(state, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments)
+    if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+        if not state.get('allow_business_actions', False):
+            logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            return _blocked(state, 'not_allowed',
+                            '业务动作功能未启用，或当前请求无执行权限。',
+                            tool_name=decision.tool_name, arguments=decision.arguments)
+        if state.get('business_date') is None:
+            logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            return _blocked(state, 'not_allowed', '当前业务日期不可用。',
+                            tool_name=decision.tool_name, arguments=decision.arguments)
 
     # 3. Tool 调用预算（基于实际发起执行的次数）
     if tool_call_count >= MAX_TOOL_CALLS:
@@ -163,6 +187,19 @@ def tool_executor_node(state: dict) -> dict:
                 )
             args['employee_id'] = employee_id
             args['trace_id'] = trace_id
+        elif decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+            # Composite Enterprise Task P0：原始问题 / business_date / trace_id
+            # 由 Executor 注入；模型不得夹带任何系统或业务字段（日期 / 原因等
+            # 由受控链路基于原始问题确定性解析）。
+            leaked = set(decision.arguments or {}).intersection(_PROPOSAL_SYSTEM_ARG_KEYS)
+            if leaked:
+                raise PlannerDecisionError(
+                    f'{decision.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+                )
+            business_date = state.get('business_date')
+            args['question'] = state.get('question', '')
+            args['business_date'] = business_date.isoformat() if business_date else ''
+            args['trace_id'] = trace_id
         result = _get_tool(decision.tool_name).invoke(args)
         observation = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         status = 'success'
@@ -187,9 +224,19 @@ def tool_executor_node(state: dict) -> dict:
     })
     logger.info('[%s] tool 执行 tool_name=%s status=%s tool_call_count=%d',
                 trace_id, decision.tool_name, status, tool_call_count)
-    return {
+    updates: dict = {
         'tool_call_count': tool_call_count,
         'tool_history': tool_history,
         'observation': observation,
         'stop_reason': 'tool_executed',
     }
+    # Composite Enterprise Task P0：leave_proposal_tool 的 proposal / clarification
+    # 结果同步回 AgentState，供最终响应与后续链路使用。
+    if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+        try:
+            parsed = json.loads(observation) if isinstance(observation, str) else {}
+        except json.JSONDecodeError:
+            parsed = {}
+        updates['action_proposal'] = parsed.get('action_proposal')
+        updates['missing_fields'] = parsed.get('missing_fields', [])
+    return updates

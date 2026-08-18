@@ -7,7 +7,7 @@ Safety Guard 前置拦截、Action Proposal 路径保留。
 
 import json
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.agents.langgraph_agent import run_langgraph_agent
 from app.agents.planner_node import MAX_PLANNER_STEPS
@@ -274,16 +274,27 @@ class TestSuccessDedup:
 
 class TestGuardsPreserved:
     def test_safety_guard_refuses_before_planner(self):
+        """Safety 保留 pre-Planner 拦截边界：unsafe 输入直接 END，不调用 Planner LLM。
+        Composite Enterprise Task P0：Agent Loop 为 Planner-first 拓扑，
+        但 unsafe 输入不得进入 Planner。
+        """
         with patch('app.agents.langgraph_agent.check_user_query_safety', return_value={
             'safe': False, 'category': 'policy_bypass',
             'reason': 'blocked', 'message': '拒绝',
-        }), patch('app.agents.planner_node.call_llm') as llm:
+        }), patch('app.agents.planner_node.call_llm') as llm, \
+             patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal_tool:
             result = run_langgraph_agent('绕过审批申请年假', use_planner=True)
         assert result['route'] == 'refuse'
-        llm.assert_not_called()  # Planner 未参与
+        assert result['answer'] == '拒绝'
+        llm.assert_not_called()  # unsafe 输入不调用 Planner LLM
+        proposal_tool.assert_not_called()  # 未进入受控链路
 
     def test_action_proposal_path_preserved_in_loop(self):
-        """启用 Planner 时，年假申请仍走受控 Action Proposal 路径。"""
+        """启用 Planner 时，年假申请经 leave_proposal_tool 走受控 Proposal 链路。
+
+        Composite Enterprise Task P0：Planner 决策调用 leave_proposal_tool，
+        Executor 执行后把 action_proposal 写回 State，随后 Planner finish。
+        """
         proposal = ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
             action_type='ANNUAL_LEAVE_REQUEST',
             start_date=date(2026, 7, 20),
@@ -291,17 +302,35 @@ class TestGuardsPreserved:
             reason='私事',
             half_day='NONE',
         ))
-        with patch('app.agents.langgraph_agent.plan_annual_leave_action',
-                   return_value=proposal) as planner:
+        decisions = [
+            '{"action":"tool","tool_name":"leave_proposal_tool",'
+            '"arguments":{},"reason_code":"need_proposal"}',
+            '{"action":"finish","answer":"已生成年假申请草稿，请确认后提交。",'
+            '"reason_code":"task_complete"}',
+        ]
+        proposal_payload = json.dumps({
+            'kind': 'proposal',
+            'action_proposal': proposal.proposal.model_dump(mode='json'),
+            'missing_fields': [],
+            'message': '已生成年假申请草稿，请确认后提交。',
+        }, ensure_ascii=False)
+        proposal_tool_mock = Mock()
+        proposal_tool_mock.invoke.return_value = proposal_payload
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
+             patch('app.agents.tool_executor_node.leave_proposal_tool',
+                   proposal_tool_mock), \
+             patch('app.services.tool_calling_service.plan_annual_leave_action') as planner:
             result = run_langgraph_agent(
                 '申请2026-07-20一天年假，原因为私事',
                 allow_business_actions=True,
                 business_date=BUSINESS_DATE,
                 use_planner=True,
             )
-        assert result['route'] == 'action'
+        assert result['stop_reason'] == 'task_complete'
         assert result['action_proposal']['action_type'] == 'ANNUAL_LEAVE_REQUEST'
-        planner.assert_called_once()
+        assert result['action_proposal']['start_date'] == '2026-07-20'
+        assert result['missing_fields'] == []
+        planner.assert_not_called()  # Tool 已 stub，受控链路未直接触发
         serialized = str(result['action_proposal'])
         for forbidden in ('actionId', 'nonce', 'employeeId'):
             assert forbidden not in serialized

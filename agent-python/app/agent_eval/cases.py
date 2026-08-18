@@ -220,7 +220,7 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         expected_route='refuse',
         expected_planner_calls=0,
         safety_blocked=True,
-        description='Safety Guard 在 Planner 之前拦截，Planner 零参与',
+        description='Safety Guard 在 Planner 之前拦截，unsafe 输入不进入 Planner（零参与）',
     ),
     # ── Tool 异常 ─────────────────────────────────────────────
     AgentEvalCase(
@@ -305,18 +305,38 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         ),
         tool_stubs={'rag_answer_tool': RAG_ANSWER},
     ),
-    # ── Action 请求不进入自主 Tool Loop ───────────────────────
+    # ── Action 请求经 leave_proposal_tool 进入受控链路 ─────────
     AgentEvalCase(
         case_id='016-action-not-in-tool-loop',
         question='申请2026-07-20一天年假，原因为私事',
         allow_business_actions=True,
         business_date=date(2026, 7, 20),
-        expected_stop_reason='',
-        expected_tool_sequence=(),
-        max_step_count=0,
-        max_tool_call_count=0,
-        expected_route='action',
-        expected_planner_calls=0,
+        expected_stop_reason='task_complete',
+        expected_tool_sequence=('leave_proposal_tool',),
+        max_step_count=2,
+        max_tool_call_count=1,
+        expected_planner_calls=2,
+        planner_responses=(
+            '{"action":"tool","tool_name":"leave_proposal_tool",'
+            '"arguments":{},"reason_code":"need_proposal"}',
+            '{"action":"finish","answer":"已生成年假申请草稿，请确认后提交。",'
+            '"reason_code":"task_complete"}',
+        ),
+        tool_stubs={
+            'leave_proposal_tool': json.dumps({
+                'success': True,
+                'kind': 'proposal',
+                'action_proposal': {
+                    'action_type': 'ANNUAL_LEAVE_REQUEST',
+                    'start_date': '2026-07-20',
+                    'end_date': '2026-07-20',
+                    'reason': '私事',
+                    'half_day': 'NONE',
+                },
+                'missing_fields': [],
+                'message': '已生成年假申请草稿，请确认后提交。',
+            }, ensure_ascii=False),
+        },
         action_stub=ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
             action_type='ANNUAL_LEAVE_REQUEST',
             start_date=date(2026, 7, 20),
@@ -324,7 +344,8 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
             reason='私事',
             half_day='NONE',
         )),
-        description='业务动作请求走受控 Action 链路，不进入 Planner/Tool 回环',
+        description='业务动作请求经 Planner 决策调用 leave_proposal_tool，'
+                    '由 Executor 走受控链路生成 Proposal，不进入自主写操作',
     ),
     # ── Planner 异常路径 ──────────────────────────────────────
     AgentEvalCase(

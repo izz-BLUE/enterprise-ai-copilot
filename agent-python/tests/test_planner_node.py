@@ -1,5 +1,6 @@
 """test_planner_node.py —— planner_node 权限边界、Prompt 输入与失败路径测试"""
 
+from datetime import date
 from unittest.mock import patch
 
 from app.agents.planner_node import (
@@ -12,6 +13,7 @@ from app.agents.planner_node import (
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
 )
@@ -54,6 +56,10 @@ EVAL_RAW = (
 )
 FINISH_RAW = '{"action":"finish","answer":"年假制度：入职满1年5天。","reason_code":"task_complete"}'
 REFUSE_RAW = '{"action":"refuse","answer":"该请求不允许处理。","reason_code":"not_allowed"}'
+PROPOSAL_RAW = (
+    '{"action":"tool","tool_name":"leave_proposal_tool",'
+    '"arguments":{},"reason_code":"need_proposal"}'
+)
 
 
 class TestPermissionBoundary:
@@ -92,6 +98,65 @@ class TestFinishAndRefuse:
             result = planner_node(state())
         assert result['planner_decision']['action'] == 'refuse'
         assert result['stop_reason'] == 'refused'
+
+
+class TestProposalToolPath:
+    """Composite Enterprise Task P0：Planner 决策调用 leave_proposal_tool。"""
+
+    def test_proposal_tool_allowed_with_permission_and_business_date(self):
+        with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW):
+            result = planner_node(state(allow_business_actions=True,
+                                        business_date=date(2026, 8, 18)))
+        assert result['planner_decision']['action'] == 'tool'
+        assert result['planner_decision']['tool_name'] == LEAVE_PROPOSAL_TOOL_NAME
+        assert result['planner_decision']['reason_code'] == 'need_proposal'
+        assert result['stop_reason'] == 'continue'
+        assert result['step_count'] == 1
+
+    def test_proposal_tool_denied_without_business_permission(self):
+        with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:
+            result = planner_node(state(allow_business_actions=False,
+                                        business_date=date(2026, 8, 18)))
+        llm.assert_called_once()
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['planner_decision']['reason_code'] == 'not_allowed'
+        assert result['stop_reason'] == 'not_allowed'
+
+    def test_proposal_tool_denied_without_business_date(self):
+        with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:
+            result = planner_node(state(allow_business_actions=True,
+                                        business_date=None))
+        llm.assert_called_once()
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['stop_reason'] == 'not_allowed'
+
+    def test_proposal_tool_with_arguments_rejected_by_schema(self):
+        """模型夹带业务参数（如 start_date）时由 PlannerDecision 校验拦截。"""
+        bad = (
+            '{"action":"tool","tool_name":"leave_proposal_tool",'
+            '"arguments":{"start_date":"2026-09-01"},"reason_code":"need_proposal"}'
+        )
+        with patch('app.agents.planner_node.call_llm', return_value=bad):
+            result = planner_node(state(allow_business_actions=True,
+                                        business_date=date(2026, 8, 18)))
+        assert result['stop_reason'] == 'invalid_decision'
+
+    def test_proposal_tool_with_wrong_reason_code_rejected_by_schema(self):
+        bad = (
+            '{"action":"tool","tool_name":"leave_proposal_tool",'
+            '"arguments":{},"reason_code":"task_complete"}'
+        )
+        with patch('app.agents.planner_node.call_llm', return_value=bad):
+            result = planner_node(state(allow_business_actions=True,
+                                        business_date=date(2026, 8, 18)))
+        assert result['stop_reason'] == 'invalid_decision'
+
+    def test_proposal_tool_consumes_one_planner_step(self):
+        with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW):
+            result = planner_node(state(allow_business_actions=True,
+                                        business_date=date(2026, 8, 18),
+                                        step_count=2))
+        assert result['step_count'] == 3
 
 
 class TestFailurePaths:
@@ -169,7 +234,7 @@ class TestUntrustedDataBoundary:
 
 
 class TestPromptInputs:
-    def test_visible_tools_respect_allow_eval(self):
+    def test_visible_tools_respect_permissions(self):
         # 企业 Tool P0：leave_balance / leave_request 默认可见，但显式列在 RAG 之后；
         # Planner 仅基于可见集合做决策；运行时身份校验在 Executor 层做。
         assert visible_tools(False) == [
@@ -178,6 +243,13 @@ class TestPromptInputs:
         assert visible_tools(True) == [
             RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
             EVAL_TOOL_NAME,
+        ]
+        # leave_proposal_tool 只在受控业务动作授权开启时暴露
+        assert LEAVE_PROPOSAL_TOOL_NAME not in visible_tools(False, False)
+        assert LEAVE_PROPOSAL_TOOL_NAME in visible_tools(False, True)
+        assert visible_tools(True, True) == [
+            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
+            EVAL_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME,
         ]
 
     def test_prompt_contains_question_tools_observation_history_budget(self):

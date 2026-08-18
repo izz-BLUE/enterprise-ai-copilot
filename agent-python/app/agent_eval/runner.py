@@ -21,7 +21,13 @@ from unittest.mock import Mock, patch
 from app.agent_eval.cases import AGENT_EVAL_CASES, AgentEvalCase
 from app.agents.langgraph_agent import run_langgraph_agent
 
-_ALL_TOOL_NAMES = ('rag_answer_tool', 'eval_report_tool')
+_ALL_TOOL_NAMES = (
+    'rag_answer_tool',
+    'eval_report_tool',
+    'leave_balance_tool',
+    'leave_request_tool',
+    'leave_proposal_tool',
+)
 
 
 def _executed_sequence(tool_history: list) -> list[str]:
@@ -68,8 +74,9 @@ def run_single_case(case: AgentEvalCase) -> dict:
             stack.enter_context(patch(f'app.agents.tool_executor_node.{name}', tool_mock))
 
         if case.action_stub is not None:
+            # leave_proposal_tool 通过模块属性访问受控链路，patch 其定义模块
             stack.enter_context(patch(
-                'app.agents.langgraph_agent.plan_annual_leave_action',
+                'app.services.tool_calling_service.plan_annual_leave_action',
                 return_value=case.action_stub,
             ))
         if case.safety_blocked:
