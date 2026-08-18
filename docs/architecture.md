@@ -57,7 +57,11 @@ flowchart TD
         RN --> EN[eval_node]
         RN --> AN[action_node]
         RN --> REFN[refuse_node]
-        TEN -->|rag_answer_tool / eval_report_tool / leave_*_tool| RAG/IR
+        TEN -->|rag_answer_tool| HR
+        TEN -->|eval_report_tool| EV
+        TEN -->|leave_balance_tool / leave_request_tool| IR
+        TEN -->|leave_proposal_tool| AP[action_proposal / missing_fields]
+        AP -->|Java createPending| PEND[(PendingAction)]
     end
 
     subgraph KB ["知识库离线构建"]
@@ -97,10 +101,8 @@ flowchart TD
     RN -->|refuse| REFN
     PLN <-->|PlannerDecision / Tool Result| TEN
     RAGN --> HR
-    AN --> BAS
     AN --> BAS --> PA
     PA --> BA
-    TEN -->|leave_balance_tool / leave_request_tool| IR
     PA -->|confirm transaction| LS
     LS --> AC
     LS --> LR
@@ -399,9 +401,8 @@ agent-python/app/
 ├── prompts/       # system_prompt.py, build_rag_prompt()
 ├── schemas/       # ChatRequest, ChatResponse, AgentResponse
 ├── chains/        # langchain_rag_chain.py — LangChain RAG 封装
-├── tools/         # rag_answer_tool, eval_report_tool — LangChain @tool
+├── tools/         # rag_tools（rag_answer_tool / eval_report_tool，LangChain @tool）+ enterprise_tools（leave_balance_tool / leave_request_tool / leave_proposal_tool）
 ├── agents/        # langgraph_agent.py + planner_node.py + tool_executor_node.py — LangGraph 两套互斥图
-├── tools/         # rag_tools（rag_answer_tool / eval_report_tool）+ enterprise_tools（leave_balance_tool / leave_request_tool / leave_proposal_tool）
 ├── clients/       # java_client.py — Python → Java 内部只读 HTTP 客户端（仅供只读企业 Tool 使用）
 ├── guards/        # input_normalizer + safety_rules + safety_guard — Safety Guard Lite（规范化 + 五族规则）
 └── main.py        # FastAPI 应用入口 + trace_id_middleware

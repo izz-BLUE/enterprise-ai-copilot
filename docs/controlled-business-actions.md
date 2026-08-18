@@ -27,22 +27,27 @@ flowchart LR
     D --> J[Java Trace / Admin / Feature Flag]
     J --> S[Python Safety Guard]
     S --> G{AGENT_LOOP_ENABLED}
-    G -->|false 默认| R[Deterministic Router]
+    G -->|false 默认| RT[Deterministic Router]
     G -->|true 显式开启| P[Planner ⇄ Tool Executor]
-    R --> A1[action_node<br/>plan_annual_leave_action]
+    RT --> A1[action_node<br/>plan_annual_leave_action]
     P -->|PlannerDecision| T[leave_proposal_tool]
     T --> A2[tool_calling_service.plan_annual_leave_action]
     A1 --> AP[action_proposal / missing_fields]
     A2 --> AP
     AP --> V[Java BusinessActionService]
     V -->|Java 产 confirmationNonce| DB[(PostgreSQL PendingAction)]
-    DB --> R[React PendingAction Card]
-    R -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]
+    DB --> CARD[React PendingAction Card]
+    CARD -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]
     E --> L[(PostgreSQL Leave Account + LeaveRequest)]
-    R -->|cancel| X[CANCELLED]
+    CARD -->|cancel| X[CANCELLED]
 ```
 
-Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终止，不会进入 Planner LLM。年假政策、余额、结转和审批流程查询不会进入 `leave_proposal_tool`；它们在 legacy Router-first 下继续走 `rag_node`，在 Planner-first 下由 Planner 决策调用 `leave_balance_tool` / `leave_request_tool` 等只读 Tool。
+Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终止，不会进入 Planner LLM。年假申请草稿不会进入只读 Tool：
+
+- 政策 / 结转 / 审批流程类查询 → `rag_answer_tool`
+- 余额查询 → `leave_balance_tool`
+- 最近已成功提交的请假记录 → `leave_request_tool`
+- 申请草稿（明确含"申请 / 提交 / 准备"年假业务动作）→ `leave_proposal_tool`
 
 ## `leave_proposal_tool` 的设计
 

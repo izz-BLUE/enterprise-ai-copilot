@@ -21,13 +21,16 @@ flowchart LR
     P --> SG[Safety Guard]
     SG --> LG{AGENT_LOOP_ENABLED}
     LG -->|false 默认| RT[Router]
-    LG -->|true 显式开启| PL[Planner ⇄ Tool Executor]
-    RT -->|RAG / Eval / Action / Refuse| HR[Hybrid Retrieval]
-    PL -->|Tool| EX[Tool Executor]
+    LG -->|true 显式开启| PL[Planner]
+    RT -->|RAG| HR[Hybrid Retrieval]
+    RT -->|Eval| EV[Eval Reports]
+    RT -->|Action| AP[action_proposal / missing_fields]
+    RT -->|Refuse| RFN[Refuse / response]
+    PL <-->|PlannerDecision / Tool Result| EX[Tool Executor]
     EX -->|rag_answer_tool| HR
-    EX -->|eval_report_tool| EV[Eval Reports]
+    EX -->|eval_report_tool| EV
     EX -->|leave_balance_tool / leave_request_tool| IR[Java Internal Read API]
-    EX -->|leave_proposal_tool| AP[action_proposal / missing_fields]
+    EX -->|leave_proposal_tool| AP
     AP -->|Java createPending| PA[(PendingAction)]
     IR --> DB[(PostgreSQL leave_account / leave_request)]
     HR --> FA[FAISS]
