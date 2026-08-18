@@ -15,11 +15,17 @@ from pydantic import ValidationError
 from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
 )
+from app.tools.enterprise_tools import leave_balance_tool, leave_request_tool
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
+
+# 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key
+_LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
 
 # 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
 # 小于 MAX_PLANNER_STEPS(5)，使 Tool 预算成为独立防线：连续请求 Tool 时
@@ -41,10 +47,16 @@ def _error_code(exc: Exception) -> str:
 
 
 def _get_tool(tool_name: str):
-    """每次执行时从模块命名空间解析工具（不缓存快照，保证测试 patch 生效）。"""
+    """每次执行时从模块命名空间解析工具(不缓存快照,保证测试 patch 生效)。"""
     if tool_name == RAG_TOOL_NAME:
         return rag_answer_tool
-    return eval_report_tool
+    if tool_name == EVAL_TOOL_NAME:
+        return eval_report_tool
+    if tool_name == LEAVE_BALANCE_TOOL_NAME:
+        return leave_balance_tool
+    if tool_name == LEAVE_REQUEST_TOOL_NAME:
+        return leave_request_tool
+    raise ValueError(f'Unknown tool: {tool_name}')
 
 
 def _blocked(state: dict, stop_reason: str, message: str,
@@ -139,6 +151,17 @@ def tool_executor_node(state: dict) -> dict:
         if decision.tool_name == RAG_TOOL_NAME:
             # 系统字段由 Executor 注入，不经过模型
             args['original_question'] = state.get('question', '')
+            args['trace_id'] = trace_id
+        elif decision.tool_name in (LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME):
+            # 企业 Tool P0：身份由 Java 注入到 AgentState.employee_id，
+            # Executor 转发给 Tool；模型不得在 arguments 中夹带这些字段。
+            employee_id = state.get('employee_id', '') or ''
+            leaked = set(decision.arguments or {}).intersection(_LEAVE_SYSTEM_ARG_KEYS)
+            if leaked:
+                raise PlannerDecisionError(
+                    f'{decision.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+                )
+            args['employee_id'] = employee_id
             args['trace_id'] = trace_id
         result = _get_tool(decision.tool_name).invoke(args)
         observation = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)

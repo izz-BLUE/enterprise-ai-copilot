@@ -139,6 +139,11 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
         except ValueError:
             pass
 
+    # 企业 Tool P0：Java 侧已通过身份校验后注入的 employeeId。
+    # 该值由 LangGraphAgentController 从 DemoIdentity 解析后写入 header，
+    # Python 不接受任何来自请求体 / LLM arguments 的 employeeId。
+    employee_id = (req.headers.get('x-employee-id') or '').strip()
+
     try:
         result = run_langgraph_agent(
             request.message,
@@ -146,6 +151,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             allow_business_actions=allow_business_actions,
             business_date=business_date,
             trace_id=trace_id,
+            employee_id=employee_id,
             use_planner=AGENT_LOOP_ENABLED,
         )
         return AgentResponse(

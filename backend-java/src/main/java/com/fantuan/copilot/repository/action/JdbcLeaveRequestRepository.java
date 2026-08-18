@@ -1,11 +1,13 @@
 package com.fantuan.copilot.repository.action;
 
 import com.fantuan.copilot.model.action.LeaveRequest;
+import com.fantuan.copilot.model.action.HalfDay;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.sql.Timestamp;
+import java.util.List;
 import java.util.Map;
 
 @Repository
@@ -64,5 +66,26 @@ public class JdbcLeaveRequestRepository implements LeaveRequestRepository {
     public int size() {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM leave_request", Map.of(), Integer.class);
         return count == null ? 0 : count;
+    }
+
+    @Override
+    public List<LeaveRequest> findRecentByEmployee(String employeeId, int limit) {
+        return jdbc.query("""
+                SELECT request_id, employee_id, leave_type, start_date, end_date,
+                       half_day, days, submitted_at
+                FROM leave_request
+                WHERE employee_id = :employeeId
+                ORDER BY submitted_at DESC
+                LIMIT :limit
+                """, Map.of("employeeId", employeeId, "limit", limit),
+                (rs, rowNum) -> new LeaveRequest(
+                        rs.getString("request_id"),
+                        rs.getString("employee_id"),
+                        rs.getString("leave_type"),
+                        rs.getDate("start_date").toLocalDate(),
+                        rs.getDate("end_date").toLocalDate(),
+                        HalfDay.valueOf(rs.getString("half_day")),
+                        rs.getBigDecimal("days"),
+                        rs.getTimestamp("submitted_at").toInstant()));
     }
 }
