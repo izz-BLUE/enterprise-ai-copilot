@@ -212,6 +212,27 @@ def planner_node(state: dict) -> dict:
             'provider_error',
         )
 
+    # 偶发空响应恢复：None / 空字符串 / 纯空白属于 Provider 偶发问题，
+    # 在同一次 Planner 决策内部重试 1 次；非空但 JSON 非法不重试，走 invalid_decision。
+    if raw is None or not str(raw).strip():
+        logger.warning('[%s] planner LLM 首次返回空响应，进行 1 次内部重试', trace_id)
+        try:
+            raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
+        except Exception:
+            logger.exception('[%s] planner LLM 重试调用失败', trace_id)
+            return _decision_result(
+                state,
+                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+                'provider_error',
+            )
+        if raw is None or not str(raw).strip():
+            logger.warning('[%s] planner LLM 重试后仍返回空响应', trace_id)
+            return _decision_result(
+                state,
+                _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
+                'invalid_decision',
+            )
+
     try:
         decision = PlannerDecision.model_validate(json.loads(raw))
         decision.validate_decision()
