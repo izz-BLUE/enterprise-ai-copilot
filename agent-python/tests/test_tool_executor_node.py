@@ -7,8 +7,15 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
-from app.schemas.planner_schema import EVAL_TOOL_NAME, RAG_TOOL_NAME
+from app.schemas.planner_schema import (
+    EVAL_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    RAG_TOOL_NAME,
+)
 
 
 def state(**changes):
@@ -25,6 +32,7 @@ def state(**changes):
         'allow_business_actions': False,
         'business_date': None,
         'trace_id': 'trace-exec',
+        'employee_id': '',
         'action_proposal': None,
         'missing_fields': [],
         'step_count': 0,
@@ -45,12 +53,18 @@ def state(**changes):
 
 
 def _tool_decision(tool_name, arguments, **changes):
+    default_reason = {
+        RAG_TOOL_NAME: 'need_knowledge',
+        EVAL_TOOL_NAME: 'need_eval',
+        LEAVE_BALANCE_TOOL_NAME: 'need_balance',
+        LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
+    }
     decision = {
         'action': 'tool',
         'tool_name': tool_name,
         'arguments': arguments,
         'answer': None,
-        'reason_code': 'need_knowledge' if tool_name == RAG_TOOL_NAME else 'need_eval',
+        'reason_code': default_reason.get(tool_name, 'need_knowledge'),
     }
     decision.update(changes)
     return decision
@@ -232,3 +246,88 @@ class TestSuccessDedup:
         assert second['tool_call_count'] == 2  # 重试计数
         assert rag.invoke.call_count == 2
         assert second['tool_history'][1]['status'] == 'success'
+
+
+class TestLeaveToolSystemFieldInjection:
+    """只读企业 Tool：employee_id / demo_user_id / trace_id 由 Executor 注入，
+    模型不得在 arguments 中夹带这些字段。"""
+
+    def test_leave_balance_tool_injects_employee_id(self):
+        with patch('app.agents.tool_executor_node.leave_balance_tool') as tool:
+            tool.invoke.return_value = (
+                '{"success":true,"employee_id":"DEMO-001","annual_balance":3.5}'
+            )
+            result = tool_executor_node(state(
+                employee_id='DEMO-001',
+                planner_decision=_tool_decision(LEAVE_BALANCE_TOOL_NAME, {}),
+            ))
+        assert result['stop_reason'] == 'tool_executed'
+        assert result['tool_call_count'] == 1
+        invoked = tool.invoke.call_args.args[0]
+        assert invoked['employee_id'] == 'DEMO-001'
+        assert invoked['trace_id'] == 'trace-exec'
+
+    def test_leave_balance_tool_blocks_when_employee_id_missing(self):
+        with patch('app.agents.tool_executor_node.leave_balance_tool') as tool:
+            tool.invoke.return_value = (
+                '{"success":false,"error_code":"EMPLOYEE_ID_REQUIRED",'
+                '"message":"当前请求缺少员工身份,请联系管理员。"}'
+            )
+            result = tool_executor_node(state(
+                employee_id='',
+                planner_decision=_tool_decision(LEAVE_BALANCE_TOOL_NAME, {}),
+            ))
+        assert result['stop_reason'] == 'tool_executed'
+        assert result['tool_call_count'] == 1
+        # 工具自身被调用,但因为缺 employee_id 应返回稳定错误 payload
+        tool.invoke.assert_called_once()
+        observation = json.loads(result['observation'])
+        assert observation['success'] is False
+        assert observation['error_code'] == 'EMPLOYEE_ID_REQUIRED'
+
+    def test_leave_balance_tool_rejects_system_args_in_decision(self):
+        """PlannerDecision.validate_decision 已经拒绝 arguments 含 employee_id;
+        Executor 收到非法决策时应直接 blocked 且不调用 Tool。"""
+        with patch('app.agents.tool_executor_node.leave_balance_tool') as tool:
+            result = tool_executor_node(state(
+                employee_id='DEMO-001',
+                planner_decision=_tool_decision(
+                    LEAVE_BALANCE_TOOL_NAME,
+                    {'employee_id': 'attacker'},
+                ),
+            ))
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['tool_call_count'] == 0
+        tool.invoke.assert_not_called()
+
+    def test_leave_request_tool_injects_employee_id(self):
+        with patch('app.agents.tool_executor_node.leave_request_tool') as tool:
+            tool.invoke.return_value = (
+                '{"success":true,"employee_id":"DEMO-001","total":0,"items":[]}'
+            )
+            result = tool_executor_node(state(
+                employee_id='DEMO-001',
+                planner_decision=_tool_decision(
+                    LEAVE_REQUEST_TOOL_NAME,
+                    {'limit': 10},
+                ),
+            ))
+        assert result['stop_reason'] == 'tool_executed'
+        invoked = tool.invoke.call_args.args[0]
+        assert invoked['employee_id'] == 'DEMO-001'
+        assert invoked['trace_id'] == 'trace-exec'
+        # LLM 入参原样保留
+        assert invoked['limit'] == 10
+
+    def test_leave_request_tool_rejects_demo_user_id_arg(self):
+        with patch('app.agents.tool_executor_node.leave_request_tool') as tool:
+            result = tool_executor_node(state(
+                employee_id='DEMO-001',
+                planner_decision=_tool_decision(
+                    LEAVE_REQUEST_TOOL_NAME,
+                    {'status': 'all', 'limit': 10, 'demo_user_id': 'attacker'},
+                ),
+            ))
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['tool_call_count'] == 0
+        tool.invoke.assert_not_called()

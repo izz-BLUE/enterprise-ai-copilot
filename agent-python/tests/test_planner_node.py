@@ -9,7 +9,12 @@ from app.agents.planner_node import (
     planner_node,
     visible_tools,
 )
-from app.schemas.planner_schema import EVAL_TOOL_NAME, RAG_TOOL_NAME
+from app.schemas.planner_schema import (
+    EVAL_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    RAG_TOOL_NAME,
+)
 
 
 def state(**changes):
@@ -165,8 +170,15 @@ class TestUntrustedDataBoundary:
 
 class TestPromptInputs:
     def test_visible_tools_respect_allow_eval(self):
-        assert visible_tools(False) == [RAG_TOOL_NAME]
-        assert visible_tools(True) == [RAG_TOOL_NAME, EVAL_TOOL_NAME]
+        # 企业 Tool P0：leave_balance / leave_request 默认可见，但显式列在 RAG 之后；
+        # Planner 仅基于可见集合做决策；运行时身份校验在 Executor 层做。
+        assert visible_tools(False) == [
+            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
+        ]
+        assert visible_tools(True) == [
+            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
+            EVAL_TOOL_NAME,
+        ]
 
     def test_prompt_contains_question_tools_observation_history_budget(self):
         prompt = build_planner_prompt(

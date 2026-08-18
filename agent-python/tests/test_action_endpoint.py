@@ -46,6 +46,7 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         allow_business_actions=True,
         business_date=date(2026, 7, 16),
         trace_id="java-trace",
+        employee_id="",
         use_planner=False,
     )
     assert response.traceId == "java-trace"

@@ -28,8 +28,15 @@ public class TraceIdFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
-        // 服务端统一生成 traceId，不读取客户端传入的 X-Trace-Id
-        String traceId = UUID.randomUUID().toString();
+        // 服务端统一生成 traceId，不读取客户端传入的 X-Trace-Id；
+        // 例外：/api/internal/** 为可信内部调用（Python Agent → Java），透传上游 traceId 保证全链路一致。
+        String traceId = null;
+        if (request.getRequestURI().startsWith("/api/internal/")) {
+            traceId = request.getHeader(HEADER);
+        }
+        if (traceId == null || traceId.isBlank()) {
+            traceId = UUID.randomUUID().toString();
+        }
 
         // 存入 MDC（日志自动带上）和 request attribute（Controller 可取用）
         MDC.put(MDC_KEY, traceId);

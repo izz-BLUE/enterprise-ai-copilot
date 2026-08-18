@@ -37,6 +37,7 @@ class AgentState(TypedDict):
     allow_business_actions: bool
     business_date: date | None
     trace_id: str
+    employee_id: str  # 企业 Tool P0：Java 注入的身份字段；Tool Executor 注入到只读企业 Tool
     action_proposal: dict | None
     missing_fields: list[str]
     # Agent Loop P0 预留：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
@@ -311,11 +312,13 @@ def run_langgraph_agent(
     business_date: date | None = None,
     trace_id: str = '',
     use_planner: bool = False,
+    employee_id: str = '',
 ) -> dict:
     """运行 LangGraph Agent。
 
     use_planner=True 时启用最小 Agent Loop（planner → tool_executor → planner），
     rag/eval 请求由 Planner 决策驱动；默认保持确定性路由不变。
+    employee_id 由 Java 侧身份校验后注入，仅供只读企业 Tool 使用；Planner 不可见。
     """
     graph = build_agent_loop_graph() if use_planner else build_agent_graph()
     initial: AgentState = {
@@ -326,6 +329,7 @@ def run_langgraph_agent(
         "allow_business_actions": allow_business_actions,
         "business_date": business_date,
         "trace_id": trace_id,
+        "employee_id": employee_id,
         "action_proposal": None,
         "missing_fields": [],
         "step_count": 0,

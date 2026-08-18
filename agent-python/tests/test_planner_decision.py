@@ -8,6 +8,8 @@ from pydantic import ValidationError
 
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
@@ -33,6 +35,30 @@ def _eval(**changes):
         'arguments': {'report_type': 'all'},
         'answer': None,
         'reason_code': 'need_eval',
+    }
+    value.update(changes)
+    return value
+
+
+def _leave_balance(**changes):
+    value = {
+        'action': 'tool',
+        'tool_name': LEAVE_BALANCE_TOOL_NAME,
+        'arguments': {},
+        'answer': None,
+        'reason_code': 'need_balance',
+    }
+    value.update(changes)
+    return value
+
+
+def _leave_request(**changes):
+    value = {
+        'action': 'tool',
+        'tool_name': LEAVE_REQUEST_TOOL_NAME,
+        'arguments': {'limit': 20},
+        'answer': None,
+        'reason_code': 'need_leave_history',
     }
     value.update(changes)
     return value
@@ -74,6 +100,18 @@ class TestValidDecisions:
         assert decision.action == 'tool'
         assert decision.tool_name == EVAL_TOOL_NAME
         assert decision.reason_code == 'need_eval'
+
+    def test_leave_balance_tool_decision(self):
+        decision = PlannerDecision.model_validate(_leave_balance()).validate_decision()
+        assert decision.action == 'tool'
+        assert decision.tool_name == LEAVE_BALANCE_TOOL_NAME
+        assert decision.reason_code == 'need_balance'
+
+    def test_leave_request_tool_decision(self):
+        decision = PlannerDecision.model_validate(_leave_request()).validate_decision()
+        assert decision.action == 'tool'
+        assert decision.tool_name == LEAVE_REQUEST_TOOL_NAME
+        assert decision.reason_code == 'need_leave_history'
 
     def test_finish_decision(self):
         decision = PlannerDecision.model_validate(_finish()).validate_decision()
@@ -122,6 +160,41 @@ class TestToolDecisionConsistency:
     def test_eval_tool_without_need_eval_rejected(self):
         with pytest.raises(PlannerDecisionError):
             PlannerDecision.model_validate(_eval(reason_code='need_knowledge')).validate_decision()
+
+    def test_leave_balance_arguments_must_be_empty(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_balance(arguments={'employee_id': 'fake'})
+            ).validate_decision()
+
+    def test_leave_balance_without_need_balance_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_leave_balance(reason_code='need_knowledge')).validate_decision()
+
+
+
+    def test_leave_request_limit_out_of_range_rejected(self):
+        for bad in (0, 51, -1):
+            with pytest.raises(PlannerDecisionError):
+                PlannerDecision.model_validate(
+                    _leave_request(arguments={'limit': bad})
+                ).validate_decision()
+
+    def test_leave_request_limit_not_int_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_request(arguments={'limit': '20'})
+            ).validate_decision()
+
+    def test_leave_request_extra_args_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_request(arguments={'limit': 20, 'employee_id': 'fake'})
+            ).validate_decision()
+
+    def test_leave_request_without_need_leave_history_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(_leave_request(reason_code='need_eval')).validate_decision()
 
 
 class TestFinishRefuseConsistency:
@@ -208,6 +281,24 @@ class TestArgumentsWhitelist:
         with pytest.raises(PlannerDecisionError):
             PlannerDecision.model_validate(
                 _rag(arguments={'question': '公司的年假制度是什么', 'original_question': 'x'})
+            ).validate_decision()
+
+    def test_leave_balance_arguments_with_employee_id_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_balance(arguments={'employee_id': 'fake'})
+            ).validate_decision()
+
+    def test_leave_balance_arguments_with_demo_user_id_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_balance(arguments={'demo_user_id': 'fake'})
+            ).validate_decision()
+
+    def test_leave_request_arguments_with_employee_id_rejected(self):
+        with pytest.raises(PlannerDecisionError):
+            PlannerDecision.model_validate(
+                _leave_request(arguments={'limit': 10, 'employee_id': 'fake'})
             ).validate_decision()
 
 

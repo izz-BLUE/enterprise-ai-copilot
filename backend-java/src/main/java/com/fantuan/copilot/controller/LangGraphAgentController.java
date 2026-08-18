@@ -102,6 +102,11 @@ public class LangGraphAgentController {
             if (businessActionService != null) {
                 headers.set("X-Business-Date", businessActionService.businessDate().toString());
             }
+            // 企业 Tool P0：把已通过身份校验的 employeeId 透传给 Python，供只读 Tool 使用。
+            // 永远从服务端解析后的 identity 注入，不接受请求头直传，防止前端伪造身份。
+            if (identity != null && identity.employeeId() != null) {
+                headers.set("X-Employee-Id", identity.employeeId());
+            }
             HttpEntity<ChatRequest> httpEntity = new HttpEntity<>(request, headers);
 
             String url = agentBaseUrl + "/agent/langgraph/chat";
