@@ -105,13 +105,28 @@ Java 和 Python 都有并发限制：
 
 ### Business Action 流程
 
-年假申请的受控业务动作（Planner-first 路径）：
-1. Python `leave_proposal_tool` 生成 `action_proposal`（proposal）或 `missing_fields`（clarification），**不生成 nonce，不执行写操作**
-2. Java `LangGraphAgentController` 调 `BusinessActionService.createPending` 创建 `PendingAction`（PostgreSQL 持久化，TTL 过期），由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
-3. 前端展示确认卡片，用户确认/取消；`confirmationNonce` 仅在页面内存保留，不写入 DOM / 日志 / 浏览器持久化存储
-4. Java `BusinessActionController /confirm` 或 `/cancel` 执行确认（owner 校验、nonce 校验、状态机、TTL、幂等、余额扣减）
+年假申请的受控业务动作（Planner-first 路径）—— Python `leave_proposal_tool` 生成两种结果，分叉处理：
 
-写操作仅由 Java `LeaveExecutionGateway` 在 PostgreSQL 事务中执行；`leave_proposal_tool` 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`。
+```text
+- action_proposal（字段完整）
+   → Java LangGraphAgentController
+   → BusinessActionService.createPending
+   → PendingAction（PostgreSQL 持久化，TTL 过期）
+   → confirmationNonce 由 Java 生成（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
+
+- missing_fields（Clarification）
+   → Clarification response
+   → 用户补充信息
+   → 不创建 PendingAction（不进入 BusinessActionService / Confirm / Cancel）
+```
+
+只有已经创建 `PendingAction` 才进入人工确认链路：
+
+1. 前端展示确认卡片，用户确认/取消；`confirmationNonce` 仅在页面内存保留，不写入 DOM / 日志 / 浏览器持久化存储
+2. Java `BusinessActionController /confirm` 或 `/cancel` 执行确认（owner 校验、nonce 校验、状态机、TTL、幂等、余额扣减）
+3. `/confirm` 成功后由 Java `LeaveExecutionGateway` 在 PostgreSQL 事务内执行最终写操作（`source_action_id` 唯一约束保证幂等）
+
+`leave_proposal_tool` 不生成 `confirmationNonce`、不执行写操作，且不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`。
 
 ## 关键配置
 

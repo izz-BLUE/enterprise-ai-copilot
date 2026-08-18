@@ -249,8 +249,8 @@ POST /api/agent/langgraph/chat
                       → Clarification response
                       → END
                       （不得进入 BusinessActionService / PendingAction）
-    → Java BusinessActionService 权威复核与 owner 校验
-      → PendingAction
+    → 已创建 PendingAction
+      → Java BusinessActionService 权威复核与 owner 校验
         → React 脱敏确认卡
           ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL 事务
           └── cancel（无 Idempotency-Key）→ CANCELLED
@@ -295,8 +295,8 @@ POST /api/agent/langgraph/chat
           │           → 不创建 PendingAction
           ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
           └── 终止后：_finalize_action_proposal + _finalize_response_contract 收敛 route / category / reason
-    → Java BusinessActionService 权威复核与 owner 校验
-      → PendingAction（Java 产 confirmationNonce）
+    → 已创建 PendingAction
+      → Java BusinessActionService 权威复核与 owner 校验（Java 产 confirmationNonce）
         → React 脱敏确认卡
           ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL 事务
           └── cancel（无 Idempotency-Key）→ CANCELLED
