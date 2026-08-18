@@ -2,7 +2,7 @@
 rag_tools.py —— RAG 工具封装
 
 将现有的 RAG 问答能力和评估报告查询能力封装为 LangChain Tool，
-供后续 Agent 工作流调用。
+供 Tool Executor 在 Agent Loop 中调用。
 """
 
 import json

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-langgraph_agent_demo.py —— LangGraph Agent Demo CLI
+langgraph_agent_demo.py —— LangGraph Agent Loop Demo CLI
 
-调用 app.agents.langgraph_agent.run_langgraph_agent()。
+显式启用 use_planner=True，调用 app.agents.langgraph_agent.run_langgraph_agent()
+走 Planner ⇄ Tool Executor 拓扑。
 
 用法:
     uv run python scripts/experiments/langgraph_agent_demo.py "病假需要提供哪些材料？"
@@ -24,19 +25,15 @@ def main():
         sys.exit(1)
 
     question = sys.argv[1]
-    result = run_langgraph_agent(question, allow_eval=True)
+    result = run_langgraph_agent(question, allow_eval=True, use_planner=True)
 
-    print(f'用户问题: {result["question"]}')
-    print(f'route:    {result["route"]}')
-    print(f'safe:     {result["safe"]}')
-    print(f'category: {result["category"]}')
-    if result["reason"]:
-        print(f'reason:   {result["reason"]}')
-    print(f'\n{"=" * 60}')
-    print(f'最终回答:\n{result["answer"]}')
-    print(f'{"=" * 60}')
-    if result.get("sources"):
-        print(f'sources: {result["sources"]}')
+    print(f'route:       {result.get("route", "")}')
+    print(f'stop_reason: {result.get("stop_reason", "")}')
+    print(f'step_count:  {result.get("step_count", 0)}')
+    tool_history = result.get('tool_history', []) or []
+    print(f'tool_history: {len(tool_history)} entries')
+    for idx, entry in enumerate(tool_history, start=1):
+        print(f'  [{idx}] {entry.get("tool_name")} -> {entry.get("status")}')
 
 
 if __name__ == '__main__':

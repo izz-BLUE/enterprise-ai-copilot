@@ -47,7 +47,7 @@ def test_case_coverage_categories():
     assert '013-repeated-call-blocked' in by_id                     # 重复调用阻止
     assert '014-step-budget-exhausted' in by_id                     # step budget
     assert '015-tool-budget-exhausted' in by_id                     # tool budget
-    assert '016-action-not-in-tool-loop' in by_id                   # Action 不进入回环
+    assert '016-leave-proposal-tool' in by_id                       # Action 经 leave_proposal_tool 走受控链路
 
 
 def test_report_identifies_failing_case_with_actuals():
