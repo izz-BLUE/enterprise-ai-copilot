@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/izz-BLUE/enterprise-ai-copilot)](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/latest)
 [![License](https://img.shields.io/github/license/izz-BLUE/enterprise-ai-copilot)](LICENSE)
 
-面向企业知识库问答的工程化 RAG 项目。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。
+面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。当前 Agent 已支持企业请假领域的只读 Tool，业务写操作仍保留 Java 权威校验和用户确认边界。
 
 - 在线演示：<https://copilot.jintianchi.cn>
 - 当前版本：[v0.4.0](docs/releases/v0.4.0.md)
@@ -16,9 +16,16 @@
 ```mermaid
 flowchart LR
     U[用户/前端] --> J[Java Gateway]
-    J --> P[Python Agent]
+    J -->|/api/chat| P[Python Agent]
+    J -->|/api/agent/langgraph/chat| P
     P --> SG[Safety Guard]
-    SG --> HR[Hybrid Retrieval]
+    SG --> RT[Router]
+    RT -->|RAG| HR[Hybrid Retrieval]
+    RT -->|Agent Loop 可选| PL[Planner]
+    PL --> EX[Tool Executor]
+    EX -->|rag_answer_tool| HR
+    EX -->|leave_balance_tool / leave_request_tool| IR[Java Internal Read API]
+    IR --> DB[(PostgreSQL leave_account / leave_request)]
     HR --> FA[FAISS]
     HR --> BM[BM25]
     HR --> RF[RRF 融合]
@@ -28,7 +35,9 @@ flowchart LR
     J --> U
 ```
 
-LangGraph 路由是并行的实验链路；上图展示稳定 RAG 主流程。公网请求经过 Nginx 和 Java，Python 不映射宿主机端口。
+稳定 RAG 走 `Java → Python /agent/chat → Hybrid Retrieval`；LangGraph 走 `Safety Guard → Router`，可按配置进入确定性 RAG/Evaluation/Action 路由，或进入 `Planner → Tool Executor` 的最小 Agent Loop。公网请求经过 Nginx 和 Java，Python 不映射宿主机端口。
+
+企业请假只读 Tool 的链路是：Java 侧完成身份解析后，将可信 `employee_id` 注入 Python AgentState；Python Tool Executor 再通过最小 HTTP client 调用 Java `/api/internal/leave/*`，Java 使用 `JAVA_INTERNAL_TOKEN` 鉴权并严格按员工身份查询 PostgreSQL。`employee_id` 和 `trace_id` 不属于 LLM 可控 arguments。
 
 ## What this project demonstrates
 
@@ -42,6 +51,7 @@ LangGraph 路由是并行的实验链路；上图展示稳定 RAG 主流程。�
 | Overload control | Nginx 限流 + Java/Python 各 3 个并发槽；超限返回 JSON 429 |
 | Verification | Java/Python 单测、检索评估、前端 lint/build、Playwright、分层 k6 场景 |
 | Controlled actions | 三个白名单 Demo 身份、PostgreSQL 数据隔离、HITL 确认与 `LeaveExecutionGateway` |
+| Enterprise read tools | `leave_balance_tool` / `leave_request_tool`、Planner 参数白名单、Java 内部接口鉴权与员工身份隔离 |
 
 ## Design decisions and trade-offs
 
@@ -309,10 +319,16 @@ uv run python scripts/experiments/langchain_rag_demo.py "病假需要提供哪�
 app/agents/langgraph_agent.py
 ```
 
-**实现状态图：**
+**默认确定性状态图：**
 
 ```
 safety → router → rag / eval / refuse
+```
+
+当 `AGENT_LOOP_ENABLED=true` 时，RAG/企业只读查询会进入可选的最小 Agent Loop：
+
+```text
+safety → router → planner ⇄ tool_executor → finish / refuse
 ```
 
 **能力：**
@@ -322,7 +338,7 @@ safety → router → rag / eval / refuse
 - RAG 问答
 - Evaluation 查询
 - 安全拒答
-- Tool 调用封装
+- Tool 调用封装与有界预算
 
 **接口：**
 
@@ -332,6 +348,34 @@ POST /api/agent/langgraph/chat
 ```
 
 **说明：** LangGraph Agent 与 RAG 主链路并行运行，不替换 `/agent/chat` 稳定接口。
+
+### 10. Enterprise Leave Read Tools
+
+Agent Loop 提供两个只读企业 Tool：
+
+| Tool | 用途 | LLM 可控参数 |
+|------|------|-------------|
+| `leave_balance_tool` | 查询当前登录用户自己的年假余额 | 无 |
+| `leave_request_tool` | 查询当前登录用户最近已成功提交的请假记录 | `limit`，范围 `1..50`，默认 `20` |
+
+调用链路：
+
+```text
+Java 身份解析
+  → AgentState.employee_id
+  → Python Planner 决定是否调用 Tool
+  → Tool Executor 注入 employee_id / trace_id
+  → Python JavaReadClient
+  → Java GET /api/internal/leave/balance 或 /requests
+  → PostgreSQL 按 employee_id 严格查询
+```
+
+安全边界：
+
+- Planner arguments 使用严格白名单，模型不能传入 `employee_id` 或 `trace_id`；
+- Python 只读客户端通过 `JAVA_INTERNAL_TOKEN` 调用 Java 内部接口，不做 retry 或 fallback；
+- Java 内部接口默认关闭，启用后仍只接受可信链路注入的员工身份；
+- 请假写操作不由这些 Tool 执行，仍走 PendingAction、nonce、幂等确认和 Java 最终业务校验。
 
 ## API Endpoints
 
@@ -343,6 +387,10 @@ POST /api/agent/langgraph/chat
 | GET | `/api/agent/health` | Python agent health check through Java |
 | POST | `/api/chat` | Stable RAG chat API |
 | POST | `/api/agent/langgraph/chat` | Experimental LangGraph Agent API |
+| GET | `/api/internal/leave/balance` | Internal-only annual leave balance read API |
+| GET | `/api/internal/leave/requests` | Internal-only successful leave request list API |
+
+上述两个 `/api/internal/*` 接口仅供 Python → Java 内部调用，要求 `X-Internal-Token` 和可信链路注入的 `X-Employee-Id`，不应直接暴露到公网。
 
 ### Python AI Service
 
@@ -421,6 +469,7 @@ enterprise-ai-copilot/
 │   │   ├── retrieval/             # faiss, keyword, hybrid retriever
 │   │   ├── schemas/               # request / response schemas
 │   │   ├── services/              # rag_service, llm_service
+│   │   ├── clients/               # Java internal read client
 │   │   ├── chains/                # LangChain RAG chain
 │   │   ├── tools/                 # agent tools
 │   │   ├── agents/                # LangGraph agent
@@ -479,6 +528,8 @@ npm run dev
 | Java Spring Boot | http://localhost:8080 |
 | React Frontend | http://localhost:5173 |
 
+企业只读 Tool 默认关闭。需要本地验证时，在 Python `.env` 和 Java 运行环境中配置同一个 `JAVA_INTERNAL_TOKEN`，并设置 `JAVA_BASE_URL=http://localhost:8080`；不要把真实 token 写入 Git。
+
 Java calls Python through:
 
 ```properties
@@ -521,9 +572,14 @@ AI_QUEUE_TIMEOUT_MS=500                        # 获取槽位最长等待时间�
 MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
 REWRITE_MODE=none                              # 查询重写：none / rule（本地默认 none，公网部署使用 rule）
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
+JAVA_BASE_URL=http://localhost:8080            # Java 内部只读接口地址
+JAVA_INTERNAL_TOKEN=replace_with_local_token   # 与 Java 的 JAVA_INTERNAL_TOKEN 保持一致
+JAVA_TIMEOUT_SECONDS=5                         # Python → Java 内部查询超时（秒）
 ```
 
 **Do not commit `.env` or any API keys to GitHub.**
+
+`JAVA_INTERNAL_TOKEN` 为空时，Java 内部请假只读接口返回 `LEAVE_READ_DISABLED`；Python 客户端不做重试或 fallback。公网部署时应通过运行环境注入该变量，不要写入 README、前端代码或仓库文件。
 
 Recommended `.gitignore` entries:
 
@@ -533,6 +589,27 @@ Recommended `.gitignore` entries:
 target/
 node_modules/
 data/processed/*.index
+```
+
+## Verification
+
+在仓库根目录分别执行：
+
+```bash
+# Python 全量测试
+cd agent-python && uv run pytest
+
+# Java 全量测试
+cd ../backend-java && ./mvnw test
+
+# 前端质量检查
+cd ../frontend && npm run lint && npm run build
+
+# 浏览器端到端测试（需要可用的本地服务）
+npm run test:e2e
+
+# 回到仓库根目录后检查 diff 空白
+cd .. && git diff --check
 ```
 
 ## Build Knowledge Base
