@@ -21,6 +21,7 @@ const ROUTE_LABELS = {
   refuse: { label: '安全拒答', cls: 'tag-red' },
   busy: { label: '并发保护', cls: 'tag-orange' },
   action: { label: '业务动作', cls: 'tag-purple' },
+  agent: { label: '智能体任务', cls: 'tag-blue' },
 }
 
 function getStatusInfo(result) {

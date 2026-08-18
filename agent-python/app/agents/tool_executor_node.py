@@ -74,8 +74,12 @@ def _get_tool(tool_name: str):
 
 
 def _blocked(state: dict, stop_reason: str, message: str,
-             tool_name=None, arguments=None) -> dict:
-    """执行前被阻止：未真正发起 Tool 执行，不消耗 tool_call_count。"""
+             tool_name=None, arguments=None, category: str = '') -> dict:
+    """执行前被阻止：未真正发起 Tool 执行，不消耗 tool_call_count。
+
+    category 是程序层对本次终止语义的预先归类（access_control / business_action），
+    最终响应契约收敛时优先保留，避免仅靠 reason_code 区分 Eval 与受控业务动作。
+    """
     observation = json.dumps({
         'status': 'blocked',
         'reason': stop_reason,
@@ -89,12 +93,15 @@ def _blocked(state: dict, stop_reason: str, message: str,
         'status': 'blocked',
         'observation': observation,
     })
-    return {
+    updates: dict = {
         'tool_call_count': state.get('tool_call_count', 0),
         'tool_history': tool_history,
         'observation': observation,
         'stop_reason': stop_reason,
     }
+    if category:
+        updates['category'] = category
+    return updates
 
 
 def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
@@ -143,17 +150,20 @@ def tool_executor_node(state: dict) -> dict:
     if decision.tool_name == EVAL_TOOL_NAME and not state.get('allow_eval', False):
         logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, EVAL_TOOL_NAME)
         return _blocked(state, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
-                        tool_name=decision.tool_name, arguments=decision.arguments)
+                        tool_name=decision.tool_name, arguments=decision.arguments,
+                        category='access_control')
     if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
         if not state.get('allow_business_actions', False):
             logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
             return _blocked(state, 'not_allowed',
                             '业务动作功能未启用，或当前请求无执行权限。',
-                            tool_name=decision.tool_name, arguments=decision.arguments)
+                            tool_name=decision.tool_name, arguments=decision.arguments,
+                            category='business_action')
         if state.get('business_date') is None:
             logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
             return _blocked(state, 'not_allowed', '当前业务日期不可用。',
-                            tool_name=decision.tool_name, arguments=decision.arguments)
+                            tool_name=decision.tool_name, arguments=decision.arguments,
+                            category='business_action')
 
     # 3. Tool 调用预算（基于实际发起执行的次数）
     if tool_call_count >= MAX_TOOL_CALLS:

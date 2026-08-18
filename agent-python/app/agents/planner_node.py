@@ -200,10 +200,12 @@ def _refuse_decision(answer: str, reason_code: str) -> dict:
     }
 
 
-def _decision_result(state: dict, decision: dict, stop_reason: str) -> dict:
+def _decision_result(state: dict, decision: dict, stop_reason: str, category: str = '') -> dict:
     """组装 Planner 节点输出：决策、终止原因、决策计数（每次决策 +1）。
 
     finish/refuse 决策把 answer 同步进 state，供图结束后返回。
+    category 是程序层对本次终止语义的预先归类（access_control / business_action），
+    最终响应契约收敛时优先保留，避免仅靠 reason_code 区分 Eval 与受控业务动作。
     """
     result = {
         'planner_decision': decision,
@@ -212,6 +214,8 @@ def _decision_result(state: dict, decision: dict, stop_reason: str) -> dict:
     }
     if decision.get('action') in ('finish', 'refuse'):
         result['answer'] = decision.get('answer', '')
+    if category:
+        result['category'] = category
     return result
 
 
@@ -326,6 +330,7 @@ def planner_node(state: dict) -> dict:
             state,
             _refuse_decision('该问题涉及内部评估诊断能力，仅管理员可访问。', 'not_allowed'),
             'not_allowed',
+            category='access_control',
         )
 
     # leave_proposal_tool 权限边界：受控业务动作授权 + Java 业务日期是前置条件，
@@ -340,6 +345,7 @@ def planner_node(state: dict) -> dict:
                 state,
                 _refuse_decision('业务动作功能未启用，或当前请求无执行权限。', 'not_allowed'),
                 'not_allowed',
+                category='business_action',
             )
         if state.get('business_date') is None:
             logger.warning('[%s] planner %s 在无业务日期时被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
@@ -347,6 +353,7 @@ def planner_node(state: dict) -> dict:
                 state,
                 _refuse_decision('当前业务日期不可用。', 'cannot_complete'),
                 'not_allowed',
+                category='business_action',
             )
 
     stop_reason = {
