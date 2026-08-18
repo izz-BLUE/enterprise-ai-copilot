@@ -18,6 +18,7 @@ flowchart TD
         LAC[LangGraphAgentController]
         TID[TraceIdFilter]
         BAS[BusinessActionService]
+        LRC[Java LeaveReadController]
         PA[JDBC Action Repository]
         LS[JDBC Leave Repositories]
     end
@@ -27,7 +28,6 @@ flowchart TD
         EP1[/agent/chat]
         EP2[/agent/langgraph/chat]
         SG[Safety Guard]
-        RT[Router]
     end
 
     subgraph Database ["PostgreSQL 16"]
@@ -45,15 +45,36 @@ flowchart TD
         LLM[DeepSeek LLM]
     end
 
-    subgraph Agent ["LangGraph Agent"]
+    subgraph Reports ["Evaluation Reports"]
+        EVR[Evaluation Reports]
+    end
+
+    subgraph Agent ["LangGraph Agent（两套互斥）"]
         SN[safety_node]
+        LG{AGENT_LOOP_ENABLED}
         RN[router_node]
+        PLN[planner_node]
+        TEN[tool_executor_node]
         RAGN[rag_node]
         EN[eval_node]
         AN[action_node]
-        ALI[AnnualLeaveInputService]
-        ZAT[Zero-Argument Native Tool]
         REFN[refuse_node]
+        APP[action_proposal]
+        CL[Clarification response]
+        SN --> LG
+        LG -->|false 默认| RN
+        LG -->|true 显式开启| PLN
+        PLN <-->|PlannerDecision / Tool Result| TEN
+        RN -->|rag| RAGN
+        RN -->|eval| EN
+        RN -->|annual leave action| AN
+        RN -->|refuse| REFN
+        AN -->|字段完整| APP
+        AN -->|缺字段| CL
+        TEN -->|rag_answer_tool| HR
+        TEN -->|eval_report_tool| EVR
+        TEN -->|leave_balance_tool / leave_request_tool| LRC
+        TEN -->|leave_proposal_tool| APP
     end
 
     subgraph KB ["知识库离线构建"]
@@ -84,16 +105,14 @@ flowchart TD
     PP --> LLM
 
     EP2 --> SN
-    SN --> RN
-    RN -->|rag| RAGN
-    RN -->|eval| EN
-    RN -->|annual leave action| AN
-    RN -->|refuse| REFN
     RAGN --> HR
-    AN --> ALI --> ZAT
-    ZAT --> BAS --> PA
+    EN --> EVR
+    APP -->|Java createPending| LAC
+    CL -->|Clarification response| EP2
+    LRC --> LS
+    LAC --> BAS --> PA
     PA --> BA
-    PA -->|confirm transaction| LS
+    BAS -->|confirm transaction| LS
     LS --> AC
     LS --> LR
 
@@ -124,7 +143,8 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **LangGraphAgentController**：在 Python 调用前解析白名单 Demo 身份，转发时只透传 Java traceId、Evaluation/Business Action 许可和 Java 权威业务日期；Admin Token 与 Demo 身份均不下传 Python。Python 返回 Proposal 后，在 permit 已释放的情况下调用 `BusinessActionService`
+- **LangGraphAgentController**：在 Python 调用前解析白名单 Demo 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id` 和 Java 权威 `business_date`；Admin Token 不下传 Python。Python 返回的 `action_proposal` 用于生成 PendingAction：`BusinessActionService.createPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
+- **BusinessActionController**：`POST /api/agent/actions/{actionId}/confirm` 与 `/cancel`；强制要求 owner 校验、nonce 校验、状态机、TTL、幂等
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
@@ -132,7 +152,8 @@ flowchart TD
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
 - **DemoIdentityService**：默认关闭的三身份白名单目录，服务端派生 employeeId/displayName/role
-- **BusinessActionService**：Java 权威校验、Action 归属、Spring 事务、PendingAction 状态机、持久化幂等确认与审计；只依赖 `LeaveExecutionGateway`
+- **BusinessActionService**：Java 权威控制面 —— PendingAction 状态机、TTL、容量、owner 校验、nonce 校验、幂等确认、Spring 事务、持久化与审计；最终执行只通过 `LeaveExecutionGateway`
+- **LeaveReadController**：`/api/internal/leave/{balance,requests}`，由 Python 只读企业 Tool 调用；`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权；**与 `leave_proposal_tool` 无关**（`leave_proposal_tool` 不调用此端点）
 - **PostgresLeaveSandboxGateway**：当前同数据库事务执行适配器，按 employeeId 检查冲突、生成编号并写入 LeaveRequest
 - **JdbcPendingActionRepository / JdbcLeaveAccountRepository / JdbcLeaveRequestRepository**：明确 SQL、Action/Account 行锁、唯一申请关联和原子余额扣减
 - **Flyway / PostgreSQL 16**：版本化结构迁移，并持久化 Action、余额、申请及执行结果
@@ -141,7 +162,11 @@ flowchart TD
 
 - **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
-- **langgraph_agent**：LangGraph 状态图编排（safety → router → rag/eval/action/refuse）
+- **langgraph_agent**：LangGraph 状态图编排入口；同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换：
+  - `use_planner=false`（仓库部署默认）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
+  - `use_planner=true`（显式开启）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor`
+- **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`
+- **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数
 - **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重
@@ -150,8 +175,10 @@ flowchart TD
 - **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
 - **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
-- **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表
-- **tool_calling_service**：接入 Action Node 的零参数 Native Tool Adapter；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
+- **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表（legacy Router-first 与 Planner-first 的 `leave_proposal_tool` 复用此服务）
+- **tool_calling_service**：`plan_annual_leave_action` 的实现入口，由 `leave_proposal_tool` 复用；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
+- **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
+- **java_client**：Python → Java 内部只读 HTTP 客户端；仅供 `leave_balance_tool` / `leave_request_tool` 使用；不做 retry / fallback
 
 受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
 
@@ -191,14 +218,18 @@ POST /api/chat
 
 > **注意：** Safety Guard Lite 是启发式纵深防御过滤器（heuristic defense-in-depth filter），不是 authorization / trust / tool permission / business validation 边界。真正安全边界由认证、授权、工具能力、业务校验、租户/数据隔离、事务/状态机、人工确认承担。Lite 只做输入规范化 + 五族高置信确定性规则，明确攻击拦截、咨询放行，不承诺完整 prompt injection 检测 / 完整 Unicode confusable 保护 / 完整自然语言意图理解。
 
-### 链路二：/api/agent/langgraph/chat（Agent 实验链路）
+### 链路二：/api/agent/langgraph/chat（LangGraph Agent）
+
+main 同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换（仓库部署默认 false，走 legacy Router-first）。
+
+**legacy Router-first**（`AGENT_LOOP_ENABLED=false`）：
 
 ```
 POST /api/agent/langgraph/chat
   → Java LangGraphAgentController
     → Python POST /agent/langgraph/chat
-      → run_langgraph_agent()
-        → StateGraph.invoke()
+      → run_langgraph_agent(use_planner=False)
+        → build_agent_graph()
           ├── safety_node
           │     └── check_user_query_safety()
           │           ├── unsafe → route=refuse
@@ -207,28 +238,83 @@ POST /api/agent/langgraph/chat
           │     ├── 评估类关键词 → route=eval
           │     ├── 明确年假申请 → route=action
           │     └── 其他（含年假政策/余额/流程）→ route=rag
-          ├── rag_node
-          │     └── rag_answer_tool()
-          │           └── answer_with_langchain_rag()
-          ├── eval_node
-          │     └── eval_report_tool()
-          │           └── read evaluation reports
-          ├── action_node
-          │     └── AnnualLeaveInputService
-          │           ├── 缺字段 → 固定 Clarification（Provider 0 次）
-          │           └── 字段完整 → Zero-Argument Native Tool
-          │                 └── Python 确定性 Proposal
-          └── refuse_node
-                └── 返回安全拒答文案
-    → Java DemoIdentityService（身份不下传 Python）
-    → Java BusinessActionService 权威复核与 owner 校验
-      → PendingAction
-        → React 脱敏确认卡
-          ├── confirm + 稳定 Idempotency-Key → LeaveExecutionGateway → PostgreSQL事务
-          └── cancel（无 Idempotency-Key）→ CANCELLED
+          ├── rag_node / eval_node / action_node / refuse_node → END
+          └── action_node: plan_annual_leave_action
+                ├─ 字段完整：
+                │     action_proposal
+                │     → BusinessActionService.createPending
+                │        → Java 权威 Proposal 校验
+                │        → Java 生成 confirmationNonce
+                │        → 持久化 PendingAction
+                └─ 缺字段：
+                      missing_fields
+                      → Clarification response
+                      → END
+                      （不得进入 BusinessActionService / PendingAction）
+    → 已创建 PendingAction
+      → React 脱敏确认卡
+        ├── confirm
+        │  → BusinessActionService confirm
+        │  → owner / nonce / 状态机 / TTL / 幂等校验
+        │  → LeaveExecutionGateway
+        │  → PostgreSQL 事务
+        └── cancel
+           → CANCELLED
 ```
 
-**特点**：LangGraph 状态图编排，规则路由，Safety Guard + Tools + 多分支。
+**Planner-first**（`AGENT_LOOP_ENABLED=true`）：
+
+```
+POST /api/agent/langgraph/chat
+  → Java LangGraphAgentController
+    → Python POST /agent/langgraph/chat
+      → run_langgraph_agent(use_planner=True)
+        → build_agent_loop_graph()
+          ├── safety_node
+          │     └── unsafe → route=refuse（直接终止，不调 Planner LLM）
+          │     └── safe → planner_node
+          ├── planner_node
+          │     └── PlannerDecision（Pydantic 严格白名单，MAX_PLANNER_STEPS=5）
+          │           ├── action=tool → tool_executor_node
+          │           ├── action=finish / refuse → END
+          │           └── step budget exhausted
+          │                 → stop_reason=step_budget_exhausted
+          │                 → route=error
+          │                 （Planner 只能规划，不能授权 —— 权限边界在 tool_executor_node）
+          ├── tool_executor_node
+          │     └── 校验：结构 → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
+          │           ├── 通过 → 执行 Tool；Tool 可见性由程序层按权限动态收缩（模型不能自行扩大 Tool 权限）：
+          │           │     默认 rag_answer_tool / leave_balance_tool / leave_request_tool；
+          │           │     allow_eval=true 追加 eval_report_tool；
+          │           │     allow_business_actions=true 追加 leave_proposal_tool
+          │           ├── 权限 / Tool boundary 拦截
+          │           │     → stop_reason=not_allowed
+          │           │     → route=refuse
+          │           │     → Tool 不执行
+          │           └── 其他拦截 → tool_history 记录 blocked，不计数
+          ├── leave_proposal_tool（Planner-first 下）：
+          │     ├─ action_proposal（字段完整）
+          │     │     → BusinessActionService.createPending
+          │     │        → Java 权威 Proposal 校验
+          │     │        → Java 生成 confirmationNonce
+          │     │        → 持久化 PendingAction
+          │     └─ missing_fields（Clarification）
+          │           → Clarification response
+          │           → 不创建 PendingAction
+          ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
+          └── 终止后：_finalize_action_proposal + _finalize_response_contract 收敛 route / category / reason
+    → 已创建 PendingAction
+      → React 脱敏确认卡
+        ├── confirm
+        │  → BusinessActionService confirm
+        │  → owner / nonce / 状态机 / TTL / 幂等校验
+        │  → LeaveExecutionGateway
+        │  → PostgreSQL 事务
+        └── cancel
+           → CANCELLED
+```
+
+**特点**：两套互斥图共用同一 Java 控制面；Python `run_langgraph_agent` 仅在 `use_planner=True` 时启用 `_finalize_action_proposal` 与 `_finalize_response_contract` 两层 finalization。
 
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
@@ -358,8 +444,9 @@ agent-python/app/
 ├── prompts/       # system_prompt.py, build_rag_prompt()
 ├── schemas/       # ChatRequest, ChatResponse, AgentResponse
 ├── chains/        # langchain_rag_chain.py — LangChain RAG 封装
-├── tools/         # rag_answer_tool, eval_report_tool — LangChain @tool
-├── agents/        # langgraph_agent.py — LangGraph Agent 状态图
+├── tools/         # rag_tools（rag_answer_tool / eval_report_tool，LangChain @tool）+ enterprise_tools（leave_balance_tool / leave_request_tool / leave_proposal_tool）
+├── agents/        # langgraph_agent.py + planner_node.py + tool_executor_node.py — LangGraph 两套互斥图
+├── clients/       # java_client.py — Python → Java 内部只读 HTTP 客户端（仅供只读企业 Tool 使用）
 ├── guards/        # input_normalizer + safety_rules + safety_guard — Safety Guard Lite（规范化 + 五族规则）
 └── main.py        # FastAPI 应用入口 + trace_id_middleware
 ```
@@ -427,17 +514,24 @@ graph TD
 
 ## Agent 与 Controlled Action 边界说明
 
-LangGraph 用于流程编排，当前 Router 是关键词和规则判断：
+LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 
-- LangGraph 状态图：safety → router → rag/eval/action/refuse
-- Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
-- 不具有自主任务拆解、反思、多步规划能力
-- 不使用"自主 Agent""智能规划系统"等措辞
-- Native Tool 是零参数协议门禁，不提取字段、不执行写操作、不提供业务事实
-- React 展示 PendingAction 确认卡；confirmationNonce 和 Confirm 幂等 Key 仅存在页面内存，双击由同步锁拦截，网络失败重试 Confirm 时复用原 Key
-- 客户端按 `expiresAt` 提前禁用过期草稿，服务端 Action 状态和错误码仍是权威来源；确认/取消执行期间禁用清空会话和模式切换
-- PendingAction、幂等结果、余额和 LeaveRequest 均持久化到 PostgreSQL；Action/Account 行锁和唯一 `source_action_id` 保证并发确认只执行一次，Java 或数据库重启后可恢复和重放
-- 仍不接真实 OA、不使用 Redis，也不处理法定节假日和调休；浏览器刷新不会恢复只存在页面内存的 nonce 明文
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
+  - 状态图：`safety → router → rag|eval|action|refuse`
+  - Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
+  - 不使用"自主 Agent""智能规划系统"等措辞
+  - legacy Router-first 不暴露 Planner-first 的 Tool 可见性集合；`leave_proposal_tool` 仅在 Planner-first 下被 Planner 决策调用
+
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）
+  - 状态图：`safety → planner ⇄ tool_executor`
+  - Planner 拥有规划权（Pydantic 严格白名单），没有最终业务执行授权
+  - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验
+  - 任务拆解 / 多步规划具有有限自主规划能力，但受 Tool 白名单、权限校验、`MAX_PLANNER_STEPS=5`、`MAX_TOOL_CALLS=3` 和 Java 最终授权边界约束
+  - 可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`
+  - `leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
+
+- **跨图公共语义**：受控业务动作的统一边界仍然由 Java 承担 —— React 展示 PendingAction 确认卡；`confirmationNonce` 由 Java 生成（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）；Confirm 幂等 Key 仅存页面内存，双击由同步锁拦截，网络失败重试 Confirm 时复用原 Key。客户端按 `expiresAt` 提前禁用过期草稿，服务端 Action 状态和错误码仍是权威来源；确认/取消执行期间禁用清空会话和模式切换。PendingAction、幂等结果、余额和 LeaveRequest 均持久化到 PostgreSQL；Action/Account 行锁和唯一 `source_action_id` 保证并发确认只执行一次，Java 或数据库重启后可恢复和重放。
+- **共同不变约束**：仍不接真实 OA、不使用 Redis，也不处理法定节假日和调休；浏览器刷新不会恢复只存在页面内存的 nonce 明文。
 
 ## Embedding Runtime
 

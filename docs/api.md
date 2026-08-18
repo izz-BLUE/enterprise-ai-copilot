@@ -175,6 +175,8 @@ Java 代理 Python 健康检查。
 }
 ```
 
+`route=eval` 在 legacy Router-first 与 Planner-first 两种状态下都可能产生；公共响应字段一致。
+
 **响应**（安全拒答）
 ```json
 {
@@ -193,7 +195,7 @@ Java 代理 Python 健康检查。
 
 Agent 模式必须携带 `X-Demo-User-Id`，其值只能来自服务端演示身份目录。该请求头仅用于本地或受控演示环境，不是真实认证；Java 不会把它、employeeId、角色、余额或申请历史发送给 Python/模型。
 
-Python 内部 Action 响应先产生 `action_proposal`，Java 会重新执行权限、日期、工作日、余额和冲突校验；校验通过后，公网响应只暴露可确认的 `pendingAction`：
+Python `leave_proposal_tool` 只在 Planner-first 下被 Planner 决策调用，生成 `action_proposal`（完整字段）或 `missing_fields`（Clarification），**不执行写操作**。Java 在 `LangGraphAgentController` 内重新执行权限、日期、工作日、余额和冲突校验后，调用 `BusinessActionService.createPending` 创建 PendingAction；`confirmationNonce` 由 Java 生成，DB 仅存 SHA-256 摘要。校验通过后，公网响应只暴露可确认的 `pendingAction`：
 
 ```json
 {
@@ -251,9 +253,9 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | answer | string | 回答内容 |
-| route | string | 路由结果：`rag` / `eval` / `action` / `agent` / `refuse` / `busy` / `error`；其中 `agent` 表示 Planner-first 模式下混合 / 多步 / 仅企业只读 Tool 等智能体任务（Planner-first 启用时新增） |
+| route | string | 公共路由分类：`rag` / `eval` / `action` / `agent` / `refuse` / `busy` / `error` |
 | safe | bool | 安全守卫是否通过 |
-| category | string | 安全分类：`normal` / `illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access` / `access_control` / `business_action` / `overloaded` / `error` |
+| category | string | 公共分类：`normal` / `access_control` / `business_action` / `overloaded` / `error` / `input_error`；Safety Guard 命中时由 Safety 写入细分类别（`illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access`），公网消费方按需处理 |
 | reason | string | 拒答原因（安全 / 权限场景）。正常完成 / 业务动作场景为空字符串；异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | RAG 引用来源 chunk ID 列表 |
 | success | bool | 是否成功；语义：`route != 'error'` ⇒ `success=true`，合法拒绝 / 权限拒绝均视为成功（系统已正确处理），仅技术 / 规划失败返回 `false` |
@@ -411,11 +413,11 @@ Python AI 服务健康检查。
 
 ### POST /agent/langgraph/chat
 
-LangGraph Agent 问答接口（实验链路）。
+LangGraph Agent 问答接口。
 
-请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions` 和 `X-Business-Date`，不读取 Admin Token。
+请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions` 和 `X-Business-Date`，不读取 Admin Token。`X-Business-Date` 是 Java 权威业务日期，供 `leave_proposal_tool` 在 Planner-first 路径下使用。
 
-完整 Action 的 Python 内部响应包含确定性 `action_proposal`：
+Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 
 ```json
 {

@@ -1,4 +1,4 @@
-# Controlled Business Actions
+# 受控业务动作（Controlled Business Actions）
 
 ## 定位与边界
 
@@ -6,53 +6,63 @@
 
 Feature Flag `business.actions.enabled` 与 `demo.identity.enabled` 均默认关闭。共享 Admin Token 只用于演示访问控制，`X-Demo-User-Id` 只用于受控 Demo 数据隔离，两者都不代表员工身份认证。数据库终态和唯一 `source_action_id` 支持多 Java 实例间的确认重放；当前仍不处理中国法定节假日与调休。
 
+main 同时保留两套 LangGraph 互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
+
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）：`safety → router → rag|eval|action|refuse`。`router_node` 检测到年假申请意图后进入 `action_node`，由 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）：`safety → planner ⇄ tool_executor`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+
+两套图在受控业务动作这条链路上汇流到 **同一个 Java 权威控制面**：Python 端只产 Proposal，不执行写操作；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部由 Java 完成。
+
+Planner-first 下受控业务动作相关的 Tool 可见性由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
+
+- 默认可见：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`
+- `allow_eval=true` 时追加：`eval_report_tool`
+- `allow_business_actions=true` 时追加：`leave_proposal_tool`（仅在此条件下 Planner 才能决策调用并产出 Proposal）
+
 ## 真实调用链
 
 ```mermaid
 flowchart LR
     U[React / API Client] --> D[Demo Identity Directory]
     D --> J[Java Trace / Admin / Feature Flag]
-    J --> S[Python Safety]
-    S --> R[Deterministic Action Router]
-    R --> I[AnnualLeaveInputService]
-    I --> G{Missing Field Gate}
-    G -->|缺字段| C[Deterministic Clarification]
-    G -->|字段完整| T[Zero-Argument Native Tool]
-    T --> P[Deterministic Proposal]
-    P --> V[Java BusinessActionService]
-    V --> A[(PostgreSQL PendingAction)]
-    A --> R[React PendingAction Card]
-    R -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]
+    J --> S[Python Safety Guard]
+    S --> G{AGENT_LOOP_ENABLED}
+    G -->|false 默认| RT[Deterministic Router]
+    G -->|true 显式开启| P[Planner ⇄ Tool Executor]
+    RT -->|字段完整| APP[action_proposal]
+    RT -->|缺字段| CL[Clarification response]
+    P -->|PlannerDecision| T[leave_proposal_tool]
+    T -->|字段完整| APP
+    T -->|缺字段| CL
+    APP --> V[Java BusinessActionService]
+    V -->|Java 产 confirmationNonce| DB[(PostgreSQL PendingAction)]
+    DB --> CARD[React PendingAction Card]
+    CARD -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]
     E --> L[(PostgreSQL Leave Account + LeaveRequest)]
-    R -->|cancel| X[CANCELLED]
+    CARD -->|cancel| X[CANCELLED]
 ```
 
-Safety 先于 Evaluation，Evaluation 先于 Annual Leave Action，其他请求继续进入 RAG。年假政策、余额、结转和审批流程查询不会进入 Action Tool。
+Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终止，不会进入 Planner LLM。年假申请草稿不会进入只读 Tool：
 
-## 零参数 Native Tool
+- 政策 / 结转 / 审批流程类查询 → `rag_answer_tool`
+- 余额查询 → `leave_balance_tool`
+- 最近已成功提交的请假记录 → `leave_request_tool`
+- 申请草稿（明确含"申请 / 提交 / 准备"年假业务动作）→ `leave_proposal_tool`
 
-`plan_annual_leave_request` 是零参数受控协议节点，不是字段抽取器、业务事实来源或写操作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、traceId、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。受控 Tool Calling 使用独立 OpenAI SDK 客户端并显式设置 `max_retries=0`；应用层不递归、不循环重试，因此一次规划最多产生一次 Provider HTTP 请求。普通 RAG 客户端保持既有 SDK 行为。
+## `leave_proposal_tool` 的设计
 
-最终契约：
+`leave_proposal_tool` 是 Planner-first 下的受控业务动作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、trace_id、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。Tool Executor 独立做权限 / Tool 预算（`MAX_TOOL_CALLS=3`） / 成功签名去重校验；可信系统字段（`question` / `business_date` / `trace_id`）由 Executor 从 AgentState 注入，模型在 `arguments` 中不得夹带这些字段。
 
-```text
-tool_name=plan_annual_leave_request
-tool_count=1
-parameters=omitted
-tool_choice=Named
-thinking=disabled
-strict=omitted
-retry_policy=none
-max_attempts=1
-max_tokens=64
-provider_received_business_data=NO
-```
+执行流程：
 
-Python 先确定性解析日期、明确原因表达和半天表达。缺少日期或原因时，Python 直接返回固定 Clarification，Provider 调用次数为 0。字段完整时，Provider 只需返回一个指定函数调用，且 `arguments` 必须能解析为严格空对象 `{}`；非空 Object、Array、非法 JSON、错误 Tool 名或多个 Tool Call 都会被拒绝。代码不读取 `message.content`，也不重试。
+1. Planner 输出 `action=tool` 且 `tool_name=leave_proposal_tool`、`arguments={}`、`reason_code=need_proposal` 的严格结构化决策；
+2. Tool Executor 在结构 / 权限 / Tool 预算 / 成功签名去重四项校验通过后发起调用；
+3. `leave_proposal_tool` 调用 `tool_calling_service.plan_annual_leave_action(question, business_date, trace_id)`；
+4. 缺失日期或原因时返回 `kind=clarification`、`action_proposal=null`、`missing_fields=[...]`；
+5. 字段完整时返回 `kind=proposal`、`action_proposal={...}`、`missing_fields=[]`；
+6. Tool Executor 把 `action_proposal` / `missing_fields` 同步写回 `AgentState`；图终止后由 `_finalize_action_proposal` 与 `_finalize_response_contract` 收敛公共响应。
 
-协议成功后，Proposal 的 `start_date`、`end_date`、`reason` 和 `half_day` 全部来自 Python 确定性分析结果。Provider 超时、连接失败、状态错误或 Tool 协议错误时不会生成草稿。
-
-该设计的生产代价是：完整字段 Action 会额外依赖一次外部 Provider 调用；Provider 不可用时草稿生成失败；Native Tool 本身不增加业务语义，只提供可观测的协议门禁。
+`leave_proposal_tool` **不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；它不调用 Java 内部只读端点，不执行任何写操作，最终写操作完全交给 Java。
 
 ## Java 权威控制面
 
@@ -76,15 +86,30 @@ PENDING_CONFIRMATION
   └─ timeout → EXPIRED
 ```
 
-确认 nonce 由 32 字节 `SecureRandom` 生成，明文只在创建响应返回；数据库只保存 32 字节 SHA-256 摘要，Java 使用常量时间比较。浏览器刷新后 nonce 不会恢复，因为明文仅存在页面内存。confirm 要求 UUID `Idempotency-Key`。
+`confirmationNonce` 由 Java 在 `BusinessActionService.createPending` 内部用 32 字节 `SecureRandom` 生成，明文只在创建响应返回；数据库只保存 32 字节 SHA-256 摘要，Java 使用常量时间比较。浏览器刷新后 nonce 不会恢复，因为明文仅存在页面内存。confirm 要求 UUID `Idempotency-Key`。
 
 `createPending` 先锁定 `business_action_control`，并发安全地执行过期转换、容量检查和历史清理；随后只锁定当前 identity 的 `leave_account`。冲突查询始终包含 employeeId，所以不同用户可提交相同日期，同一用户仍拒绝重叠日期。confirm/cancel 使用 `SELECT ... FOR UPDATE` 锁定 Action 行并先校验 owner；归属不符与 Action 不存在统一返回 `ACTION_NOT_FOUND`。confirm 再锁定当前 Account 行，在一个事务内通过 `LeaveExecutionGateway` 复查冲突、写入唯一 `source_action_id` 的 LeaveRequest、扣减余额并写入成功结果。任何数据库异常会整体回滚，草稿保持可重试。
 
-当前唯一实现 `PostgresLeaveSandboxGateway` 与 Action、账户处于同一个 PostgreSQL 事务。真实 OA 远程请求无法加入本地事务，不能声称“替换 Gateway 即可安全上线”；未来需要 Transactional Outbox、异步投递、外部幂等、回调或轮询、重试、对账、补偿和状态映射。
+当前唯一实现 `PostgresLeaveSandboxGateway` 与 Action、账户处于同一个 PostgreSQL 事务。真实 OA 远程请求无法加入本地事务，不能声称"替换 Gateway 即可安全上线"；未来需要 Transactional Outbox、异步投递、外部幂等、回调或轮询、重试、对账、补偿和状态映射。
 
 LeaveRequest 编号由 PostgreSQL Sequence 生成。事务回滚时 Sequence 已取出的编号不会回收，因此编号允许出现间隙，但不会因服务或数据库重启而重复。
 
 confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被拒绝。PendingAction、confirm、cancel 及 Action 错误响应均使用 `Cache-Control: no-store`。
+
+## Python 与 Java 的契约
+
+Python 端通过 `/agent/langgraph/chat` 返回的内部响应字段（公网侧不直接消费）：
+
+- `action_proposal`：确定性 Proposal 字典；仅在 Planner-first 或 legacy Router-first 命中 `route=action` 且字段完整时出现；
+- `missing_fields`：缺字段时的固定顺序数组（`start_date` / `end_date` / `reason`）。
+
+Java 端在 `LangGraphAgentController` 内：
+
+1. 收到 `action_proposal` 后立即调用 `BusinessActionService.createPending`；
+2. 重新校验日期、跨度、半天、原因长度、工作日、余额与冲突；
+3. 生成 `confirmationNonce`，持久化 PendingAction，返回公网 `pendingAction` 视图（仅摘要 + nonce，不含内部 trace_id / 数据库主键 / 余额与申请历史）。
+
+`action_proposal` 是 Java/Python 内部契约，**不能绕过 Java 权威校验直接执行**。
 
 ## React 人工确认链路
 
@@ -108,5 +133,22 @@ Confirm 首次成功后，Action 的持久化成功结果成为权威结果。�
 | `business.actions.demo-annual-leave-balance` | `5.0` |
 | `business.actions.timezone` | `Asia/Shanghai` |
 | `demo.identity.enabled` | `false` |
+| `AGENT_LOOP_ENABLED`（Python 端环境变量） | `false`（仓库部署默认；控制两套互斥状态图切换） |
 
-仓库使用事务内惰性过期和数据库有界容量，不创建后台线程。`maxCompleted` 只清理未被 LeaveRequest 引用的 `CANCELLED / EXPIRED / FAILED`；成功 Action 保留，以满足外键和重放要求。审计日志记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason。
+仓库使用事务内惰性过期和数据库有界容量，不创建后台线程。`maxCompleted` 只清理未被 LeaveRequest 引用的 `CANCELLED / EXPIRED / FAILED`；成功 Action 保留，以满足外键和重放要求。本地表审计记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason；完整集中日志 / APM / 告警栈尚未实现。
+
+## 两套图对受控业务动作的影响
+
+| 维度 | legacy Router-first（默认） | Planner-first（显式开启） |
+|---|---|---|
+| 入口 | `safety → router → action` | `safety → planner` 决策 → `leave_proposal_tool` |
+| 是否暴露 `leave_proposal_tool` | 否（action_node 复用 `tool_calling_service`） | 由 `allow_business_actions` 控制可见性；Planner-first 最多 5 个 Tool，实际可见集合由程序层按权限动态收缩，模型不能自行扩大 Tool 权限 |
+| 公共响应 `route=action` | 是 | 是 |
+| 公共响应 `category=business_action` | 是 | 是 |
+| 写操作入口 | 仍由 Java 完成 | 仍由 Java 完成 |
+| 与 `BUSINESS_ACTIONS_ENABLED` 关系 | 同样依赖；不开启则 Java 不创建 PendingAction | 同样依赖；不开启则 `leave_proposal_tool` 在 Planner 看来不可见、Java 也拒绝 |
+| 与 `JAVA_INTERNAL_TOKEN` 关系 | 无 | `leave_proposal_tool` 不依赖；只读 Tool 依赖 |
+
+## 真实 OA 边界
+
+当前 `PostgresLeaveSandboxGateway` 与 Action、账户参加同一个本地 PostgreSQL 事务，本项目没有发送任何真实 OA 请求。真实 OA 网络调用不能加入本地数据库事务，不能只替换 Gateway 就宣称安全上线；后续至少需要 Transactional Outbox、异步投递、外部幂等、重试、回调或轮询、对账、补偿和状态映射。
