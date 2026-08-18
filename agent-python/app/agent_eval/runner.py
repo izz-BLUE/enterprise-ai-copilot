@@ -73,12 +73,6 @@ def run_single_case(case: AgentEvalCase) -> dict:
                     f'case {case.case_id} 未 stub 工具 {name}，但 Executor 发起执行')
             stack.enter_context(patch(f'app.agents.tool_executor_node.{name}', tool_mock))
 
-        if case.action_stub is not None:
-            # leave_proposal_tool 通过模块属性访问受控链路，patch 其定义模块
-            stack.enter_context(patch(
-                'app.services.tool_calling_service.plan_annual_leave_action',
-                return_value=case.action_stub,
-            ))
         if case.safety_blocked:
             stack.enter_context(patch(
                 'app.agents.langgraph_agent.check_user_query_safety',

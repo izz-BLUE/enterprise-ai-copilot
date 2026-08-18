@@ -13,11 +13,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from app.schemas.action_schema import (
-    AnnualLeaveActionProposal,
-    ProposalPlanningResult,
-)
-
 RAG_ANSWER = (
     '{"answer":"年假制度：入职满1年享有5天年假。","success":true,'
     '"sources":["hr/annual_leave.md"]}'
@@ -73,8 +68,6 @@ class AgentEvalCase:
     tool_stubs: dict[str, Any] = field(default_factory=dict)
     # 注入：Safety Guard 前置拦截
     safety_blocked: bool = False
-    # 注入：Action Proposal 规划结果（业务动作链路 stub）
-    action_stub: Any | None = None
     # 期望补充校验
     expected_route: str | None = None
     expected_planner_calls: int | None = None
@@ -307,7 +300,7 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
     ),
     # ── Action 请求经 leave_proposal_tool 进入受控链路 ─────────
     AgentEvalCase(
-        case_id='016-action-not-in-tool-loop',
+        case_id='016-leave-proposal-tool',
         question='申请2026-07-20一天年假，原因为私事',
         allow_business_actions=True,
         business_date=date(2026, 7, 20),
@@ -337,13 +330,6 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
                 'message': '已生成年假申请草稿，请确认后提交。',
             }, ensure_ascii=False),
         },
-        action_stub=ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
-            action_type='ANNUAL_LEAVE_REQUEST',
-            start_date=date(2026, 7, 20),
-            end_date=date(2026, 7, 20),
-            reason='私事',
-            half_day='NONE',
-        )),
         description='业务动作请求经 Planner 决策调用 leave_proposal_tool，'
                     '由 Executor 走受控链路生成 Proposal，不进入自主写操作',
     ),

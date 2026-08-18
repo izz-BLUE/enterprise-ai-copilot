@@ -1,8 +1,12 @@
 """
 langgraph_agent.py —— LangGraph Agent 核心模块
 
-实现 safety → router → (rag | eval | refuse) 的最小状态图，
-集成 Safety Guard + LangChain Tools + RAG Chain。
+提供两条状态图：
+  1. 确定性路由图（use_planner=False）：safety → router → rag | eval | action | refuse，
+     集成 Safety Guard + LangChain Tools + RAG Chain。
+  2. Agent Loop 图（use_planner=True）：safety → planner ⇄ tool_executor，
+     Planner 决策工具调用，Tool Executor 校验权限/预算/重复并执行；
+     业务动作统一由 Planner 调用 leave_proposal_tool 走受控链路生成待确认草稿。
 """
 
 import json
@@ -45,10 +49,9 @@ class AgentState(TypedDict):
     employee_id: str  # 企业 Tool P0：Java 注入的身份字段；Tool Executor 注入到只读企业 Tool
     action_proposal: dict | None
     missing_fields: list[str]
-    # Agent Loop P0 预留：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
+    # Agent Loop P0：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
     # tool_call_count = 通过执行前校验后，实际发起 Tool 执行的次数——
-    # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数；
-    # （本阶段无 Tool Executor，保持 0，不递增）
+    # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数。
     step_count: int
     tool_call_count: int
     tool_history: list
