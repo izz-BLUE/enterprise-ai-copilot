@@ -135,6 +135,50 @@ def answer_with_langchain_rag(
             "sources": [],
         }
 
+    # Model Reliability P0：LangChain 路径补空响应检测 + 最多 1 次 empty-only retry；
+    # 不改变其他检索 / RAG 逻辑，不引入网络层 retry。
+    if not (getattr(response, "content", "") or "").strip():
+        logger.warning(
+            '[%s] LangChain LLM 首次返回空响应，进行 1 次内部重试',
+            trace_id or '-',
+        )
+        try:
+            response = chain.invoke({"context": context, "question": question})
+        except Exception:
+            logger.exception(
+                '[%s] LangChain LLM 重试调用失败', trace_id or '-',
+            )
+            log_gate_event(
+                trace_id=trace_id or '-', decision=gate_decision,
+                candidate_count=len(candidate_signals),
+                retrieval_latency_ms=retrieval_latency_ms,
+                gate_latency_ms=gate_latency_ms, llm_called=True,
+            )
+            return {
+                "answer": "当前 AI 服务暂时不可用，请稍后重试。",
+                "model": DEEPSEEK_MODEL,
+                "success": False,
+                "sources": [],
+            }
+        if not (getattr(response, "content", "") or "").strip():
+            # 重试仍空：明确走服务不可用兜底，避免返回空答案给用户。
+            logger.warning(
+                '[%s] LangChain LLM 重试后仍返回空响应，走失败兜底',
+                trace_id or '-',
+            )
+            log_gate_event(
+                trace_id=trace_id or '-', decision=gate_decision,
+                candidate_count=len(candidate_signals),
+                retrieval_latency_ms=retrieval_latency_ms,
+                gate_latency_ms=gate_latency_ms, llm_called=True,
+            )
+            return {
+                "answer": "当前 AI 服务暂时不可用，请稍后重试。",
+                "model": DEEPSEEK_MODEL,
+                "success": False,
+                "sources": [],
+            }
+
     log_gate_event(
         trace_id=trace_id or '-', decision=gate_decision,
         candidate_count=len(candidate_signals),
