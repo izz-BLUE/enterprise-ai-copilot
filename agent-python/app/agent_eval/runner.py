@@ -88,6 +88,7 @@ def run_single_case(case: AgentEvalCase) -> dict:
                 allow_eval=case.allow_eval,
                 allow_business_actions=case.allow_business_actions,
                 business_date=case.business_date,
+                employee_id=case.employee_id,
                 trace_id=f'eval-{case.case_id}',
                 use_planner=True,
             )

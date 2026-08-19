@@ -15,9 +15,10 @@ main 同时保留两套 LangGraph 互斥状态图，由 `AGENT_LOOP_ENABLED` 切
 
 Planner-first 下受控业务动作相关的 Tool 可见性由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
 
-- 默认可见：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`
+- 始终可见：`rag_answer_tool`
+- `employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加：`leave_balance_tool` / `leave_request_tool`
 - `allow_eval=true` 时追加：`eval_report_tool`
-- `allow_business_actions=true` 时追加：`leave_proposal_tool`（仅在此条件下 Planner 才能决策调用并产出 Proposal）
+- `allow_business_actions=true` 且 `employee_id` 非空时追加：`leave_proposal_tool`（仅在此条件下 Planner 才能决策调用并产出 Proposal）
 
 ## 真实调用链
 
@@ -56,7 +57,7 @@ Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终
 执行流程：
 
 1. Planner 输出 `action=tool` 且 `tool_name=leave_proposal_tool`、`arguments={}`、`reason_code=need_proposal` 的严格结构化决策；
-2. Tool Executor 在结构 / 权限 / Tool 预算 / 成功签名去重四项校验通过后发起调用；
+2. Tool Executor 在结构 / employee_id / 权限 / Tool 预算 / 成功签名去重校验通过后发起调用；
 3. `leave_proposal_tool` 调用 `tool_calling_service.plan_annual_leave_action(question, business_date, trace_id)`；
 4. 缺失日期或原因时返回 `kind=clarification`、`action_proposal=null`、`missing_fields=[...]`；
 5. 字段完整时返回 `kind=proposal`、`action_proposal={...}`、`missing_fields=[]`；

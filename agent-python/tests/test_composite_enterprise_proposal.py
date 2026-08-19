@@ -106,6 +106,8 @@ class TestAgentLoopProposalPath:
         proposal_mock.invoke.return_value = _proposal_payload('2026-09-01', '2026-09-05')
 
         with patch('app.agents.planner_node.call_llm', side_effect=planner_responses), \
+             patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+             patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
              patch('app.agents.tool_executor_node.rag_answer_tool', rag_mock), \
              patch('app.agents.tool_executor_node.leave_balance_tool', balance_mock), \
              patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_mock):
@@ -159,6 +161,8 @@ class TestAgentLoopProposalPath:
         proposal_mock.invoke.return_value = _clarification_payload(['reason'])
 
         with patch('app.agents.planner_node.call_llm', side_effect=planner_responses), \
+             patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+             patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
              patch('app.agents.tool_executor_node.rag_answer_tool', rag_mock), \
              patch('app.agents.tool_executor_node.leave_balance_tool', balance_mock), \
              patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_mock):
@@ -200,6 +204,8 @@ class TestAgentLoopProposalPath:
         proposal_mock = Mock()
 
         with patch('app.agents.planner_node.call_llm', side_effect=planner_responses), \
+             patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+             patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
              patch('app.agents.tool_executor_node.rag_answer_tool', rag_mock), \
              patch('app.agents.tool_executor_node.leave_balance_tool', balance_mock), \
              patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_mock):

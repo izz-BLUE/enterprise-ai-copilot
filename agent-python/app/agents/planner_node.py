@@ -10,7 +10,7 @@ import json
 
 from pydantic import ValidationError
 
-from app.core.config import logger
+from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
@@ -50,7 +50,7 @@ PLANNER_SYSTEM_PROMPT = (
     '你是企业 AI Copilot 的任务规划器。\n'
     '你的职责是根据:\n'
     '- 用户目标\n'
-    '- 当前可用工具\n'
+    '- 本次请求动态提供的当前可用工具\n'
     '- 已有工具执行结果\n'
     '决定下一步操作。\n'
     '每次只能选择一个下一步。\n'
@@ -60,11 +60,11 @@ PLANNER_SYSTEM_PROMPT = (
     '不要为了"再确认一次"重复执行已经成功完成的相同调用\n'
     '- 仅当仍缺少必要信息时才调用 Tool\n'
     '允许:\n'
-    '1. 调用一个可用 Tool\n'
+    '1. 调用当前能力清单中的一个 Tool\n'
     '2. 信息足够时完成任务\n'
     '3. 无法或不允许处理时拒绝\n'
     '不得:\n'
-    '- 调用未提供的 Tool\n'
+    '- 调用未提供的 Tool（当前能力清单之外的 Tool）\n'
     '- 自己执行 Tool\n'
     '- 修改权限\n'
     '- 修改 trace_id\n'
@@ -83,73 +83,157 @@ PLANNER_SYSTEM_PROMPT = (
     '(字段名与取值必须与声明完全一致):\n'
     '- action: 必填。取值只能是 "tool"(调用工具)、"finish"(任务完成)、'
     '"refuse"(拒绝)\n'
-    '- tool_name: action 为 "tool" 时必填,取值只能是 "rag_answer_tool"'
-    '(企业知识库问答)、"eval_report_tool"(评估报告查询)、'
-    '"leave_balance_tool"(查询当前登录用户的年假余额)、'
-    '"leave_request_tool"(查询当前登录用户的请假记录)或'
-    '"leave_proposal_tool"(生成年假申请草稿供用户确认);'
+    '- tool_name: action 为 "tool" 时必填,只能选择下方动态能力清单中的名称;'
     'action 为 "finish" 或 "refuse" 时必须省略\n'
-    '- arguments: action 为 "tool" 时必填,且只允许该工具声明的参数:\n'
-    '    rag_answer_tool 只允许 {"question": "用户问题"};\n'
-    '    eval_report_tool 只允许 {"report_type": "retrieval"|"generation"|"all"};\n'
-    '    leave_balance_tool 必须为空对象 {};\n'
-    '    leave_request_tool 只允许 {"limit": 1..50};\n'
-    '    leave_proposal_tool 必须为空对象 {},任何日期 / 原因 / 半天等业务参数'
-    '均由程序层基于用户原始问题确定性解析,不得出现在 arguments 中;\n'
-    '    action 为 "finish" 或 "refuse" 时必须省略\n'
+    '- arguments: action 为 "tool" 时必填,且必须符合下方动态能力清单中的参数 contract;'
+    'action 为 "finish" 或 "refuse" 时必须省略\n'
     '- answer: action 为 "finish" 或 "refuse" 时必填,必须是非空字符串;'
     'action 为 "tool" 时必须省略\n'
-    '- reason_code: 必填。与 action / tool_name 的对应关系:\n'
-    '    tool + rag_answer_tool → "need_knowledge"\n'
-    '    tool + eval_report_tool → "need_eval"\n'
-    '    tool + leave_balance_tool → "need_balance"\n'
-    '    tool + leave_request_tool → "need_leave_history"\n'
-    '    tool + leave_proposal_tool → "need_proposal"\n'
-    '    finish → "task_complete"\n'
-    '    refuse → "not_allowed" 或 "cannot_complete"\n'
-    '\n'
-    'leave_proposal_tool 的使用规则:\n'
-    '- 当用户目标明确包含"申请 / 提交 / 准备 / 帮我办"年假业务动作,且所需信息'
-    '(日期、原因等)已由用户原始问题提供或已通过已有工具结果确认时,\n'
-    '  调用 leave_proposal_tool 生成申请草稿。\n'
-    '- 该 Tool 不会提交任何写操作,只生成待用户确认的草稿(Proposal)。\n'
-    '- 缺少必要信息(如余额不足或用户未提供日期/原因)时,优先 finish '
-    '告知用户补充信息或当前不可申请,不要调用 leave_proposal_tool。\n'
-    '\n'
-    '合法示例:\n'
-    '1. {"action": "tool", "tool_name": "rag_answer_tool", '
-    '"arguments": {"question": "公司的年假制度是什么"}, "reason_code": "need_knowledge"}\n'
-    '2. {"action": "tool", "tool_name": "eval_report_tool", '
-    '"arguments": {"report_type": "all"}, "reason_code": "need_eval"}\n'
-    '3. {"action": "tool", "tool_name": "leave_balance_tool", '
-    '"arguments": {}, "reason_code": "need_balance"}\n'
-    '4. {"action": "tool", "tool_name": "leave_request_tool", '
-    '"arguments": {"limit": 10}, "reason_code": "need_leave_history"}\n'
-    '5. {"action": "finish", "answer": "年假制度：入职满1年5天。", '
-    '"reason_code": "task_complete"}\n'
-    '6. {"action": "refuse", "answer": "该请求不允许处理。", '
-    '"reason_code": "not_allowed"}\n'
-    '7. {"action": "tool", "tool_name": "leave_proposal_tool", '
-    '"arguments": {}, "reason_code": "need_proposal"}\n'
+    '- reason_code: 必填。Tool 对应值、finish/refuse 合法值和示例见下方动态能力清单。\n'
+    'finish 的 reason_code 必须是 "task_complete"; refuse 的 reason_code 必须是'
+    '"not_allowed" 或 "cannot_complete"。\n'
     '\n'
     '禁止出现以下任何字段:decision、call_tool、thought、reasoning、plan,'
     '以及上述五个字段之外的任何其他字段;出现即视为非法输出。\n'
     '不要输出思考过程。'
 )
 
+TOOL_ARGUMENT_CONTRACTS: dict[str, str] = {
+    RAG_TOOL_NAME: '只允许 {"question": "用户问题"}。',
+    EVAL_TOOL_NAME: '只允许 {"report_type": "retrieval"|"generation"|"all"}。',
+    LEAVE_BALANCE_TOOL_NAME: '必须为空对象 {}；身份由程序层注入。',
+    LEAVE_REQUEST_TOOL_NAME: '只允许 {"limit": 1..50}。身份由程序层注入。',
+    LEAVE_PROPOSAL_TOOL_NAME: (
+        '必须为空对象 {}；日期 / 原因 / 半天等业务参数由程序层基于用户原始问题解析。'
+    ),
+}
+
+TOOL_REASON_CODES: dict[str, str] = {
+    RAG_TOOL_NAME: 'need_knowledge',
+    EVAL_TOOL_NAME: 'need_eval',
+    LEAVE_BALANCE_TOOL_NAME: 'need_balance',
+    LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
+    LEAVE_PROPOSAL_TOOL_NAME: 'need_proposal',
+}
+
+TOOL_EXAMPLES: dict[str, dict] = {
+    RAG_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': RAG_TOOL_NAME,
+        'arguments': {'question': '公司的年假制度是什么'},
+        'reason_code': 'need_knowledge',
+    },
+    EVAL_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': EVAL_TOOL_NAME,
+        'arguments': {'report_type': 'all'},
+        'reason_code': 'need_eval',
+    },
+    LEAVE_BALANCE_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': LEAVE_BALANCE_TOOL_NAME,
+        'arguments': {},
+        'reason_code': 'need_balance',
+    },
+    LEAVE_REQUEST_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': LEAVE_REQUEST_TOOL_NAME,
+        'arguments': {'limit': 10},
+        'reason_code': 'need_leave_history',
+    },
+    LEAVE_PROPOSAL_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
+        'arguments': {},
+        'reason_code': 'need_proposal',
+    },
+}
+
+TOOL_USAGE_RULES: dict[str, str] = {
+    LEAVE_PROPOSAL_TOOL_NAME: (
+        f'{LEAVE_PROPOSAL_TOOL_NAME} 使用规则:\n'
+        '- 当用户目标明确包含"申请 / 提交 / 准备 / 帮我办"年假业务动作,且所需信息'
+        '(日期、原因等)已由用户原始问题提供或已通过已有工具结果确认时,调用该 Tool。\n'
+        '- 该 Tool 只生成待用户确认的草稿(Proposal),不会提交任何写操作。\n'
+        '- 缺少必要信息(如余额不足或用户未提供日期 / 原因)时,优先 finish '
+        '告知用户补充信息或当前不可申请,不要调用该 Tool。'
+    ),
+}
 
 
-def visible_tools(allow_eval: bool, allow_business_actions: bool = False) -> list[str]:
-    """当前用户可见的 Tool 名称列表;权限判断不交给模型。
+def build_planner_system_prompt(tools: list[str]) -> str:
+    """根据当前 Capability Gate 结果构造 Planner system prompt。
 
-    只读企业 Tool 默认对所有用户可见;运行时若 AgentState.employee_id 为空,
-    Tool Executor 会直接拒,Planner 无需感知。
-    leave_proposal_tool 只在受控业务动作授权开启时暴露。
+    静态部分只包含通用 Planner 规则；Tool 名称、参数 contract、reason_code
+    对应关系和 Tool 示例均来自本次请求的可见集合，隐藏 Tool 不进入 Prompt。
     """
-    tools = [RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME]
+    tool_lines = '\n'.join(
+        f'- {name}: {TOOL_DESCRIPTIONS[name]}' for name in tools
+    )
+    contract_lines = '\n'.join(
+        f'- {name}: {TOOL_ARGUMENT_CONTRACTS[name]}' for name in tools
+    )
+    reason_lines = '\n'.join(
+        f'- tool + {name} → "{TOOL_REASON_CODES[name]}"' for name in tools
+    )
+    example_lines = '\n'.join(
+        f'{index}. {json.dumps(TOOL_EXAMPLES[name], ensure_ascii=False)}'
+        for index, name in enumerate(tools, start=1)
+    )
+    usage_rules = '\n\n'.join(
+        TOOL_USAGE_RULES[name] for name in tools if name in TOOL_USAGE_RULES
+    )
+    finish_index = len(tools) + 1
+    refuse_index = finish_index + 1
+    return (
+        f'{PLANNER_SYSTEM_PROMPT}\n\n'
+        '本次请求当前能力清单（仅以下 Tool 可调用；清单之外的 Tool 不可调用）：\n'
+        f'{tool_lines}\n\n'
+        '本次 Tool 参数 contract：\n'
+        f'{contract_lines}\n\n'
+        '本次 reason_code 对应关系：\n'
+        f'{reason_lines}\n'
+        f'- finish → "task_complete"\n'
+        f'- refuse → "not_allowed" 或 "cannot_complete"\n\n'
+        '合法示例：\n'
+        f'{example_lines}\n'
+        f'{finish_index}. {{"action": "finish", "answer": "年假制度：入职满1年5天。", '
+        '"reason_code": "task_complete"}\n'
+        f'{refuse_index}. {{"action": "refuse", "answer": "该请求不允许处理。", '
+        '"reason_code": "not_allowed"}'
+        + (f'\n\n{usage_rules}' if usage_rules else '')
+    )
+
+
+def _has_value(value: str | None) -> bool:
+    return bool(value and value.strip())
+
+
+def visible_tools(
+    *,
+    employee_id: str | None,
+    allow_eval: bool,
+    allow_business_actions: bool,
+    java_base_url: str,
+    java_internal_token: str,
+) -> list[str]:
+    """根据可信 AgentState 和 Python 服务配置计算当前可见 Tool。
+
+    Capability Gate 只决定 Planner 应看到什么；Executor、Tool、Java 仍保留
+    各自的确定性执行校验。business_date 不属于本次 Gate 条件。
+    """
+    has_employee_id = _has_value(employee_id)
+    has_java_read_config = (
+        has_employee_id
+        and _has_value(java_base_url)
+        and _has_value(java_internal_token)
+    )
+    tools = [RAG_TOOL_NAME]
+    if has_java_read_config:
+        tools.extend([LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME])
     if allow_eval:
         tools.append(EVAL_TOOL_NAME)
-    if allow_business_actions:
+    if allow_business_actions and has_employee_id:
         tools.append(LEAVE_PROPOSAL_TOOL_NAME)
     return tools
 
@@ -234,6 +318,7 @@ def planner_node(state: dict) -> dict:
     question = state.get('question', '')
     allow_eval = state.get('allow_eval', False)
     allow_business_actions = state.get('allow_business_actions', False)
+    employee_id = state.get('employee_id', '')
     step_count = state.get('step_count', 0)
 
     # 步骤预算前置检查：预算耗尽时不再调用 LLM，直接终止，step_count 保持上限
@@ -249,17 +334,25 @@ def planner_node(state: dict) -> dict:
         }
 
     steps_left = MAX_PLANNER_STEPS - step_count
+    current_visible_tools = visible_tools(
+        employee_id=employee_id,
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        java_base_url=JAVA_BASE_URL,
+        java_internal_token=JAVA_INTERNAL_TOKEN,
+    )
 
     user_prompt = build_planner_prompt(
         question,
-        visible_tools(allow_eval, allow_business_actions),
+        current_visible_tools,
         state.get('tool_history', []),
         state.get('observation', ''),
         steps_left,
     )
+    system_prompt = build_planner_system_prompt(current_visible_tools)
 
     try:
-        raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
+        raw = call_llm(system_prompt, user_prompt)
     except LLMProviderError as exc:
         # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
         # 不引入 timeout/5xx 应用层 retry。
@@ -286,7 +379,7 @@ def planner_node(state: dict) -> dict:
     if raw is None or not str(raw).strip():
         logger.warning('[%s] planner LLM 首次返回空响应，进行 1 次内部重试', trace_id)
         try:
-            raw = call_llm(PLANNER_SYSTEM_PROMPT, user_prompt)
+            raw = call_llm(system_prompt, user_prompt)
         except LLMProviderError as exc:
             logger.error(
                 '[%s] planner LLM 重试 Provider 错误: code=%s message=%s',
@@ -320,6 +413,19 @@ def planner_node(state: dict) -> dict:
         return _decision_result(
             state,
             _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
+            'invalid_decision',
+        )
+
+    # Capability Gate 后置校验：Prompt 只是能力描述，模型不得通过直接输出隐藏
+    # Tool 名称扩大本次请求的可用能力范围；隐藏 Tool 视为 Planner contract violation。
+    if decision.action == 'tool' and decision.tool_name not in current_visible_tools:
+        logger.warning(
+            '[%s] planner 选择当前不可见 Tool=%s，按 contract violation 拒绝',
+            trace_id, decision.tool_name,
+        )
+        return _decision_result(
+            state,
+            _refuse_decision('当前请求不可用的 Tool 决策，已拒绝。', 'cannot_complete'),
             'invalid_decision',
         )
 

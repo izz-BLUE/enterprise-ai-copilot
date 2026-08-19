@@ -287,7 +287,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 - `X-Admin-Token` 由调用方发送给 Java 后端，不应由前端 role 代替（权限判断在 Java 后端完成）
 - `X-Allow-Eval` 是 Java → Python 内部 header，表示 Java 已完成权限判断，**不是认证凭证**，Python 不应将其当作独立安全边界
 
-**无权限 Evaluation 响应**（`admin.token` 非空且未提供正确的 `X-Admin-Token`）
+**正常权限拒绝示例**（程序层明确拒绝 Evaluation，`admin.token` 非空且未提供正确的 `X-Admin-Token`）
 ```json
 {
   "answer": "该问题涉及内部评估诊断能力，仅管理员可访问。",
@@ -300,6 +300,8 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
   "traceId": "xxx"
 }
 ```
+
+Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当前 Capability Gate 未暴露的 Tool，系统拒绝该非法规划；其稳定公共响应为 `route=error`、`category=error`、`success=false`。这不等同于普通权限拒绝，也不意味着所有无权限 Evaluation 请求都会返回 error；正常权限拒绝仍可表现为 `route=refuse`、`category=access_control`。反之，也不能把隐藏 Tool 的 contract violation 归类为 access control。
 
 **应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
 ```json

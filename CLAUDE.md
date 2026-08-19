@@ -77,11 +77,12 @@ START → safety_node → planner_node ⇄ tool_executor_node → END
 
 Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
 
-- 默认可见：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`
+- 始终可见：`rag_answer_tool`
+- 受信任 `employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加：`leave_balance_tool` / `leave_request_tool`
 - `allow_eval=true` 时追加：`eval_report_tool`
-- `allow_business_actions=true` 时追加：`leave_proposal_tool`
+- `allow_business_actions=true` 且受信任 `employee_id` 非空时追加：`leave_proposal_tool`
 
-Planner 拥有规划权但没有最终业务执行授权；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验；可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`。`leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作。
+Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终授权边界；Executor、Tool 与 Java 仍保留各自的身份、权限、参数、预算和业务授权校验。`business_date` 不属于 Capability Gate。Planner 拥有规划权但没有最终业务执行授权；可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`。`leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作。
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）

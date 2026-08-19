@@ -79,9 +79,9 @@ class TestAcceptanceScenario:
             result = run_langgraph_agent('你好', use_planner=True)
         assert llm.call_count == 1
         evl.invoke.assert_not_called()
-        assert result['stop_reason'] == 'not_allowed'
+        assert result['stop_reason'] == 'invalid_decision'
         assert result['tool_call_count'] == 0
-        assert '管理员' in result['answer']
+        assert result['route'] == 'error'
 
 
 class TestTermination:
@@ -324,6 +324,7 @@ class TestGuardsPreserved:
                 '申请2026-07-20一天年假，原因为私事',
                 allow_business_actions=True,
                 business_date=BUSINESS_DATE,
+                employee_id='E1001',
                 use_planner=True,
             )
         assert result['stop_reason'] == 'task_complete'

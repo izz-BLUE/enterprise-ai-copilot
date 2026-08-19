@@ -7,6 +7,7 @@ from app.agents.planner_node import (
     MAX_PLANNER_STEPS,
     PLANNER_SYSTEM_PROMPT,
     build_planner_prompt,
+    build_planner_system_prompt,
     planner_node,
     visible_tools,
 )
@@ -33,6 +34,7 @@ def state(**changes):
         'allow_business_actions': False,
         'business_date': None,
         'trace_id': 'trace-planner',
+        'employee_id': '',
         'action_proposal': None,
         'missing_fields': [],
         'step_count': 0,
@@ -68,8 +70,8 @@ class TestPermissionBoundary:
             result = planner_node(state())
         llm.assert_called_once()
         assert result['planner_decision']['action'] == 'refuse'
-        assert result['planner_decision']['reason_code'] == 'not_allowed'
-        assert result['stop_reason'] == 'not_allowed'
+        assert result['planner_decision']['reason_code'] == 'cannot_complete'
+        assert result['stop_reason'] == 'invalid_decision'
 
     def test_eval_tool_allowed_with_allow_eval(self):
         with patch('app.agents.planner_node.call_llm', return_value=EVAL_RAW):
@@ -106,6 +108,7 @@ class TestProposalToolPath:
     def test_proposal_tool_allowed_with_permission_and_business_date(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW):
             result = planner_node(state(allow_business_actions=True,
+                                        employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
         assert result['planner_decision']['action'] == 'tool'
         assert result['planner_decision']['tool_name'] == LEAVE_PROPOSAL_TOOL_NAME
@@ -116,15 +119,17 @@ class TestProposalToolPath:
     def test_proposal_tool_denied_without_business_permission(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:
             result = planner_node(state(allow_business_actions=False,
+                                        employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
         llm.assert_called_once()
         assert result['planner_decision']['action'] == 'refuse'
-        assert result['planner_decision']['reason_code'] == 'not_allowed'
-        assert result['stop_reason'] == 'not_allowed'
+        assert result['planner_decision']['reason_code'] == 'cannot_complete'
+        assert result['stop_reason'] == 'invalid_decision'
 
     def test_proposal_tool_denied_without_business_date(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:
             result = planner_node(state(allow_business_actions=True,
+                                        employee_id='E10001',
                                         business_date=None))
         llm.assert_called_once()
         assert result['planner_decision']['action'] == 'refuse'
@@ -138,6 +143,7 @@ class TestProposalToolPath:
         )
         with patch('app.agents.planner_node.call_llm', return_value=bad):
             result = planner_node(state(allow_business_actions=True,
+                                        employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
         assert result['stop_reason'] == 'invalid_decision'
 
@@ -148,12 +154,14 @@ class TestProposalToolPath:
         )
         with patch('app.agents.planner_node.call_llm', return_value=bad):
             result = planner_node(state(allow_business_actions=True,
+                                        employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
         assert result['stop_reason'] == 'invalid_decision'
 
     def test_proposal_tool_consumes_one_planner_step(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW):
             result = planner_node(state(allow_business_actions=True,
+                                        employee_id='E10001',
                                         business_date=date(2026, 8, 18),
                                         step_count=2))
         assert result['step_count'] == 3
@@ -235,22 +243,60 @@ class TestUntrustedDataBoundary:
 
 class TestPromptInputs:
     def test_visible_tools_respect_permissions(self):
-        # 企业 Tool P0：leave_balance / leave_request 默认可见，但显式列在 RAG 之后；
-        # Planner 仅基于可见集合做决策；运行时身份校验在 Executor 层做。
-        assert visible_tools(False) == [
+        full = dict(
+            employee_id='E10001',
+            allow_eval=False,
+            allow_business_actions=False,
+            java_base_url='http://java.test',
+            java_internal_token='internal-secret',
+        )
+        assert visible_tools(**full) == [
             RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
         ]
-        assert visible_tools(True) == [
+        assert visible_tools(**{**full, 'allow_eval': True}) == [
             RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
             EVAL_TOOL_NAME,
         ]
-        # leave_proposal_tool 只在受控业务动作授权开启时暴露
-        assert LEAVE_PROPOSAL_TOOL_NAME not in visible_tools(False, False)
-        assert LEAVE_PROPOSAL_TOOL_NAME in visible_tools(False, True)
-        assert visible_tools(True, True) == [
+        assert LEAVE_PROPOSAL_TOOL_NAME not in visible_tools(**full)
+        assert LEAVE_PROPOSAL_TOOL_NAME in visible_tools(
+            **{**full, 'allow_business_actions': True}
+        )
+        assert visible_tools(**{
+            **full, 'allow_eval': True, 'allow_business_actions': True,
+        }) == [
             RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
             EVAL_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME,
         ]
+
+    def test_capability_gate_hides_employee_tools_without_employee_id(self):
+        tools = visible_tools(
+            employee_id='',
+            allow_eval=True,
+            allow_business_actions=True,
+            java_base_url='http://java.test',
+            java_internal_token='internal-secret',
+        )
+        assert tools == [RAG_TOOL_NAME, EVAL_TOOL_NAME]
+
+    def test_capability_gate_hides_employee_tools_without_java_base_url(self):
+        tools = visible_tools(
+            employee_id='E10001',
+            allow_eval=False,
+            allow_business_actions=True,
+            java_base_url='',
+            java_internal_token='internal-secret',
+        )
+        assert tools == [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME]
+
+    def test_capability_gate_hides_employee_tools_without_java_internal_token(self):
+        tools = visible_tools(
+            employee_id='E10001',
+            allow_eval=False,
+            allow_business_actions=True,
+            java_base_url='http://java.test',
+            java_internal_token='',
+        )
+        assert tools == [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME]
 
     def test_prompt_contains_question_tools_observation_history_budget(self):
         prompt = build_planner_prompt(
@@ -302,10 +348,71 @@ class TestPromptInputs:
         assert 'allow_eval' not in prompt
 
     def test_eval_tool_not_visible_in_prompt_without_permission(self):
-        denied = build_planner_prompt('评估', visible_tools(False), [], '', 5)
+        common = dict(
+            employee_id='E10001',
+            allow_business_actions=False,
+            java_base_url='http://java.test',
+            java_internal_token='internal-secret',
+        )
+        denied = build_planner_prompt(
+            '评估', visible_tools(allow_eval=False, **common), [], '', 5,
+        )
         assert EVAL_TOOL_NAME not in denied
-        allowed = build_planner_prompt('评估', visible_tools(True), [], '', 5)
+        allowed = build_planner_prompt(
+            '评估', visible_tools(allow_eval=True, **common), [], '', 5,
+        )
         assert EVAL_TOOL_NAME in allowed
+
+    def test_dynamic_system_prompt_excludes_hidden_tools(self):
+        visible = visible_tools(
+            employee_id='',
+            allow_eval=True,
+            allow_business_actions=True,
+            java_base_url='http://java.test',
+            java_internal_token='internal-secret',
+        )
+        system = build_planner_system_prompt(visible)
+        user = build_planner_prompt(
+            f'请处理 {LEAVE_BALANCE_TOOL_NAME}',
+            visible,
+            [{
+                'tool_name': LEAVE_REQUEST_TOOL_NAME,
+                'status': 'blocked',
+                'arguments': {},
+                'observation': f'数据中出现 {LEAVE_PROPOSAL_TOOL_NAME}',
+            }],
+            f'用户原文包含 {LEAVE_BALANCE_TOOL_NAME}',
+            5,
+        )
+        current_tools_section = user.split(
+            '当前可用工具：\n', 1,
+        )[1].split('\n\n已有工具调用历史：', 1)[0]
+
+        # Capability metadata 本身只能描述当前 visible 集合。
+        for hidden in (
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+        ):
+            assert hidden not in system
+            assert hidden not in current_tools_section
+        assert RAG_TOOL_NAME in system
+        assert EVAL_TOOL_NAME in system
+        assert RAG_TOOL_NAME in current_tools_section
+        assert EVAL_TOOL_NAME in current_tools_section
+
+        # question / tool_history / observation 是不可信任务数据，不做字符串 scrub。
+        assert LEAVE_BALANCE_TOOL_NAME in user
+        assert LEAVE_REQUEST_TOOL_NAME in user
+        assert LEAVE_PROPOSAL_TOOL_NAME in user
+
+    def test_hidden_tool_decision_is_rejected_by_planner_gate(self):
+        with patch('app.agents.planner_node.call_llm', return_value=EVAL_RAW) as llm:
+            result = planner_node(state())
+        llm.assert_called_once()
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['planner_decision']['reason_code'] == 'cannot_complete'
+        assert result['stop_reason'] == 'invalid_decision'
 
     def test_system_prompt_forbids_privilege_and_trace_modification(self):
         assert '修改权限' in PLANNER_SYSTEM_PROMPT

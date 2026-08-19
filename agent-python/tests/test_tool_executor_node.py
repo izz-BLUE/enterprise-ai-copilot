@@ -13,9 +13,11 @@ from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
 )
+from app.tools.enterprise_tools import leave_balance_tool as real_leave_balance_tool
 
 
 def state(**changes):
@@ -58,6 +60,7 @@ def _tool_decision(tool_name, arguments, **changes):
         EVAL_TOOL_NAME: 'need_eval',
         LEAVE_BALANCE_TOOL_NAME: 'need_balance',
         LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
+        LEAVE_PROPOSAL_TOOL_NAME: 'need_proposal',
     }
     decision = {
         'action': 'tool',
@@ -269,19 +272,51 @@ class TestLeaveToolSystemFieldInjection:
 
     def test_leave_balance_tool_blocks_when_employee_id_missing(self):
         with patch('app.agents.tool_executor_node.leave_balance_tool') as tool:
-            tool.invoke.return_value = (
-                '{"success":false,"error_code":"EMPLOYEE_ID_REQUIRED",'
-                '"message":"当前请求缺少员工身份,请联系管理员。"}'
-            )
             result = tool_executor_node(state(
                 employee_id='',
                 planner_decision=_tool_decision(LEAVE_BALANCE_TOOL_NAME, {}),
             ))
-        assert result['stop_reason'] == 'tool_executed'
-        assert result['tool_call_count'] == 1
-        # 工具自身被调用,但因为缺 employee_id 应返回稳定错误 payload
-        tool.invoke.assert_called_once()
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['tool_call_count'] == 0
+        assert result['category'] == 'access_control'
+        tool.invoke.assert_not_called()
         observation = json.loads(result['observation'])
+        assert observation['status'] == 'blocked'
+        assert observation['reason'] == 'not_allowed'
+
+    def test_leave_request_tool_blocks_when_employee_id_missing(self):
+        with patch('app.agents.tool_executor_node.leave_request_tool') as tool:
+            result = tool_executor_node(state(
+                employee_id='',
+                planner_decision=_tool_decision(
+                    LEAVE_REQUEST_TOOL_NAME, {'limit': 10},
+                ),
+            ))
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['tool_call_count'] == 0
+        assert result['category'] == 'access_control'
+        tool.invoke.assert_not_called()
+
+    def test_leave_proposal_tool_blocks_when_employee_id_missing(self):
+        with patch('app.agents.tool_executor_node.leave_proposal_tool') as tool:
+            result = tool_executor_node(state(
+                employee_id='',
+                allow_business_actions=True,
+                planner_decision=_tool_decision(
+                    LEAVE_PROPOSAL_TOOL_NAME, {},
+                ),
+            ))
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['tool_call_count'] == 0
+        assert result['category'] == 'business_action'
+        tool.invoke.assert_not_called()
+
+    def test_leave_balance_tool_itself_keeps_identity_defense(self):
+        raw = real_leave_balance_tool.invoke({
+            'employee_id': '',
+            'trace_id': 'trace-exec',
+        })
+        observation = json.loads(raw)
         assert observation['success'] is False
         assert observation['error_code'] == 'EMPLOYEE_ID_REQUIRED'
 

@@ -152,7 +152,9 @@ class TestTaskCompleteRoutes:
         with patch('app.agents.planner_node.call_llm', side_effect=[
             _tool_payload('leave_balance_tool', {}, 'need_balance'),
             _finish_payload('余额5天。'),
-        ]), patch('app.agents.tool_executor_node.leave_balance_tool', balance_mock):
+        ]), patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+             patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+             patch('app.agents.tool_executor_node.leave_balance_tool', balance_mock):
             result = run_langgraph_agent(
                 '查一下我的年假余额',
                 use_planner=True,
@@ -197,16 +199,17 @@ class TestRefused:
 # ---------- not_allowed ----------
 
 class TestNotAllowed:
-    def test_not_allowed_reason_yields_access_control(self):
+    def test_hidden_eval_tool_decision_yields_invalid_decision_error(self):
         """reason_code=not_allowed → category=access_control, route=refuse。"""
-        # Planner 越权要求 eval_report_tool（allow_eval=False）会返回 not_allowed
+        # Planner 输出不可见 eval_report_tool 时，Capability Gate post-validation
+        # 以 invalid_decision 终止，而不是伪装成管理员权限拒绝。
         with patch('app.agents.planner_node.call_llm',
                    return_value=_tool_payload(
                        'eval_report_tool', {'report_type': 'all'}, 'need_eval')):
             result = run_langgraph_agent('给我看评估', use_planner=True)
-        assert result['stop_reason'] == 'not_allowed'
-        assert result['route'] == 'refuse'
-        assert result['category'] == 'access_control'
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert result['category'] == 'error'
 
     def test_not_allowed_cannot_complete_yields_business_action(self):
         """reason_code=cannot_complete（业务日期缺失）→ category=business_action。"""
@@ -218,23 +221,14 @@ class TestNotAllowed:
                 allow_business_actions=True,
                 business_date=None,  # 业务日期缺失
                 use_planner=True,
+                employee_id='E1001',
             )
         assert result['stop_reason'] == 'not_allowed'
         assert result['route'] == 'refuse'
         assert result['category'] == 'business_action'
 
-    def test_proposal_permission_denied_yields_business_action_not_access_control(self):
-        """公共契约回归：业务动作权限拒绝不能映射成 access_control。
-
-        allow_business_actions=False + Planner 调用 leave_proposal_tool →
-        stop_reason=not_allowed, route=refuse, category=business_action,
-        action_proposal=None。
-
-        上轮 review bug 风险：仅依赖 reason_code 推断时，
-        leave_proposal_tool 越权拒绝可能被错误归类为 access_control。
-        修复后由 planner_node 显式写入 category=business_action，
-        finalizer 只负责保留，不再单靠 reason_code 区分 Eval 与受控业务动作。
-        """
+    def test_hidden_proposal_decision_is_invalid_contract(self):
+        """allow_business_actions=False 时 Proposal 不在能力清单中，直接拒绝。"""
         proposal_mock = Mock()
         proposal_mock.invoke.return_value = _proposal_payload('2026-09-01', '2026-09-01')
         with patch('app.agents.planner_node.call_llm',
@@ -248,9 +242,9 @@ class TestNotAllowed:
                 use_planner=True,
                 employee_id='E1001',
             )
-        assert result['stop_reason'] == 'not_allowed'
-        assert result['route'] == 'refuse'
-        assert result['category'] == 'business_action'
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert result['category'] == 'error'
         # 受控链路未被触发，action_proposal 必须清空
         proposal_mock.invoke.assert_not_called()
         assert result['action_proposal'] is None
