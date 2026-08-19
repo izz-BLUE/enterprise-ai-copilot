@@ -255,6 +255,12 @@ graph LR
 | SPRING_DATASOURCE_URL | Java 到 Compose PostgreSQL 的 JDBC 地址 |
 | PYTHON_AGENT_ACQUIRE_TIMEOUT_MS | ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500} |
 | ADMIN_TOKEN | ${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}（必填） |
+| AUTH_JWT_SECRET | ${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required in production}（至少 32 字节随机值） |
+| AUTH_JWT_ISSUER | ${AUTH_JWT_ISSUER:-enterprise-ai-copilot} |
+| AUTH_JWT_AUDIENCE | ${AUTH_JWT_AUDIENCE:-enterprise-ai-copilot} |
+| AUTH_JWT_TTL_SECONDS | ${AUTH_JWT_TTL_SECONDS:-3600} |
+| DEMO_AUTH_ENABLED | compose 默认未注入；受控演示环境显式设置 true 才初始化四个固定账号 |
+| DEMO_AUTH_DEFAULT_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；不写入前端 bundle |
 | DEMO_IDENTITY_ENABLED | compose 默认未注入；仅受控演示环境显式设置 true |
 | BUSINESS_ACTIONS_ENABLED | compose 默认 `${:-false}`；启用后 Java 才接收 Proposal 并创建 PendingAction |
 | JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时 `leave_balance_tool` / `leave_request_tool` 返回 `LEAVE_READ_FORBIDDEN` |
@@ -264,7 +270,7 @@ graph LR
 
 PostgreSQL 是 Java 受控业务动作的生产强依赖：Java 等待数据库健康后启动，Flyway 自动迁移；数据库不可用时启动或健康检查失败，不会降级为内存存储。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
-本地或受控请假演示需同时设置 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
+本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true` 与 `DEMO_AUTH_DEFAULT_PASSWORD`；受控请假兼容演示还需 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
 
 启用 Planner-first 的完整链路需要在 `python-agent` 容器环境变量中追加 `AGENT_LOOP_ENABLED=true`（且 Planner-first 下的 `leave_proposal_tool` 还需要 `BUSINESS_ACTIONS_ENABLED=true` 才能落地），仅读企业 Tool 还需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN`。上述任何一项缺失时，对应能力按各自 Tool 的稳定错误码降级（`LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` / `BUSINESS_ACTIONS_DISABLED`），不会伪造成功。
 

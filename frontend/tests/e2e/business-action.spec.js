@@ -3,20 +3,18 @@ import { expect, test } from '@playwright/test'
 const TEST_NONCE = 'test-nonce-not-a-secret'
 const TEST_ACTION_ID = 'act_business_action_test_1234567890'
 
-const demoIdentities = {
-  identities: [
-    { userId: 'DEMO-001', displayName: 'Demo User', role: 'EMPLOYEE' },
-    { userId: 'DEMO-002', displayName: 'Demo User B', role: 'EMPLOYEE' },
-    { userId: 'DEMO-MGR-001', displayName: 'Demo Manager', role: 'MANAGER' },
-  ],
-}
-
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/demo/identities', route => route.fulfill({
+  await page.addInitScript(({ key, state }) => {
+    window.localStorage.setItem(key, JSON.stringify(state))
+  }, {
+    key: 'enterprise-ai-copilot.auth',
+    state: { accessToken: 'test-token' },
+  })
+  await page.route('**/api/auth/me', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     headers: { 'Cache-Control': 'no-store' },
-    body: JSON.stringify(demoIdentities),
+    body: JSON.stringify({ userId: 'U10001', username: 'zhangsan', employeeId: 'E10001', displayName: '张三', role: 'EMPLOYEE', enabled: true }),
   }))
 })
 
@@ -107,16 +105,7 @@ test('展示完整年假草稿且敏感确认数据不进入 DOM', async ({ page
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
 
-test('身份选择器加载3个身份并默认选择User A', async ({ page }) => {
-  await page.goto('/')
-
-  const selector = page.getByRole('combobox', { name: '演示身份' })
-  await expect(selector.locator('option')).toHaveCount(3)
-  await expect(selector).toHaveValue('DEMO-001')
-  await expect(page.getByText('演示身份仅用于展示数据隔离，不是真实登录。')).toBeVisible()
-})
-
-test('Agent请求只在Header携带当前身份', async ({ page }) => {
+test('Agent请求携带Bearer身份且不发送Demo身份Header', async ({ page }) => {
   let captured
   await page.route('**/api/agent/langgraph/chat', async route => {
     captured = {
@@ -132,7 +121,8 @@ test('Agent请求只在Header携带当前身份', async ({ page }) => {
   await page.goto('/')
   await askForLeave(page)
 
-  expect(captured.headers['x-demo-user-id']).toBe('DEMO-001')
+  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.body).toEqual({ message: '请帮我申请年假' })
   expect(captured.body.userId).toBeUndefined()
   expect(captured.body.employeeId).toBeUndefined()
@@ -161,7 +151,8 @@ test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page 
   await expect(page.getByText('申请编号：LR-202607-0001')).toBeVisible()
   expect(new URL(captured.url).pathname).toBe(`/api/agent/actions/${TEST_ACTION_ID}/confirm`)
   expect(captured.headers['x-admin-token']).toBe('test-only')
-  expect(captured.headers['x-demo-user-id']).toBe('DEMO-001')
+  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   )
@@ -271,35 +262,13 @@ test('Cancel 不发送 Idempotency-Key 且成功后隐藏操作按钮', async ({
   await expect(page.getByText('申请草稿已取消')).toBeVisible()
   await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
   expect(captured.headers['x-admin-token']).toBe('test-only')
-  expect(captured.headers['x-demo-user-id']).toBe('DEMO-001')
+  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toBeUndefined()
   expect(captured.body).toEqual({ confirmationNonce: TEST_NONCE })
 })
 
-test('身份切换确认后清空会话与旧草稿', async ({ page }) => {
-  await openDraft(page)
-  page.once('dialog', dialog => dialog.accept())
-
-  await page.getByRole('combobox', { name: '演示身份' }).selectOption('DEMO-002')
-
-  await expect(page.getByRole('combobox', { name: '演示身份' })).toHaveValue('DEMO-002')
-  await expect(page.getByRole('region', { name: '年假申请确认卡' })).toHaveCount(0)
-  await expect(page.getByText('欢迎使用 Enterprise AI Copilot')).toBeVisible()
-  await expect(page.locator('body')).not.toContainText(TEST_NONCE)
-  await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
-})
-
-test('用户取消身份切换时保留原身份与草稿', async ({ page }) => {
-  await openDraft(page)
-  page.once('dialog', dialog => dialog.dismiss())
-
-  await page.getByRole('combobox', { name: '演示身份' }).selectOption('DEMO-002')
-
-  await expect(page.getByRole('combobox', { name: '演示身份' })).toHaveValue('DEMO-001')
-  await expect(page.getByRole('region', { name: '年假申请确认卡' })).toBeVisible()
-})
-
-test('Confirm执行期间身份选择器不可切换', async ({ page }) => {
+test('Confirm执行期间退出登录按钮不可用', async ({ page }) => {
   let release
   const waiting = new Promise(resolve => { release = resolve })
   await page.route('**/api/agent/actions/**/confirm', async route => {
@@ -313,32 +282,30 @@ test('Confirm执行期间身份选择器不可切换', async ({ page }) => {
   await openDraft(page)
 
   const click = page.getByRole('button', { name: '确认提交' }).click()
-  await expect(page.getByRole('combobox', { name: '演示身份' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '退出登录' })).toBeDisabled()
   release()
   await click
   await expect(page.getByText('模拟申请已提交')).toBeVisible()
 })
 
-test('未知身份错误显示安全提示且不显示堆栈', async ({ page }) => {
-  await page.route('**/api/agent/langgraph/chat', route => route.fulfill({
-    status: 403,
+test('Confirm收到401后清理登录态与待确认敏感状态', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 401,
     contentType: 'application/json',
-    body: JSON.stringify({
-      answer: '请选择有效的演示身份。',
-      route: 'error',
-      category: 'demo_identity',
-      success: false,
-      traceId: 'identity-error-trace',
-    }),
+    body: JSON.stringify({ errorCode: 'AUTHENTICATION_REQUIRED', message: '请重新登录。' }),
   }))
-  await page.goto('/')
-  await askForLeave(page)
 
-  await expect(page.getByText('请选择有效的演示身份。')).toBeVisible()
-  await expect(page.locator('body')).not.toContainText(/Exception|stack trace/i)
+  await openDraft(page)
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  await expect(page.getByRole('heading', { name: '登录工作台' })).toBeVisible()
+  await expect(page.evaluate(key => window.localStorage.getItem(key), 'enterprise-ai-copilot.auth'))
+    .resolves.toBeNull()
+  await expect(page.locator('body')).not.toContainText(TEST_NONCE)
+  await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
 
-test('标准RAG不要求或发送Demo身份Header', async ({ page }) => {
+test('标准RAG携带Bearer身份且不发送Demo身份Header', async ({ page }) => {
   let captured
   await page.route('**/api/chat', async route => {
     captured = {
@@ -359,77 +326,12 @@ test('标准RAG不要求或发送Demo身份Header', async ({ page }) => {
   await input.press('Enter')
 
   await expect(page.getByText('标准问答', { exact: true }).last()).toBeVisible()
+  expect(captured.headers.authorization).toBe('Bearer test-token')
   expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.body).toEqual({ message: '几点上班？' })
   expect(captured.body.userId).toBeUndefined()
   expect(captured.body.employeeId).toBeUndefined()
-})
-
-test('身份接口延迟不阻断标准RAG', async ({ page }) => {
-  await page.unroute('**/api/demo/identities')
-  let releaseIdentity
-  let markIdentityRequested
-  const identityResponseGate = new Promise(resolve => { releaseIdentity = resolve })
-  const identityRequested = new Promise(resolve => { markIdentityRequested = resolve })
-  await page.route('**/api/demo/identities', async route => {
-    markIdentityRequested()
-    await identityResponseGate
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      headers: { 'Cache-Control': 'no-store' },
-      body: JSON.stringify(demoIdentities),
-    })
-  })
-
-  await page.goto('/')
-  await identityRequested
-  const standardRagButton = page.getByRole('button', { name: '切换到标准问答' })
-  try {
-    await expect(page.locator('#root')).toBeAttached()
-    await expect(standardRagButton).toBeVisible()
-    await expect(standardRagButton).toBeEnabled()
-    await standardRagButton.click()
-    await expect(standardRagButton).toHaveAttribute('aria-pressed', 'true')
-  } finally {
-    releaseIdentity()
-  }
-  await expect(page.getByRole('combobox', { name: '演示身份' })).toHaveValue('DEMO-001')
-})
-
-test('身份接口失败不阻断标准RAG请求', async ({ page }) => {
-  await page.unroute('**/api/demo/identities')
-  await page.route('**/api/demo/identities', route => route.fulfill({
-    status: 503,
-    contentType: 'application/json',
-    body: JSON.stringify({ errorCode: 'SERVICE_UNAVAILABLE' }),
-  }))
-  let captured
-  await page.route('**/api/chat', async route => {
-    captured = {
-      headers: route.request().headers(),
-      body: route.request().postDataJSON(),
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ answer: '标准问答可用', success: true, traceId: 'rag-503-trace' }),
-    })
-  })
-
-  await page.goto('/')
-  await expect(page.locator('#root')).toBeAttached()
-  await expect(page.getByRole('alert')).toHaveText('无法加载演示身份。')
-  await page.getByRole('button', { name: '切换到标准问答' }).click()
-  const input = page.getByPlaceholder('输入问题... (Enter 发送，Shift+Enter 换行)')
-  await input.fill('身份服务失败时还能问答吗？')
-  await input.press('Enter')
-
-  await expect(page.getByText('标准问答可用')).toBeVisible()
-  expect(captured.headers['x-demo-user-id']).toBeUndefined()
-  expect(captured.headers['x-admin-token']).toBeUndefined()
-  expect(captured.body).toEqual({ message: '身份服务失败时还能问答吗？' })
 })
 
 test('服务端 ACTION_EXPIRED 进入过期终态', async ({ page }) => {

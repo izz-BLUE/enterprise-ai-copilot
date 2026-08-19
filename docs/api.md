@@ -25,6 +25,22 @@
 
 ## Java Backend API（端口 8080）
 
+### POST /api/auth/login
+
+使用 `app_user` 中的用户名和密码登录，返回短期 Bearer JWT。前端默认填充用户名 `zhangsan`，密码由部署环境提供，不写入前端 bundle。
+
+```json
+{"username":"zhangsan","password":"<password>"}
+```
+
+登录成功响应包含 `accessToken`、`tokenType`、`expiresIn` 和用户信息。JWT 只携带已验证的身份字段，不携带 `enabled`；账号是否启用仅在登录时查询数据库。
+
+### GET /api/auth/me
+
+需要请求头 `Authorization: Bearer <access-token>`，返回当前 JWT 身份。Agent 和 Business Action 路由的 Spring Security 规则均为 `authenticated()`：有效 Bearer JWT 优先；Bearer 存在但无效或过期直接返回 401，不回退 Demo 身份；完全没有 Bearer 时，受控 Demo 模式才可使用 `X-Demo-User-Id` fallback。
+
+`/api/internal/leave/**` 不要求用户 JWT，仅由 `X-Internal-Token` 服务间认证，并消费可信上游注入的 `X-Employee-Id`。
+
 ### GET /api/health
 
 Java 服务健康检查。
@@ -193,7 +209,7 @@ Java 代理 Python 健康检查。
 
 **响应**（完整年假申请，Java 公网契约）
 
-Agent 模式必须携带 `X-Demo-User-Id`，其值只能来自服务端演示身份目录。该请求头仅用于本地或受控演示环境，不是真实认证；Java 不会把它、employeeId、角色、余额或申请历史发送给 Python/模型。
+Agent 模式需要已认证身份：公网/正常登录链路携带 `Authorization: Bearer <access-token>`；仅在显式启用 Demo fallback 且完全没有 Bearer 时，才可携带来自服务端演示身份目录的 `X-Demo-User-Id`。Java 不会把用户提交的 employeeId、角色、余额或申请历史发送给 Python/模型。
 
 Python `leave_proposal_tool` 只在 Planner-first 下被 Planner 决策调用，生成 `action_proposal`（完整字段）或 `missing_fields`（Clarification），**不执行写操作**。Java 在 `LangGraphAgentController` 内重新执行权限、日期、工作日、余额和冲突校验后，调用 `BusinessActionService.createPending` 创建 PendingAction；`confirmationNonce` 由 Java 生成，DB 仅存 SHA-256 摘要。校验通过后，公网响应只暴露可确认的 `pendingAction`：
 
@@ -307,7 +323,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 确认并确定性执行一份 PostgreSQL 持久化的模拟年假草稿。Feature Flag 默认关闭。
 
-请求 Header：`X-Demo-User-Id: <demo-user-id>`、`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。请求体只能包含：
+请求 Header：`Authorization: Bearer <access-token>`、`X-Admin-Token: <admin-token>`、`Idempotency-Key: <UUID>`。仅在受控 Demo fallback 且没有 Bearer 时，才可用 `X-Demo-User-Id: <demo-user-id>` 代替登录身份。请求体只能包含：
 
 ```json
 {"confirmationNonce": "<confirmation-nonce>"}
@@ -335,7 +351,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 ### POST /api/agent/actions/{actionId}/cancel
 
-取消尚未确认的草稿。请求 Header 为 `X-Demo-User-Id` 和 `X-Admin-Token`，不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
+取消尚未确认的草稿。请求 Header 为 `Authorization: Bearer <access-token>` 和 `X-Admin-Token`；仅在受控 Demo fallback 且没有 Bearer 时使用 `X-Demo-User-Id`。不得携带 `Idempotency-Key`，请求体同样只能包含 `confirmationNonce`。重复取消返回 `CANCELLED` 且 `replayed=true`。前端取消成功后清理页面内存中的 nonce 和幂等 Key，并隐藏所有操作按钮。
 
 Confirm/Cancel 都会在锁定 Action 后先校验员工归属，再检查 nonce、过期和状态。其他身份即使持有正确 actionId、nonce、Admin Token 和幂等键，也只得到与不存在 Action 完全相同的 `404 ACTION_NOT_FOUND`，且不会改变草稿、余额或申请记录。
 
@@ -376,7 +392,7 @@ DEMO_IDENTITY_DISABLED
 
 仅在 `demo.identity.enabled=true` 时返回三个固定演示身份的 `userId`、`displayName` 和 `role`，响应为 `Cache-Control: no-store`。不返回 employeeId、余额、申请、nonce、Action 或数据库主键。关闭时返回 `503 DEMO_IDENTITY_DISABLED`。
 
-`X-Demo-User-Id` 不是登录或认证机制，任何公开生产环境都不得依赖它建立用户身份。
+`X-Demo-User-Id` 仅是默认关闭的本地/受控兼容 fallback，不是登录凭证；任何公开生产环境都不得依赖它建立用户身份。
 
 ---
 

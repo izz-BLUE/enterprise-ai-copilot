@@ -28,6 +28,17 @@ public class JdbcLeaveAccountRepository implements LeaveAccountRepository {
     }
 
     @Override
+    public Optional<LeaveAccount> findAccount(String employeeId) {
+        return jdbc.query("SELECT employee_id, display_name, annual_balance "
+                        + "FROM leave_account WHERE employee_id = :id",
+                Map.of("id", employeeId), (rs, rowNum) -> new LeaveAccount(
+                        rs.getString("employee_id"),
+                        rs.getString("display_name"),
+                        rs.getBigDecimal("annual_balance")))
+                .stream().findFirst();
+    }
+
+    @Override
     public Optional<BigDecimal> findBalanceForUpdate(String employeeId) {
         return jdbc.query("SELECT annual_balance FROM leave_account "
                         + "WHERE employee_id = :id FOR UPDATE", Map.of("id", employeeId),

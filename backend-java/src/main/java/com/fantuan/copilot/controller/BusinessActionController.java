@@ -2,10 +2,12 @@ package com.fantuan.copilot.controller;
 
 import com.fantuan.copilot.dto.action.ActionDecisionRequest;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
+import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,25 +21,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/agent/actions")
 public class BusinessActionController {
     private final BusinessActionService service;
-    private final DemoIdentityService identities;
+    private final IdentityContext identityContext;
 
+    @Autowired
+    public BusinessActionController(BusinessActionService service,
+                                    IdentityContext identityContext) {
+        this.service = service;
+        this.identityContext = identityContext;
+    }
+
+    /** Compatibility constructor retained for standalone DemoIdentity tests. */
     public BusinessActionController(BusinessActionService service,
                                     DemoIdentityService identities) {
-        this.service = service;
-        this.identities = identities;
+        this(service, new IdentityContext(identities));
     }
 
     @PostMapping("/{actionId}/confirm")
     public ResponseEntity<ActionExecutionResponse> confirm(
             @PathVariable String actionId,
             @RequestHeader(value = "X-Admin-Token", required = false) String adminToken,
-            @RequestHeader(value = "X-Demo-User-Id", required = false) String demoUserId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
         service.requireAccess(adminToken);
-        var identity = identities.requireIdentity(demoUserId);
+        var identity = identityContext.require(servletRequest).asDemoIdentity();
         return noStore(service.confirm(actionId, request.confirmationNonce(), idempotencyKey,
                 adminToken, traceId, identity));
     }
@@ -46,12 +54,11 @@ public class BusinessActionController {
     public ResponseEntity<ActionExecutionResponse> cancel(
             @PathVariable String actionId,
             @RequestHeader(value = "X-Admin-Token", required = false) String adminToken,
-            @RequestHeader(value = "X-Demo-User-Id", required = false) String demoUserId,
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
         service.requireAccess(adminToken);
-        var identity = identities.requireIdentity(demoUserId);
+        var identity = identityContext.require(servletRequest).asDemoIdentity();
         return noStore(service.cancel(actionId, request.confirmationNonce(), adminToken, traceId,
                 identity));
     }

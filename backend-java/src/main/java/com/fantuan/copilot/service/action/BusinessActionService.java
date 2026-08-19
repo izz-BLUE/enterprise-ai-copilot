@@ -294,8 +294,9 @@ public class BusinessActionService {
     }
 
     private void requireIdentity(DemoIdentity identity) {
-        if (identity == null) {
-            throw new IllegalArgumentException("Verified demo identity is required");
+        if (identity == null || identity.employeeId() == null || identity.employeeId().isBlank()) {
+            throw new ActionException(HttpStatus.FORBIDDEN, "EMPLOYEE_ID_REQUIRED",
+                    "当前身份不是员工身份。", null, null);
         }
     }
 

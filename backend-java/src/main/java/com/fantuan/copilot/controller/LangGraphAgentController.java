@@ -8,8 +8,9 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
-import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
+import com.fantuan.copilot.identity.IdentityContext;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -38,7 +39,7 @@ public class LangGraphAgentController {
     private final PythonAgentBulkhead pythonAgentBulkhead;
     private final AdminAccessService adminAccessService;
     private final BusinessActionService businessActionService;
-    private final DemoIdentityService demoIdentityService;
+    private final IdentityContext identityContext;
 
     @Value("${python.agent.base-url}")
     private String agentBaseUrl;
@@ -48,12 +49,22 @@ public class LangGraphAgentController {
                                     PythonAgentBulkhead pythonAgentBulkhead,
                                     AdminAccessService adminAccessService,
                                     BusinessActionService businessActionService,
-                                    DemoIdentityService demoIdentityService) {
+                                    IdentityContext identityContext) {
         this.restTemplate = restTemplate;
         this.pythonAgentBulkhead = pythonAgentBulkhead;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
-        this.demoIdentityService = demoIdentityService;
+        this.identityContext = identityContext;
+    }
+
+    /** Compatibility constructor retained for standalone DemoIdentity tests. */
+    public LangGraphAgentController(RestTemplate restTemplate,
+                                    PythonAgentBulkhead pythonAgentBulkhead,
+                                    AdminAccessService adminAccessService,
+                                    BusinessActionService businessActionService,
+                                    DemoIdentityService demoIdentityService) {
+        this(restTemplate, pythonAgentBulkhead, adminAccessService, businessActionService,
+                new IdentityContext(demoIdentityService));
     }
 
     /**
@@ -69,20 +80,16 @@ public class LangGraphAgentController {
                                                            HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
         String presentedToken = httpRequest.getHeader("X-Admin-Token");
-        String demoUserId = httpRequest.getHeader("X-Demo-User-Id");
-        DemoIdentity identity = null;
+        VerifiedIdentity identity;
         try {
-            if (demoIdentityService.isEnabled()) {
-                identity = demoIdentityService.requireIdentity(demoUserId);
-            } else if (demoUserId != null && !demoUserId.trim().isEmpty()) {
-                demoIdentityService.requireIdentity(demoUserId);
-            }
+            identity = identityContext.require(httpRequest);
         } catch (ActionException exception) {
             return safeIdentityFailure(traceId, exception);
         }
         boolean allowEval = adminAccessService.isAdmin(presentedToken);
         boolean allowBusinessActions = businessActionService != null
                 && identity != null
+                && identity.employeeId() != null
                 && businessActionService.isAllowed(presentedToken);
         log.info("[{}] 收到 LangGraph Agent 请求: allowEval={}, allowBusinessActions={}",
                 traceId, allowEval, allowBusinessActions);
@@ -104,7 +111,7 @@ public class LangGraphAgentController {
             }
             // 企业 Tool P0：把已通过身份校验的 employeeId 透传给 Python，供只读 Tool 使用。
             // 永远从服务端解析后的 identity 注入，不接受请求头直传，防止前端伪造身份。
-            if (identity != null && identity.employeeId() != null) {
+            if (identity.employeeId() != null) {
                 headers.set("X-Employee-Id", identity.employeeId());
             }
             HttpEntity<ChatRequest> httpEntity = new HttpEntity<>(request, headers);
@@ -140,7 +147,8 @@ public class LangGraphAgentController {
             }
             try {
                 pendingAction = businessActionService.createPending(
-                        pythonResponse.actionProposal(), traceId, presentedToken, identity);
+                        pythonResponse.actionProposal(), traceId, presentedToken,
+                        identity.asDemoIdentity());
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
@@ -196,8 +204,10 @@ public class LangGraphAgentController {
 
     private ResponseEntity<AgentChatResponse> safeIdentityFailure(String traceId,
                                                                   ActionException exception) {
+        String category = exception.errorCode().startsWith("DEMO_")
+                ? "demo_identity" : "authentication";
         AgentChatResponse response = new AgentChatResponse(exception.getMessage(), "error", true,
-                "demo_identity", "", List.of(), false, traceId);
+                category, "", List.of(), false, traceId);
         return ResponseEntity.status(exception.httpStatus())
                 .cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(response);

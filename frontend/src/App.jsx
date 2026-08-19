@@ -1,16 +1,16 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import InfoPanel from './components/InfoPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ChatMessage, { UserMessage, LoadingMessage } from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import AdminPanel from './components/AdminPanel'
-import DemoIdentityPanel from './components/DemoIdentityPanel'
 import {
   BusinessActionApiError,
   cancelBusinessAction,
   confirmBusinessAction,
 } from './services/businessActionApi'
+import { authenticatedFetch, AuthExpiredError } from './services/authApi'
 import './App.css'
 
 const JAVA_BASE_URL = ''  // Vite proxy 转发到 localhost:8080
@@ -49,13 +49,12 @@ function initialActionUi(phase = 'pending', error = null) {
   }
 }
 
-function App() {
+function App({ authState, onLogout }) {
   const [mode, setMode] = useState('agent')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [messages, setMessages] = useState([])
   const [adminToken, setAdminToken] = useState('')
-  const [demoIdentity, setDemoIdentity] = useState(null)
   const [error, setError] = useState(null)
   const chatEndRef = useRef(null)
   const actionSecretsRef = useRef(new Map())
@@ -65,28 +64,14 @@ function App() {
   const actionBusy = messages.some(message =>
     message.actionUi?.phase === 'confirming' || message.actionUi?.phase === 'cancelling')
 
-  const handleInitialIdentity = useCallback(identity => {
-    setDemoIdentity(current => current || identity)
-  }, [])
-
-  const clearIdentityBoundSession = () => {
+  const clearSession = () => {
     setMessages([])
     setInput('')
+    setAdminToken('')
     setError(null)
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
-  }
-
-  const handleDemoIdentityChange = nextIdentity => {
-    if (!nextIdentity || nextIdentity.userId === demoIdentity?.userId
-        || loading || actionBusy || actionLocksRef.current.size > 0) return
-    const hasPendingDraft = messages.some(message =>
-      ['pending', 'error'].includes(message.actionUi?.phase))
-    if (hasPendingDraft && !window.confirm(
-      '切换身份会清空当前会话，当前草稿需要重新生成。')) return
-    clearIdentityBoundSession()
-    setDemoIdentity(nextIdentity)
   }
 
   // 自动滚动到底部
@@ -162,13 +147,13 @@ function App() {
             confirmationNonce: secret.confirmationNonce,
             idempotencyKey,
             adminToken,
-            demoUserId: demoIdentity?.userId,
+            accessToken: authState.accessToken,
           })
         : await cancelBusinessAction({
             actionId: action.actionId,
             confirmationNonce: secret.confirmationNonce,
             adminToken,
-            demoUserId: demoIdentity?.userId,
+            accessToken: authState.accessToken,
           })
 
       updateActionUi(messageId, {
@@ -180,6 +165,11 @@ function App() {
       actionSecretsRef.current.delete(messageId)
       idempotencyKeysRef.current.delete(messageId)
     } catch (requestError) {
+      if (requestError instanceof AuthExpiredError || requestError?.httpStatus === 401) {
+        clearSession()
+        onLogout()
+        return
+      }
       const safeError = requestError instanceof BusinessActionApiError
         ? requestError
         : new BusinessActionApiError({ message: '业务操作未完成，请稍后重试。' })
@@ -217,15 +207,16 @@ function App() {
     idempotencyKeysRef.current.delete(messageId)
   }
 
+  const handleLogout = () => {
+    clearSession()
+    onLogout()
+  }
+
   const sendMessage = async () => {
     const question = input.trim()
     if (!question || loading) return
 
     const requestMode = mode
-    if (requestMode === 'agent' && !demoIdentity) {
-      setError('请选择有效的演示身份。')
-      return
-    }
     setLoading(true)
     setError(null)
     setInput('')
@@ -237,16 +228,13 @@ function App() {
       ? '/api/agent/langgraph/chat'
       : '/api/chat'
 
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' }
     if (requestMode === 'agent' && adminToken.trim()) {
       headers['X-Admin-Token'] = adminToken.trim()
     }
-    if (requestMode === 'agent') {
-      headers['X-Demo-User-Id'] = demoIdentity.userId
-    }
-
     try {
-      const response = await fetch(`${JAVA_BASE_URL}${endpoint}`, {
+      const response = await authenticatedFetch(`${JAVA_BASE_URL}${endpoint}`,
+        authState.accessToken, {
         method: 'POST',
         headers,
         body: JSON.stringify({ message: question }),
@@ -313,6 +301,11 @@ function App() {
 
       appendAssistantMessage(data)
     } catch (e) {
+      if (e instanceof AuthExpiredError || e?.httpStatus === 401) {
+        clearSession()
+        onLogout()
+        return
+      }
       if (e instanceof TypeError) {
         setError('无法连接到 Java 后端，请确认服务已启动。')
       } else if (e.type === 'http_error') {
@@ -362,15 +355,23 @@ function App() {
               {mode === 'agent' ? 'LangGraph Agent' : 'RAG Pipeline'}
             </span>
           </div>
-          {messages.length > 0 && (
-            <button
-              className="clear-btn"
-              onClick={handleClearMessages}
-              disabled={loading || actionBusy}
-            >
-              清空会话
+          <div className="header-actions">
+            <span className="current-user" title={authState.user.username}>
+              {authState.user.displayName}
+            </span>
+            {messages.length > 0 && (
+              <button
+                className="clear-btn"
+                onClick={handleClearMessages}
+                disabled={loading || actionBusy}
+              >
+                清空会话
+              </button>
+            )}
+            <button className="logout-btn" onClick={handleLogout} disabled={loading || actionBusy}>
+              退出登录
             </button>
-          )}
+          </div>
         </div>
 
         <div className="chat-area">
@@ -408,12 +409,6 @@ function App() {
         </div>
 
         <div className="input-section">
-          <DemoIdentityPanel
-            demoIdentity={demoIdentity}
-            onInitialIdentity={handleInitialIdentity}
-            onIdentityChange={handleDemoIdentityChange}
-            disabled={loading || actionBusy}
-          />
           <AdminPanel adminToken={adminToken} setAdminToken={setAdminToken} />
           <ChatInput
             input={input}

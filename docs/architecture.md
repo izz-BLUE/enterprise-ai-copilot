@@ -143,7 +143,8 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **LangGraphAgentController**：在 Python 调用前解析白名单 Demo 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id` 和 Java 权威 `business_date`；Admin Token 不下传 Python。Python 返回的 `action_proposal` 用于生成 PendingAction：`BusinessActionService.createPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
+- **SecurityConfig / AuthController**：`app_user` + BCrypt 登录并签发短期 JWT；Agent/Business Action 使用 `authenticated()`，有效 JWT 优先，Bearer 无效不回退 Demo；`/api/internal/leave/**` 保持 X-Internal-Token 服务间认证
+- **LangGraphAgentController**：在 Python 调用前解析 JWT 或显式 Demo fallback 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id` 和 Java 权威 `business_date`；Admin Token 不下传 Python。Python 返回的 `action_proposal` 用于生成 PendingAction：`BusinessActionService.createPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
 - **BusinessActionController**：`POST /api/agent/actions/{actionId}/confirm` 与 `/cancel`；强制要求 owner 校验、nonce 校验、状态机、TTL、幂等
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
@@ -151,7 +152,7 @@ flowchart TD
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
-- **DemoIdentityService**：默认关闭的三身份白名单目录，服务端派生 employeeId/displayName/role
+- **DemoIdentityService**：默认关闭的三身份白名单目录，仅供受控兼容 fallback；服务端派生 employeeId/displayName/role
 - **BusinessActionService**：Java 权威控制面 —— PendingAction 状态机、TTL、容量、owner 校验、nonce 校验、幂等确认、Spring 事务、持久化与审计；最终执行只通过 `LeaveExecutionGateway`
 - **LeaveReadController**：`/api/internal/leave/{balance,requests}`，由 Python 只读企业 Tool 调用；`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权；**与 `leave_proposal_tool` 无关**（`leave_proposal_tool` 不调用此端点）
 - **PostgresLeaveSandboxGateway**：当前同数据库事务执行适配器，按 employeeId 检查冲突、生成编号并写入 LeaveRequest
@@ -318,7 +319,7 @@ POST /api/agent/langgraph/chat
 
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
-> **身份边界：** `X-Demo-User-Id` 只用于本地或受控演示，不是认证。Manager 没有审批权限。未来 DingTalk/Feishu/WeCom 等真实 OA Gateway 需要 Outbox 与异步一致性机制，不能参与当前本地 PostgreSQL 事务。
+> **身份边界：** 正常请求使用 `app_user` 签发的 JWT；`X-Demo-User-Id` 只用于完全没有 Bearer 时的本地或受控兼容 fallback，不是认证凭证。Manager 没有审批权限。未来 DingTalk/Feishu/WeCom 等真实 OA Gateway 需要 Outbox 与异步一致性机制，不能参与当前本地 PostgreSQL 事务。
 
 ## 离线知识库构建流程
 
@@ -549,7 +550,6 @@ LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 
 以下能力尚未实现，属于 Roadmap 范畴：
 
-- 用户认证与权限控制
 - 文档上传与知识库管理
 - 多租户隔离
 - 审计日志
