@@ -1,5 +1,6 @@
 package com.fantuan.copilot.controller;
 
+import com.fantuan.copilot.dto.auth.AuthErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,12 @@ public class GlobalExceptionHandler {
         log.warn("[{}] 输入校验失败: {}", traceId, errorMessage);
 
         String path = request.getRequestURI();
+
+        if (path.startsWith("/api/auth/")) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .cacheControl(org.springframework.http.CacheControl.noStore())
+                    .body(new AuthErrorResponse("INVALID_REQUEST", "请求格式无效。", traceId));
+        }
 
         // /api/agent/langgraph/chat 返回 AgentChatResponse 兼容格式
         if (path.contains("/agent/langgraph/")) {

@@ -1,6 +1,8 @@
 package com.fantuan.copilot.controller;
 
 import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
+import com.fantuan.copilot.auth.AuthRole;
+import com.fantuan.copilot.auth.AuthenticatedUser;
 import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
@@ -20,6 +22,9 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
@@ -106,5 +111,45 @@ class LangGraphAgentActionMappingTest {
         assertFalse(entity.getValue().getHeaders().containsKey("X-Demo-User-Id"));
         verify(actionService).createPending(proposal, "java-trace-123", "admin", identity);
         verify(actionService, never()).createPending(proposal, "python-trace-999", "admin", identity);
+    }
+
+    @Test
+    void jwtIdentityWinsOverForgedEmployeeDemoAndQueryValues() {
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        DemoIdentityService identities = mock(DemoIdentityService.class);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
+        when(restTemplate.postForEntity(anyString(), any(HttpEntity.class),
+                eq(PythonAgentResponse.class))).thenReturn(ResponseEntity.ok(
+                new PythonAgentResponse("ok", "rag", true, "normal", "", List.of(),
+                        true, "python-trace", null, List.of())));
+
+        AuthenticatedUser zhangsan = new AuthenticatedUser(
+                "U10001", "zhangsan", "E10001", "张三", AuthRole.EMPLOYEE, true);
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        zhangsan, null,
+                        List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))));
+        try {
+            LangGraphAgentController controller = new LangGraphAgentController(
+                    restTemplate, bulkhead, mock(AdminAccessService.class), actionService, identities);
+            ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
+            HttpServletRequest request = mock(HttpServletRequest.class);
+            when(request.getAttribute("traceId")).thenReturn("spoof-trace");
+            when(request.getHeader("X-Employee-Id")).thenReturn("E10002");
+            when(request.getHeader("X-Demo-User-Id")).thenReturn("DEMO-002");
+            when(request.getParameter("employee_id")).thenReturn("E10002");
+
+            controller.langgraphChat(new ChatRequest("request"), request);
+
+            ArgumentCaptor<HttpEntity> entity = ArgumentCaptor.forClass(HttpEntity.class);
+            verify(restTemplate).postForEntity(anyString(), entity.capture(),
+                    eq(PythonAgentResponse.class));
+            assertEquals("E10001", entity.getValue().getHeaders().getFirst("X-Employee-Id"));
+            verifyNoInteractions(identities);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 }

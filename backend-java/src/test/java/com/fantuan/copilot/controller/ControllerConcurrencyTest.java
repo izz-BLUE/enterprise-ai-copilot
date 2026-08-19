@@ -7,6 +7,8 @@ import com.fantuan.copilot.dto.ChatResponse;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
+import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.service.demo.DemoRole;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -50,9 +52,9 @@ class ControllerConcurrencyTest {
         HttpServletRequest servletRequest = requestWithTraceId("trace-agent");
         LangGraphAgentController controller = new LangGraphAgentController(
                 mock(RestTemplate.class), bulkhead, mock(AdminAccessService.class),
-                mock(BusinessActionService.class), mock(DemoIdentityService.class));
+                mock(BusinessActionService.class), identitiesWithDemoUser());
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
-                new ChatRequest("几点上班？"), servletRequest);
+                new ChatRequest("几点上班？"), requestWithDemoIdentity(servletRequest));
 
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
         assertEquals("1", response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER));
@@ -66,6 +68,19 @@ class ControllerConcurrencyTest {
     private HttpServletRequest requestWithTraceId(String traceId) {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn(traceId);
+        return request;
+    }
+
+    private DemoIdentityService identitiesWithDemoUser() {
+        DemoIdentityService identities = mock(DemoIdentityService.class);
+        when(identities.isEnabled()).thenReturn(true);
+        when(identities.requireIdentity("DEMO-001")).thenReturn(
+                new DemoIdentity("DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE));
+        return identities;
+    }
+
+    private HttpServletRequest requestWithDemoIdentity(HttpServletRequest request) {
+        when(request.getHeader("X-Demo-User-Id")).thenReturn("DEMO-001");
         return request;
     }
 }

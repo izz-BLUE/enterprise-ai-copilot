@@ -14,16 +14,16 @@ const agentResponse = (overrides = {}) => ({
 })
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/api/demo/identities', route => route.fulfill({
+  await page.addInitScript(({ key, state }) => {
+    window.localStorage.setItem(key, JSON.stringify(state))
+  }, {
+    key: 'enterprise-ai-copilot.auth',
+    state: { accessToken: 'test-token' },
+  })
+  await page.route('**/api/auth/me', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({
-      identities: [
-        { userId: 'DEMO-001', displayName: 'Demo User', role: 'EMPLOYEE' },
-        { userId: 'DEMO-002', displayName: 'Demo User B', role: 'EMPLOYEE' },
-        { userId: 'DEMO-MGR-001', displayName: 'Demo Manager', role: 'MANAGER' },
-      ],
-    }),
+    body: JSON.stringify({ userId: 'U10001', username: 'zhangsan', employeeId: 'E10001', displayName: '张三', role: 'EMPLOYEE', enabled: true }),
   }))
 })
 

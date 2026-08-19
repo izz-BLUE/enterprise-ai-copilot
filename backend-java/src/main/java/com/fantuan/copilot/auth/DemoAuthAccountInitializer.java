@@ -1,0 +1,106 @@
+package com.fantuan.copilot.auth;
+
+import com.fantuan.copilot.repository.action.LeaveAccount;
+import com.fantuan.copilot.repository.action.LeaveAccountRepository;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+
+@Component
+public class DemoAuthAccountInitializer implements ApplicationRunner {
+    private final DemoAuthProperties properties;
+    private final AppUserRepository users;
+    private final LeaveAccountRepository accounts;
+    private final PasswordEncoder passwordEncoder;
+    private final Clock clock;
+
+    public DemoAuthAccountInitializer(DemoAuthProperties properties,
+                                      AppUserRepository users,
+                                      LeaveAccountRepository accounts,
+                                      PasswordEncoder passwordEncoder,
+                                      Clock clock) {
+        this.properties = properties;
+        this.users = users;
+        this.accounts = accounts;
+        this.passwordEncoder = passwordEncoder;
+        this.clock = clock;
+    }
+
+    @Override
+    @Transactional
+    public void run(ApplicationArguments args) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        if (properties.getDefaultPassword() == null
+                || properties.getDefaultPassword().isBlank()) {
+            throw new IllegalStateException(
+                    "DEMO_AUTH_DEFAULT_PASSWORD must be configured when DEMO_AUTH_ENABLED=true");
+        }
+
+        Instant now = clock.instant();
+        List<SeedAccount> employees = List.of(
+                new SeedAccount("U10001", "zhangsan", "E10001", "张三",
+                        AuthRole.EMPLOYEE, properties.getZhangsanAnnualBalance()),
+                new SeedAccount("U10002", "lisi", "E10002", "李四",
+                        AuthRole.EMPLOYEE, properties.getLisiAnnualBalance()),
+                new SeedAccount("U10003", "wangwu", "E10003", "王五",
+                        AuthRole.EMPLOYEE, properties.getWangwuAnnualBalance()));
+
+        for (SeedAccount employee : employees) {
+            ensureLeaveAccount(employee, now);
+        }
+        ensureAppUser(new SeedAccount("U90001", "admin", null, "管理员", AuthRole.ADMIN, null), now);
+        for (SeedAccount employee : employees) {
+            ensureAppUser(employee, now);
+        }
+    }
+
+    private void ensureLeaveAccount(SeedAccount seed, Instant now) {
+        accounts.initialize(seed.employeeId(), seed.displayName(), seed.balance(), now);
+        LeaveAccount account = accounts.findAccount(seed.employeeId()).orElseThrow(() ->
+                new IllegalStateException("Demo leave account initialization failed: "
+                        + seed.employeeId()));
+        if (!seed.employeeId().equals(account.employeeId())
+                || !seed.displayName().equals(account.displayName())) {
+            throw new IllegalStateException("Existing leave account does not match demo auth seed: "
+                    + seed.employeeId());
+        }
+    }
+
+    private void ensureAppUser(SeedAccount seed, Instant now) {
+        AppUser byId = users.findByUserId(seed.userId()).orElse(null);
+        AppUser byUsername = users.findByUsername(seed.username()).orElse(null);
+        if (byId != null && byUsername != null && !byId.userId().equals(byUsername.userId())) {
+            throw new IllegalStateException("Demo auth seed has conflicting user identity: "
+                    + seed.username());
+        }
+        AppUser existing = byId != null ? byId : byUsername;
+        if (existing == null) {
+            users.insert(new AppUser(seed.userId(), seed.username(),
+                    passwordEncoder.encode(properties.getDefaultPassword()), seed.employeeId(),
+                    seed.displayName(), seed.role(), true, now));
+            return;
+        }
+        if (!seed.userId().equals(existing.userId())
+                || !seed.username().equals(existing.username())
+                || !java.util.Objects.equals(seed.employeeId(), existing.employeeId())
+                || !seed.displayName().equals(existing.displayName())
+                || seed.role() != existing.role()) {
+            throw new IllegalStateException("Existing app_user does not match demo auth seed: "
+                    + seed.username());
+        }
+        // Existing password, enabled flag, and business data are intentionally preserved.
+    }
+
+    private record SeedAccount(String userId, String username, String employeeId,
+                                String displayName, AuthRole role,
+                                java.math.BigDecimal balance) {
+    }
+}

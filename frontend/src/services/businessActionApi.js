@@ -1,3 +1,5 @@
+import { authenticatedFetch, AuthExpiredError } from './authApi'
+
 const JAVA_BASE_URL = ''
 
 export class BusinessActionApiError extends Error {
@@ -16,27 +18,24 @@ async function postDecision({
   confirmationNonce,
   adminToken,
   idempotencyKey,
-  demoUserId,
+  accessToken,
 }) {
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' }
   if (adminToken?.trim()) {
     headers['X-Admin-Token'] = adminToken.trim()
   }
   if (idempotencyKey) {
     headers['Idempotency-Key'] = idempotencyKey
   }
-  if (demoUserId) {
-    headers['X-Demo-User-Id'] = demoUserId
-  }
-
   let response
   try {
-    response = await fetch(`${JAVA_BASE_URL}${path}`, {
+    response = await authenticatedFetch(`${JAVA_BASE_URL}${path}`, accessToken, {
       method: 'POST',
       headers,
       body: JSON.stringify({ confirmationNonce }),
     })
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthExpiredError) throw error
     throw new BusinessActionApiError({
       message: '网络连接失败，服务端结果未知，请使用原操作重试。',
       errorCode: 'NETWORK_ERROR',
@@ -76,14 +75,14 @@ export function confirmBusinessAction({
   confirmationNonce,
   idempotencyKey,
   adminToken,
-  demoUserId,
+  accessToken,
 }) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/confirm`,
     confirmationNonce,
     idempotencyKey,
     adminToken,
-    demoUserId,
+    accessToken,
   })
 }
 
@@ -91,12 +90,12 @@ export function cancelBusinessAction({
   actionId,
   confirmationNonce,
   adminToken,
-  demoUserId,
+  accessToken,
 }) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/cancel`,
     confirmationNonce,
     adminToken,
-    demoUserId,
+    accessToken,
   })
 }
