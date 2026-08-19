@@ -163,8 +163,8 @@ flowchart TD
 - **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
 - **langgraph_agent**：LangGraph 状态图编排入口；同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换：
-  - `use_planner=false`（仓库部署默认）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
-  - `use_planner=true`（显式开启）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor`
+  - `use_planner=true`（仓库部署默认）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor`
+  - `use_planner=false`（显式回退 legacy）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
 - **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`
 - **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数
 - **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
@@ -220,9 +220,9 @@ POST /api/chat
 
 ### 链路二：/api/agent/langgraph/chat（LangGraph Agent）
 
-main 同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换（仓库部署默认 false，走 legacy Router-first）。
+main 同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换（仓库部署默认 true，走 Planner-first；false 保留 legacy fallback）。
 
-**legacy Router-first**（`AGENT_LOOP_ENABLED=false`）：
+**legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）：
 
 ```
 POST /api/agent/langgraph/chat
@@ -262,7 +262,7 @@ POST /api/agent/langgraph/chat
            → CANCELLED
 ```
 
-**Planner-first**（`AGENT_LOOP_ENABLED=true`）：
+**Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：
 
 ```
 POST /api/agent/langgraph/chat
@@ -516,13 +516,13 @@ graph TD
 
 LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）
   - 状态图：`safety → router → rag|eval|action|refuse`
   - Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
   - 不使用"自主 Agent""智能规划系统"等措辞
   - legacy Router-first 不暴露 Planner-first 的 Tool 可见性集合；`leave_proposal_tool` 仅在 Planner-first 下被 Planner 决策调用
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
   - 状态图：`safety → planner ⇄ tool_executor`
   - Planner 拥有规划权（Pydantic 严格白名单），没有最终业务执行授权
   - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验

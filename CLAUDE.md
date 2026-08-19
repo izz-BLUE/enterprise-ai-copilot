@@ -60,7 +60,7 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d
 
 main 同时保留两套互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）
 
 ```
 START → safety_node → router_node → rag_node → END
@@ -69,7 +69,7 @@ START → safety_node → router_node → rag_node → END
                               └→ refuse_node → END
 ```
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
 
 ```
 START → safety_node → planner_node ⇄ tool_executor_node → END
@@ -140,7 +140,7 @@ Java 和 Python 都有并发限制：
 | `EMBEDDING_BACKEND` | 推理后端 | torch (可选 onnx_direct) |
 | `REWRITE_MODE` | 查询重写 | none (可选 rule) |
 | `RAG_GATE_MODE` | 检索门控 | off (可选 shadow) |
-| `AGENT_LOOP_ENABLED` | 切换 LangGraph 两套状态图 | false（仓库部署默认；true 启用 Planner-first） |
+| `AGENT_LOOP_ENABLED` | 切换 LangGraph 两套状态图 | true（仓库部署默认 Planner-first；false 显式回退 legacy） |
 | `JAVA_BASE_URL` | Python → Java 内部只读端点地址 | 空（只读企业 Tool 关闭；空时返回 `LEAVE_READ_DISABLED`） |
 | `JAVA_INTERNAL_TOKEN` | Python → Java 内部只读端点鉴权 | 空（空时鉴权失败） |
 | `JAVA_TIMEOUT_SECONDS` | Python → Java 内部只读超时秒数 | 5 |

@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/github/v/release/izz-BLUE/enterprise-ai-copilot)](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/latest)
 [![License](https://img.shields.io/github/license/izz-BLUE/enterprise-ai-copilot)](LICENSE)
 
-面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。仓库部署默认走 legacy Router-first 状态图；Planner-first 是已实装的另一套互斥状态图，需通过 `AGENT_LOOP_ENABLED=true` 显式启用。Python Planner 拥有规划权但没有最终业务执行授权；受控业务动作仍保留 Java 权威校验和用户确认边界。
+面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。Java Spring Boot 负责 API、权限边界和流量控制，Python FastAPI 负责检索、生成与 Agent 编排，React 提供演示界面。仓库部署默认走 Planner-first 状态图；legacy Router-first 是已实装的另一套互斥状态图，需通过 `AGENT_LOOP_ENABLED=false` 显式回退。Python Planner 拥有规划权但没有最终业务执行授权；受控业务动作仍保留 Java 权威校验和用户确认边界。
 
 - 在线演示：<https://copilot.jintianchi.cn>
 - 当前版本：[v0.4.0](docs/releases/v0.4.0.md)
@@ -331,13 +331,13 @@ app/agents/langgraph_agent.py
 
 **两套互斥状态图（由 `AGENT_LOOP_ENABLED` 切换）：**
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）
 
 ```text
 safety → router → rag | eval | action | refuse
 ```
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
 
 ```text
 safety → planner ⇄ tool_executor
@@ -699,13 +699,13 @@ Current evaluation cases cover scenarios such as:
 | Python API | `/agent/chat` | `/agent/langgraph/chat` |
 | Implementation | Hand-written RAG | LangGraph Agent |
 | Safety Guard | Yes | Yes |
-| State graph | N/A | 两套互斥：legacy Router-first（默认） / Planner-first（`AGENT_LOOP_ENABLED=true`） |
+| State graph | N/A | 两套互斥：Planner-first（默认，`AGENT_LOOP_ENABLED=true`） / legacy Router-first（显式 `AGENT_LOOP_ENABLED=false` 回退） |
 | Tool calling | No | legacy Router-first：规则工具；Planner-first：最多 5 个 Tool（默认 3 + `allow_eval` 追加 1 + `allow_business_actions` 追加 1），实际可见集合由程序层按权限动态收缩，模型不能自行扩大 |
-| Stability | Stable main pipeline | 仓库部署默认 legacy；Planner-first 是已实装能力，需显式开关 |
+| Stability | Stable main pipeline | 仓库部署默认 Planner-first；legacy Router-first 是已实装能力，可显式回退 |
 | Use case | Knowledge QA | Agent workflow（含受控业务动作生成草稿） |
 
 `/api/chat` is the **stable RAG main pipeline**.
-`/api/agent/langgraph/chat` 仓库部署默认走 legacy Router-first；启用 Planner-first 不替换稳定接口。
+`/api/agent/langgraph/chat` 仓库部署默认走 Planner-first；显式 `AGENT_LOOP_ENABLED=false` 保留 legacy Router-first 回退，不替换稳定接口。
 
 ## RAG Quality Engineering
 

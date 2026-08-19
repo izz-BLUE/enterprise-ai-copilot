@@ -8,8 +8,8 @@ Feature Flag `business.actions.enabled` 与 `demo.identity.enabled` 均默认关
 
 main 同时保留两套 LangGraph 互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，仓库部署默认）：`safety → router → rag|eval|action|refuse`。`router_node` 检测到年假申请意图后进入 `action_node`，由 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，需显式开启）：`safety → planner ⇄ tool_executor`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：`safety → planner ⇄ tool_executor`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）：`safety → router → rag|eval|action|refuse`。`router_node` 检测到年假申请意图后进入 `action_node`，由 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
 
 两套图在受控业务动作这条链路上汇流到 **同一个 Java 权威控制面**：Python 端只产 Proposal，不执行写操作；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部由 Java 完成。
 
@@ -133,7 +133,7 @@ Confirm 首次成功后，Action 的持久化成功结果成为权威结果。�
 | `business.actions.demo-annual-leave-balance` | `5.0` |
 | `business.actions.timezone` | `Asia/Shanghai` |
 | `demo.identity.enabled` | `false` |
-| `AGENT_LOOP_ENABLED`（Python 端环境变量） | `false`（仓库部署默认；控制两套互斥状态图切换） |
+| `AGENT_LOOP_ENABLED`（Python 端环境变量） | `true`（仓库部署默认，Planner-first；`false` 显式回退 legacy） |
 
 仓库使用事务内惰性过期和数据库有界容量，不创建后台线程。`maxCompleted` 只清理未被 LeaveRequest 引用的 `CANCELLED / EXPIRED / FAILED`；成功 Action 保留，以满足外键和重放要求。本地表审计记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason；完整集中日志 / APM / 告警栈尚未实现。
 
