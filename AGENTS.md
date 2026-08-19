@@ -14,9 +14,9 @@
 
 - **Java authority boundary**：受控业务动作必须经 Java 侧 PendingAction 持久化 + nonce 校验 + 幂等确认才执行，默认关闭；ADMIN_TOKEN 为空 = Demo 模式（eval 路由全开放），生产必须设置。
 - **Python Agent Graph**：main 同时保留两套互斥状态图。`AGENT_LOOP_ENABLED=true`（仓库部署默认）走 Planner-first：`safety → planner ⇄ tool_executor`，Planner 拥有规划权、无最终业务执行授权，预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；`AGENT_LOOP_ENABLED=false`（显式回退）走 legacy Router-first：`safety → router → rag|eval|action|refuse`，意图路由 + 规则工具。Planner-first **最多支持 5 个 Tool**，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
-  - 默认可见：`rag_answer_tool` / `leave_balance_tool` / `leave_request_tool`
+  - 始终可见：`rag_answer_tool`；`employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加 `leave_balance_tool` / `leave_request_tool`
   - `allow_eval=true` 时追加：`eval_report_tool`
-  - `allow_business_actions=true` 时追加：`leave_proposal_tool`
+  - `allow_business_actions=true` 且 `employee_id` 非空时追加：`leave_proposal_tool`
   legacy Router-first 仅暴露部分 Tool，不走 `leave_proposal_tool`。
 - **可信系统字段边界**：`employee_id` / `business_date` / `trace_id` 由程序层注入，不进入 LLM `arguments`；Planner 决策结构由 Pydantic 严格白名单校验；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验。
 - **`leave_proposal_tool` 定位**：Planner-first 下生成 `action_proposal` 或 `missing_fields`（Clarification），**不执行写操作**；`confirmationNonce` 与 `PendingAction` 持久化、状态机、TTL、幂等、权限和最终数据库写入全部在 Java 侧完成。`leave_proposal_tool` **不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 `leave_balance_tool` / `leave_request_tool` 的 Python → Java 内部只读链路。

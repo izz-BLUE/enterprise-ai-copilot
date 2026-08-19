@@ -166,8 +166,8 @@ flowchart TD
 - **langgraph_agent**：LangGraph 状态图编排入口；同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换：
   - `use_planner=true`（仓库部署默认）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor`
   - `use_planner=false`（显式回退 legacy）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
-- **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`
-- **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数
+- **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`；Capability Gate 同时收缩 system/user Prompt 中的 Tool contract，并在 Planner post-validation 阶段拒绝隐藏 Tool
+- **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / employee_id / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数；只读 Tool 的 Java URL / internal token 继续由下游 Tool / JavaClient 校验
 - **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重
@@ -283,16 +283,18 @@ POST /api/agent/langgraph/chat
           │                 → route=error
           │                 （Planner 只能规划，不能授权 —— 权限边界在 tool_executor_node）
           ├── tool_executor_node
-          │     └── 校验：结构 → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
-          │           ├── 通过 → 执行 Tool；Tool 可见性由程序层按权限动态收缩（模型不能自行扩大 Tool 权限）：
-          │           │     默认 rag_answer_tool / leave_balance_tool / leave_request_tool；
+          │     └── 校验：结构 → employee_id → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
+          │           ├── 通过 → 执行 Tool；Capability Gate 由程序层按可信状态动态收缩
+          │           │     system/user Prompt 与 Planner contract（模型不能自行扩大 Tool 权限）：
+          │           │     始终 rag_answer_tool；
+          │           │     employee_id + JAVA_BASE_URL + JAVA_INTERNAL_TOKEN 齐全时追加
+          │           │     leave_balance_tool / leave_request_tool；
           │           │     allow_eval=true 追加 eval_report_tool；
-          │           │     allow_business_actions=true 追加 leave_proposal_tool
-          │           ├── 权限 / Tool boundary 拦截
-          │           │     → stop_reason=not_allowed
-          │           │     → route=refuse
-          │           │     → Tool 不执行
-          │           └── 其他拦截 → tool_history 记录 blocked，不计数
+          │           │     allow_business_actions=true 且 employee_id 非空时追加 leave_proposal_tool
+          │           ├── 任一执行前校验失败
+          │           │     → 记录 blocked observation / tool_history，不计数，Tool 不执行
+          │           │     → 回到 planner_node，由 Planner 决定下一步
+          │           └── 最终 public route 由 Agent Loop 终态的 response contract 收敛
           ├── leave_proposal_tool（Planner-first 下）：
           │     ├─ action_proposal（字段完整）
           │     │     → BusinessActionService.createPending
@@ -526,7 +528,7 @@ LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 - **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
   - 状态图：`safety → planner ⇄ tool_executor`
   - Planner 拥有规划权（Pydantic 严格白名单），没有最终业务执行授权
-  - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验
+  - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做 employee_id / 权限 / Tool 预算 / 成功签名去重校验
   - 任务拆解 / 多步规划具有有限自主规划能力，但受 Tool 白名单、权限校验、`MAX_PLANNER_STEPS=5`、`MAX_TOOL_CALLS=3` 和 Java 最终授权边界约束
   - 可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`
   - `leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`

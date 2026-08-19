@@ -1,14 +1,18 @@
 """Planner Prompt 与 PlannerDecision Schema 契约一致性测试。
 
-PLANNER_SYSTEM_PROMPT 中声明的字段名、枚举值与 JSON 示例必须与
+Planner system prompt 中声明的字段名、枚举值与 JSON 示例必须与
 app.schemas.planner_schema.PlannerDecision 保持完全一致：
 - Schema 新增/修改字段或枚举值而 Prompt 未同步 → 本文件测试失败；
-- Prompt 中的合法示例必须是 Schema 可校验通过的决策。
+- 动态 Prompt 中的合法示例必须是 Schema 可校验通过的决策；
+- 静态 Prompt 不得提前暴露当前请求不可见的 Tool。
 """
 
 import json
 
-from app.agents.planner_node import PLANNER_SYSTEM_PROMPT
+from app.agents.planner_node import (
+    PLANNER_SYSTEM_PROMPT,
+    build_planner_system_prompt,
+)
 from app.schemas.planner_schema import (
     Action,
     PlannerDecision,
@@ -49,13 +53,15 @@ def test_prompt_declares_all_action_values():
 
 
 def test_prompt_declares_all_tool_names():
+    prompt = build_planner_system_prompt(list(ToolName.__args__))
     for value in ToolName.__args__:
-        assert value in PLANNER_SYSTEM_PROMPT
+        assert value in prompt
 
 
 def test_prompt_declares_all_reason_codes():
+    prompt = build_planner_system_prompt(list(ToolName.__args__))
     for value in ReasonCode.__args__:
-        assert f'"{value}"' in PLANNER_SYSTEM_PROMPT
+        assert f'"{value}"' in prompt
 
 
 def test_prompt_requires_completion_check_before_tool_call():
@@ -78,5 +84,11 @@ def test_each_prompt_example_validates_against_schema():
 
 
 def test_examples_appear_verbatim_in_prompt():
+    prompt = build_planner_system_prompt(list(ToolName.__args__))
     for example in _LEGAL_EXAMPLES:
-        assert json.dumps(example, ensure_ascii=False) in PLANNER_SYSTEM_PROMPT
+        assert json.dumps(example, ensure_ascii=False) in prompt
+
+
+def test_static_prompt_does_not_expose_tool_names():
+    for value in ToolName.__args__:
+        assert value not in PLANNER_SYSTEM_PROMPT

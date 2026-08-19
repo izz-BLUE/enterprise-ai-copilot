@@ -61,6 +61,7 @@ class AgentEvalCase:
     allow_eval: bool = False
     allow_business_actions: bool = False
     business_date: date | None = None
+    employee_id: str = ''
     # 注入：Planner 决策序列（按顺序消费）或 Planner 异常
     planner_responses: tuple[str, ...] = ()
     planner_error: Exception | None = None
@@ -193,11 +194,11 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         case_id='009-eval-denied-without-permission',
         question='你好',
         allow_eval=False,
-        expected_stop_reason='not_allowed',
+        expected_stop_reason='invalid_decision',
         expected_tool_sequence=(),
         max_step_count=1,
         max_tool_call_count=0,
-        description='allow_eval=False 时 Planner 硬输出 eval 决策 → 程序层拒绝',
+        description='allow_eval=False 时 Planner 硬输出隐藏 eval 决策 → contract violation',
         planner_responses=(
             _tool('eval_report_tool', {'report_type': 'all'}, 'need_eval'),
         ),
@@ -304,6 +305,7 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         question='申请2026-07-20一天年假，原因为私事',
         allow_business_actions=True,
         business_date=date(2026, 7, 20),
+        employee_id='E10001',
         expected_stop_reason='task_complete',
         expected_tool_sequence=('leave_proposal_tool',),
         max_step_count=2,
