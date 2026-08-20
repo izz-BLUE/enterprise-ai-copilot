@@ -180,9 +180,14 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     private LocalDate nextWeekday(TestActionService service, int offset) {
-        LocalDate date = service.businessDate().plusDays(offset);
-        while (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
+        LocalDate date = service.businessDate();
+        int workdays = 0;
+        while (workdays < offset) {
             date = date.plusDays(1);
+            DayOfWeek dow = date.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                workdays++;
+            }
         }
         return date;
     }
