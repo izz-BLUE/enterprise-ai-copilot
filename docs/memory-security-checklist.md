@@ -26,8 +26,11 @@
 - [x] Python `MemoryExtractionInput` 仅从白名单字段构造，不把 trusted runtime signal 交给 Extractor。
 - [x] Python `MemoryWritePolicy` 对 `task_state` 递归剥离 camelCase / snake_case trusted keys，
       并对敏感字符串做保守脱敏。
+- [x] Python 脱敏**完整扫描，无长度短路**：task_state 允许到 16 KiB，超长字符串同样
+      命中 `[REDACTED]`（不允许 `"A"*5000 + " Bearer token"` 式绕过）。
 - [x] Python outbound `JavaMemoryClient` 只序列化 `action / taskType / status / taskState / summary`。
-- [x] Java `AiTaskMemoryService` 对 taskState 做第二次 trusted-key 检查和大小校验。
+- [x] Java `AiTaskMemoryService` 对 taskState 做第二次 trusted-key 检查和大小校验，
+      并对字符串值做独立内容脱敏（结构化路径替换 / JSON 字符串路径拒绝）。
 - [x] Java 侧不从 `InternalMemoryWriteRequest` body 接收 userId / employeeId / conversationId。
 - [ ] Java DTO 自身仍使用 `@JsonIgnoreProperties(ignoreUnknown = true)`；顶层 unknown-field
       rejection 不是 DTO 层的对称约束。本轮不自动改变契约，只要求 commit review 保留 Python
@@ -45,6 +48,12 @@
 ## Read / Write Isolation
 
 - [x] Read Path 只注入 `ACTIVE` memory；`COMPLETED` / `ABANDONED` / 读库异常均不伪造上下文。
+- [x] **状态机白名单由 Java 原子 SQL 强制**：无记录仅允许写 ACTIVE；ACTIVE 可 UPSERT /
+      COMPLETE / ABANDON；终态仅允许同状态幂等重放；拒绝返回 409 且不落库，
+      终态不可能被后写重新激活（并发由 PostgreSQL 行级锁序列化）。
+- [x] **Memory 生命周期由 Java 收口**：PendingAction 记录 `owner_user_id + conversation_id`；
+      确认成功 → COMPLETED；取消 / 过期 / 创建失败 / 处理失败 → ABANDONED；
+      与 PendingAction 状态变更同一事务，不依赖 LLM 猜测终态。
 - [x] `memoryContext` 不进入公共 `ChatRequest`，前端不能提交或读取该内部字段。
 - [x] MemoryContext 作为不可信历史数据，不改变 Tool 可见集合，不进入 Tool arguments。
 - [x] 数据库按 `(user_id, conversation_id)` 隔离；相同 conversationId 的不同用户不能互读 / 互写。

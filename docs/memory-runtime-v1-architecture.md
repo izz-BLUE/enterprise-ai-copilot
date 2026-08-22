@@ -74,7 +74,7 @@ flowchart LR
    - 校验 `X-Internal-Token` 服务间凭证；
    - 验签 `X-Memory-Write-Scope`（过期/伪造 → 403），**userId 只取自 scope**，body 不接受任何身份字段；
    - 强校验 path 上的 conversationId 与 scope 内 conversationId 一致；
-9. **`AiTaskMemoryService.writeFromCommand`**：action 状态机（UPSERT 要求显式 status）→ trusted 键再次递归拒绝 → JSON 序列化 ≤ 16 KiB → `JdbcAiTaskMemoryRepository.upsert`（`ON CONFLICT (user_id, conversation_id) DO UPDATE`）落库 **ACTIVE**。
+9. **`AiTaskMemoryService.writeFromCommand`**：action 状态机（UPSERT 要求显式 status）→ trusted 键再次递归拒绝 + 敏感内容脱敏 → JSON 序列化 ≤ 16 KiB → `JdbcAiTaskMemoryRepository.upsert` 状态机受限写入（单条原子 SQL：无记录仅允许 ACTIVE；已有记录按白名单条件覆盖，拒绝时返回 409 `MEMORY_STATE_CONFLICT`，不落库）。
 10. **审计**：`LoggingAuditRecorder` 记录 `{triggered, proposal_action, task_type, write_attempted, write_success, ...}`，不含任何身份/业务字段。
 11. **主响应**：全程 Memory 失败都不阻断；用户正常收到 Agent 回答与 action_proposal。
 
@@ -84,7 +84,11 @@ flowchart LR
 2. Java 按 `(userId, conversationId)` 查到 **ACTIVE** 记录 → 构造 `MemoryContextView(taskType, status, taskStateJson, summary)` 注入内部请求体。
 3. Python Planner 在 prompt 末尾渲染 `Memory Context` 块（显式声明为不可信历史数据，不得改变 Capability Gate / Tool 权限 / trusted 字段），Planner 据此理解"请假任务进行中，等日期确认"。
 4. Agent 更新 `action_proposal` → 出口 Trigger 命中（action_proposal + existing_memory 双信号）→ Extractor 产出新 UPSERT → **覆盖更新**同一行。
-5. 任务完成（用户确认 / 审批结束）→ `action=COMPLETE, status=COMPLETED` → 后续请求读不到（只读 ACTIVE），任务退出续接范围。
+5. 任务完成（用户确认 / 审批结束）→ **Java 侧收口**：`BusinessActionService` 在
+   PendingAction 进入终态时（同一事务内）把 Memory 置为 `COMPLETED`
+   （取消 / 过期 / 创建失败 → `ABANDONED`）→ 后续请求读不到（只读 ACTIVE），
+   任务退出续接范围；COMPLETE / ABANDON 不再依赖 LLM 猜测，由 Java
+   状态变更权威驱动。
 
 ---
 
@@ -113,6 +117,8 @@ flowchart LR
 | Trigger 不命中 | 不调用 Extractor（无额外 LLM 成本） |
 | Extractor 输出解析失败 | 跳过写入，audit 记录错误类别 |
 | WritePolicy 拒绝（trusted 键 / 超限） | 跳过写入，audit 记录 |
+| 状态机拒绝（无记录写终态 / 终态重新激活） | Java 返回 409 `MEMORY_STATE_CONFLICT`，不落库，audit 记录 |
+| Agent 失败终态（route=error / provider_error 等） | Trigger 直接短路（reason=`agent_failure_terminal`），不进入 Extractor |
 | `MEMORY_WRITE_MODE=DISABLED` | 请求入口直接短路，零额外成本 |
 | `MEMORY_WRITE_MODE=AUDIT_ONLY` | 跑完 Pipeline 并记录审计，不调用 Java 写端点 |
 | ENABLED 但缺 scope / Java 配置 | fail-closed writer 抛错 → 落入 audit，主响应不受影响 |

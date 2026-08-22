@@ -26,9 +26,13 @@
   - existing_memory（Phase2 Read Path 注入的历史 memory）非空：
     当前会话续接了上一轮 memory，应当尝试更新状态（避免 stale）。
 
-不触发条件（与上述互斥，safety / 短任务）：
+不触发条件（与上述互斥，safety / 短任务 / 失败终态）：
   - 完全空执行：question 空 + 无 tool 调用 + 无 action_proposal + 无 existing_memory；
-  - 仅 Safety 拦截（safe=False） → 不进入 Extractor；Safety reason 已记录。
+  - 仅 Safety 拦截（safe=False） → 不进入 Extractor；Safety reason 已记录；
+  - Agent 失败终态（route=error 或 stop_reason ∈ provider_error /
+    invalid_decision / step_budget_exhausted）→ 不进入 Extractor。
+    失败响应没有可信的任务进展，Extractor 可能依据错误文本误判 UPSERT /
+    COMPLETE / ABANDON；错误诊断走审计通道，不写任务记忆。
 
 P1-A 演进：
   Trigger 不再写死 tool name 白名单。改为持有 ``MemoryTaskTypePolicy``，
@@ -57,6 +61,15 @@ TRIGGER_REASON_EXISTING_MEMORY = 'existing_memory_present'
 
 NO_TRIGGER_REASON_NO_SIGNAL = 'no_trigger_signal'
 NO_TRIGGER_REASON_SAFETY_BLOCKED = 'safety_blocked'
+NO_TRIGGER_REASON_AGENT_FAILURE = 'agent_failure_terminal'
+
+# Agent 失败终态 stop_reason（与 langgraph_agent 响应契约一致）：
+# 这些终态下 Agent 没有可信的任务进展，不触发 Memory 写入 / 更新。
+_FAILURE_STOP_REASONS = frozenset({
+    'provider_error',
+    'invalid_decision',
+    'step_budget_exhausted',
+})
 
 
 class MemoryTriggerDecision(BaseModel):
@@ -104,8 +117,10 @@ class MemoryTriggerPolicy:
 
         行为：
           1. Safety 拦截优先：safe=False → 不触发（不与 Safety 语义重叠）；
-          2. 任意触发规则命中 → should_extract=True；
-          3. 全部规则未命中 → should_extract=False。
+          2. Agent 失败终态（route=error / stop_reason 失败集合）→ 不触发，
+             优先级高于一切正向触发信号（失败时不基于错误文本更新任务记忆）；
+          3. 任意触发规则命中 → should_extract=True；
+          4. 全部规则未命中 → should_extract=False。
 
         抛出：
           TypeError —— 入参不是 dict（防御性检查）。
@@ -122,7 +137,19 @@ class MemoryTriggerPolicy:
                 reason=NO_TRIGGER_REASON_SAFETY_BLOCKED,
             )
 
-        # 2. action_proposal 非空：业务动作链路已启动
+        # 2. Agent 失败终态：不进入 Extractor（错误诊断走审计通道）。
+        #    即使已有 ACTIVE memory / action_proposal，失败响应也不能作为
+        #    UPSERT / COMPLETE / ABANDON 的依据。
+        if (
+            agent_result.get('route') == 'error'
+            or agent_result.get('stop_reason') in _FAILURE_STOP_REASONS
+        ):
+            return MemoryTriggerDecision(
+                should_extract=False,
+                reason=NO_TRIGGER_REASON_AGENT_FAILURE,
+            )
+
+        # 3. action_proposal 非空：业务动作链路已启动
         action_proposal = agent_result.get('action_proposal')
         if action_proposal:
             return MemoryTriggerDecision(
@@ -130,7 +157,7 @@ class MemoryTriggerPolicy:
                 reason=TRIGGER_REASON_ACTION_PROPOSAL,
             )
 
-        # 3. 仅允许具备任务连续性价值的 Memory-eligible Tool 成功触发
+        # 4. 仅允许具备任务连续性价值的 Memory-eligible Tool 成功触发
         #    （白名单由 policy.eligible_tool_names() 动态提供，P1-A 起）
         eligible_tools = self._task_type_policy.eligible_tool_names()
         tool_history = agent_result.get('tool_history') or []
@@ -145,14 +172,14 @@ class MemoryTriggerPolicy:
                 reason=TRIGGER_REASON_TOOL_SUCCESS,
             )
 
-        # 4. existing_memory 非空：续接上一轮 task memory
+        # 5. existing_memory 非空：续接上一轮 task memory
         if agent_result.get('memory_context'):
             return MemoryTriggerDecision(
                 should_extract=True,
                 reason=TRIGGER_REASON_EXISTING_MEMORY,
             )
 
-        # 5. 全部未命中：纯 RAG 完成 / 完全空执行，不值得触发 Extractor
+        # 6. 全部未命中：纯 RAG 完成 / 完全空执行，不值得触发 Extractor
         return MemoryTriggerDecision(
             should_extract=False,
             reason=NO_TRIGGER_REASON_NO_SIGNAL,

@@ -9,6 +9,8 @@ public final class PendingAction {
     private final String actionId;
     private final BusinessActionType actionType;
     private final String originTraceId;
+    private final String ownerUserId;
+    private final String conversationId;
     private final String employeeId;
     private final String displayName;
     private final LocalDate startDate;
@@ -29,6 +31,7 @@ public final class PendingAction {
     private final Instant completedAt;
 
     public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
+                         String ownerUserId, String conversationId,
                          String employeeId, String displayName, LocalDate startDate,
                          LocalDate endDate, HalfDay halfDay, String reason, BigDecimal days,
                          BigDecimal balanceBefore, BigDecimal balanceAfter,
@@ -39,6 +42,8 @@ public final class PendingAction {
         this.actionId = actionId;
         this.actionType = actionType;
         this.originTraceId = originTraceId;
+        this.ownerUserId = ownerUserId;
+        this.conversationId = conversationId;
         this.employeeId = employeeId;
         this.displayName = displayName;
         this.startDate = startDate;
@@ -59,22 +64,32 @@ public final class PendingAction {
         this.completedAt = completedAt;
     }
 
+    /**
+     * 新动作工厂。ownerUserId / conversationId 是 Memory 生命周期收口的关联 key
+     * （对应 ai_task_memory 的 user_id / conversation_id），允许为 null 表示
+     * 历史数据或无 Memory 关联（收口时跳过）。
+     */
     public static PendingAction pending(String actionId, BusinessActionType actionType,
-                                        String originTraceId, String employeeId,
+                                        String originTraceId, String ownerUserId,
+                                        String conversationId, String employeeId,
                                         String displayName, LocalDate startDate,
                                         LocalDate endDate, HalfDay halfDay, String reason,
                                         BigDecimal days, BigDecimal balanceBefore,
                                         BigDecimal balanceAfter, byte[] nonceDigest,
                                         Instant createdAt, Instant expiresAt) {
-        return new PendingAction(actionId, actionType, originTraceId, employeeId, displayName,
-                startDate, endDate, halfDay, reason, days, balanceBefore, balanceAfter,
-                nonceDigest, ActionStatus.PENDING_CONFIRMATION, null, null, null, null,
+        return new PendingAction(actionId, actionType, originTraceId, ownerUserId, conversationId,
+                employeeId, displayName, startDate, endDate, halfDay, reason, days, balanceBefore,
+                balanceAfter, nonceDigest, ActionStatus.PENDING_CONFIRMATION, null, null, null, null,
                 createdAt, expiresAt, null);
     }
 
     public String actionId() { return actionId; }
     public BusinessActionType actionType() { return actionType; }
     public String originTraceId() { return originTraceId; }
+    /** Memory 收口 owner：ai_task_memory.user_id 维度；null = 无关联（历史数据）。 */
+    public String ownerUserId() { return ownerUserId; }
+    /** Memory 收口会话：ai_task_memory.conversation_id 维度；null = 无关联（历史数据）。 */
+    public String conversationId() { return conversationId; }
     public String employeeId() { return employeeId; }
     public String displayName() { return displayName; }
     public LocalDate startDate() { return startDate; }

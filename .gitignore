@@ -57,3 +57,6 @@ clash-verge.yaml
 test_out.txt
 test_q2.txt
 test_result.txt
+
+# release artifacts (deployment snapshots, tar bundles)
+releases/

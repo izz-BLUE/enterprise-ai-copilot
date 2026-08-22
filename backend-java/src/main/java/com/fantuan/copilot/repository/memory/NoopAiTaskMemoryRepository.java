@@ -13,8 +13,14 @@ public final class NoopAiTaskMemoryRepository implements AiTaskMemoryRepository 
     }
 
     @Override
-    public void upsert(String userId, String conversationId, String taskType, TaskStatus status,
-                       String taskStateJson, String summary) {
+    public boolean upsert(String userId, String conversationId, String taskType, TaskStatus status,
+                          String taskStateJson, String summary) {
+        return true;
+    }
+
+    @Override
+    public boolean transitionToTerminal(String userId, String conversationId, TaskStatus target) {
+        return false;
     }
 
     @Override

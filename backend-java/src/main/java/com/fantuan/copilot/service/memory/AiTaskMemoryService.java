@@ -5,9 +5,13 @@ import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.memory.AiTaskMemoryRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -18,8 +22,11 @@ import java.util.Optional;
  *  1. userId 永远来自服务端 VerifiedIdentity.userId()，不接受客户端传入。
  *  2. 所有方法都强制以 (userId, conversationId) 复合 key 定位，不允许只按 conversationId 查询。
  *  3. 写入前对 task_state_json / summary 做长度边界检查（与 DB CHECK 约束对齐），
- *     并拒绝任何疑似敏感字段写入。
- *  4. P0 阶段不引入 Safety Guard / Memory Write Guard / Prompt 注入 / Planner 联动。
+ *     并拒绝任何疑似敏感字段写入；字符串值做敏感内容脱敏（与 Python 同规则兜底）。
+ *  4. 状态机：无记录仅允许 ACTIVE；ACTIVE 可写入任意状态；
+ *     COMPLETED / ABANDONED 仅允许同终态幂等重放；其余转换由仓储原子 SQL 拒绝
+ *     （抛 MEMORY_STATE_CONFLICT 409），终态不可能被后写重新激活。
+ *  5. P0 阶段不引入 Safety Guard / Memory Write Guard / Prompt 注入 / Planner 联动。
  */
 @Service
 public class AiTaskMemoryService {
@@ -49,6 +56,16 @@ public class AiTaskMemoryService {
             "nonce", "idempotencyKey", "idempotency_key"
     );
 
+    /**
+     * 敏感字符串内容 marker（子串匹配、大小写不敏感），与 Python
+     * memory_write_policy._REDACT_MARKERS 对齐。结构化路径（Map）命中后
+     * 整串替换为 [REDACTED]；JSON 字符串路径（无法安全替换序列化内容）命中后拒绝。
+     */
+    static final List<String> SENSITIVE_VALUE_MARKERS = List.of(
+            "bearer ", "jwt", "password=", "password:", "token=", "token:",
+            "nonce=", "idempotency-key=");
+    static final String REDACTED = "[REDACTED]";
+
     private final AiTaskMemoryRepository repository;
     private final ObjectMapper objectMapper;
 
@@ -69,6 +86,7 @@ public class AiTaskMemoryService {
     /**
      * upsert：以 (userId, conversationId) 命中则更新，否则插入。
      * 输入做基础边界检查，越界或含敏感字段时抛 IllegalArgumentException。
+     * 状态机不允许的转换（无记录写终态 / 终态重新激活）抛 409 MEMORY_STATE_CONFLICT。
      */
     public void upsert(String userId, String conversationId, String taskType, TaskStatus status,
                        String taskStateJson, String summary) {
@@ -78,7 +96,9 @@ public class AiTaskMemoryService {
         TaskStatus safeStatus = requireStatus(status);
         String safeJson = sanitizeTaskStateJson(taskStateJson);
         String safeSummary = sanitizeSummary(summary);
-        repository.upsert(userId, conversationId, safeTaskType, safeStatus, safeJson, safeSummary);
+        if (!repository.upsert(userId, conversationId, safeTaskType, safeStatus, safeJson, safeSummary)) {
+            throw stateConflict(userId, conversationId, safeStatus);
+        }
     }
 
     /**
@@ -88,10 +108,11 @@ public class AiTaskMemoryService {
      *  1. 校验 userId / conversationId；
      *  2. trusted-key 剥离（递归）：拒绝含 FORBIDDEN_TASK_STATE_KEYS 的 taskState；
      *  3. action → status 映射（UPSERT 保留 body.status；COMPLETE→COMPLETED；ABANDON→ABANDONED）；
-     *  4. taskState → JSON 序列化 → 大小校验 → 写入；
+     *  4. taskState → JSON 序列化 → 大小校验 → 写入（状态机受限）；
      *  5. 写入后 re-fetch 拿 updated_at 返回。
      *
-     * 抛 IllegalArgumentException 用于 DTO / 业务校验失败（Controller 层映射为 400）。
+     * 抛 IllegalArgumentException 用于 DTO / 业务校验失败（Controller 层映射为 400）；
+     * 状态机拒绝映射为 409 MEMORY_STATE_CONFLICT。
      */
     public AiTaskMemory writeFromCommand(String userId, String conversationId,
                                          String action, String taskType, String status,
@@ -106,7 +127,10 @@ public class AiTaskMemoryService {
         String safeJson = serializeTaskState(sanitizedState);
         String safeSummary = sanitizeSummary(summary);
 
-        repository.upsert(userId, conversationId, safeTaskType, resolvedStatus, safeJson, safeSummary);
+        if (!repository.upsert(userId, conversationId, safeTaskType, resolvedStatus,
+                safeJson, safeSummary)) {
+            throw stateConflict(userId, conversationId, resolvedStatus);
+        }
         return repository.find(userId, conversationId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Memory upsert 后立即 re-fetch 失败: userId=" + userId
@@ -118,6 +142,24 @@ public class AiTaskMemoryService {
      */
     public void upsert(String userId, String conversationId) {
         upsert(userId, conversationId, DEFAULT_TASK_TYPE, TaskStatus.ACTIVE, "{}", "");
+    }
+
+    /**
+     * 业务终态收口：仅 ACTIVE → COMPLETED（同终态幂等）。
+     * 记录不存在或已是 ABANDONED 时返回 false，不抛错 —— 供 PendingAction
+     * 确认 / 成功等生命周期收口路径无副作用调用。
+     */
+    public boolean complete(String userId, String conversationId) {
+        return repository.transitionToTerminal(userId, conversationId, TaskStatus.COMPLETED);
+    }
+
+    /**
+     * 业务终态收口：仅 ACTIVE → ABANDONED（同终态幂等）。
+     * 记录不存在或已是 COMPLETED 时返回 false，不抛错 —— 供 PendingAction
+     * 取消 / 过期 / 创建失败等生命周期收口路径无副作用调用。
+     */
+    public boolean abandon(String userId, String conversationId) {
+        return repository.transitionToTerminal(userId, conversationId, TaskStatus.ABANDONED);
     }
 
     /** 按 (userId, conversationId) 删除。返回受影响行数：0 = 不存在或不属于该用户。 */
@@ -193,6 +235,10 @@ public class AiTaskMemoryService {
             throw new IllegalArgumentException(
                     "task_state_json 字节数超过 " + MAX_TASK_STATE_JSON_BYTES);
         }
+        // JSON 字符串路径无法在保持结构的前提下安全替换敏感内容，命中即拒绝（fail-closed）。
+        if (containsSensitiveMarker(value)) {
+            throw new IllegalArgumentException("task_state_json 包含敏感内容，禁止写入");
+        }
         return value;
     }
 
@@ -239,14 +285,36 @@ public class AiTaskMemoryService {
             }
             return cleaned;
         }
-        if (value instanceof java.util.List<?> list) {
-            java.util.List<Object> cleaned = new java.util.ArrayList<>(list.size());
+        if (value instanceof List<?> list) {
+            List<Object> cleaned = new ArrayList<>(list.size());
             for (Object item : list) {
                 cleaned.add(scrubValue(item));
             }
             return cleaned;
         }
+        if (value instanceof String text) {
+            // Java 独立内容安全边界：与 Python 同 marker 规则，命中整串替换，保持结构。
+            return containsSensitiveMarker(text) ? REDACTED : text;
+        }
         return value;
+    }
+
+    /** 子串扫描（大小写不敏感）：与 Python memory_write_policy 的脱敏规则保持一致。 */
+    static boolean containsSensitiveMarker(String value) {
+        String lowered = value.toLowerCase(Locale.ROOT);
+        for (String marker : SENSITIVE_VALUE_MARKERS) {
+            if (lowered.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static MemoryWriteException stateConflict(String userId, String conversationId,
+                                                      TaskStatus target) {
+        return new MemoryWriteException(HttpStatus.CONFLICT, "MEMORY_STATE_CONFLICT",
+                "Memory 状态机拒绝转换: target=" + target.name()
+                        + " userId=" + userId + " conversationId=" + conversationId);
     }
 
     private String serializeTaskState(Map<String, Object> sanitized) {

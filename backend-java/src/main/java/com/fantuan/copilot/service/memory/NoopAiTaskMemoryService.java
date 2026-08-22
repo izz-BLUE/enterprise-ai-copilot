@@ -34,6 +34,16 @@ public final class NoopAiTaskMemoryService extends AiTaskMemoryService {
     }
 
     @Override
+    public boolean complete(String userId, String conversationId) {
+        return false;
+    }
+
+    @Override
+    public boolean abandon(String userId, String conversationId) {
+        return false;
+    }
+
+    @Override
     public int delete(String userId, String conversationId) {
         return 0;
     }

@@ -86,27 +86,43 @@ flowchart TD
 1. `MemoryTriggerPolicy` 是 Pipeline 入口开关；
    - 仅当 `leave_proposal_tool` 成功 / 已有 ACTIVE memory / 明确延续信号
      时才进入 Extractor；
+   - **Agent 失败终态不触发**：`route=error` 或 `stop_reason ∈
+     {provider_error, invalid_decision, step_budget_exhausted}` 时直接
+     短路（reason=`agent_failure_terminal`），即使已有 ACTIVE memory /
+     action_proposal —— 失败响应没有可信任务进展，错误诊断走审计通道；
 2. `MemoryExtractor` 只接收白名单字段（`question / answer / tool_history /
    observation / existing_memory / action_proposal`），trusted 字段被
    `MemoryExtractionInput.extra='forbid'` 兜底；
 3. `MemoryWritePolicy` 是 trusted 字段清洗 + 大小限制的最终边界：
    - `task_state` 内递归剥离 forbidden 键；
-   - 字符串值命中敏感关键字 → 替换为 `[REDACTED]`；
+   - 字符串值命中敏感关键字 → 替换为 `[REDACTED]`（**完整扫描，无长度
+     短路**：task_state 允许到 16 KiB，超长字符串同样必须脱敏）；
    - `task_state` 序列化 ≤ 16 KiB；`summary` ≤ 500 chars；
-4. `MemoryQuotaPolicy` 状态机白名单（见 Phase 5E）：
-   - `(None, UPSERT)` / `(ACTIVE, UPSERT)` / `(COMPLETED, COMPLETE)` /
-     `(ABANDONED, ABANDON)` 才允许；
-5. `MemoryWriteMode` 控制 ENABLED / DISABLED：
+4. **状态机白名单**（Java 侧原子条件 SQL 强制，拒绝时返回 409
+   `MEMORY_STATE_CONFLICT`，不落库）：
+   - `(None, UPSERT-ACTIVE)` —— 首条创建；
+   - `(ACTIVE, UPSERT)` / `(ACTIVE, COMPLETE)` / `(ACTIVE, ABANDON)` —— 续写 / 终结；
+   - `(COMPLETED, COMPLETE)` / `(ABANDONED, ABANDON)` —— 幂等重放；
+   - 其余组合（无记录直接写终态、终态被 UPSERT 重新激活、终态互转）
+     一律拒绝；终态不可能被后写覆盖，并发下由 PostgreSQL 行级锁序列化；
+5. **Memory 生命周期由 Java 收口**（不依赖 LLM 猜测）：
+   - `PendingAction` 创建时记录 `owner_user_id + conversation_id`
+     （与 `ai_task_memory` 复合 key 对齐，V4 migration）；
+   - 确认成功 → Memory COMPLETED；取消 / 过期 / 处理失败 / 创建失败 →
+     Memory ABANDONED；全部与 PendingAction 状态变更在同一事务内完成；
+6. `MemoryWriteMode` 控制 ENABLED / DISABLED：
    - DISABLED 时 Dispatcher 被跳过、仍记录 audit event（写路径不丢信号）；
-6. Java 写入只信任 scope 内的 `userId`：
+7. Java 写入只信任 scope 内的 `userId`：
    - `X-Memory-Write-Scope` 由 Java 内部签发，TTL 短；
-   - path 上的 `conversationId` 与 scope 绑定，Java 侧双重校验。
+   - path 上的 `conversationId` 与 scope 绑定，Java 侧双重校验；
+   - Java 侧保留独立内容安全边界：结构化路径对敏感字符串值脱敏，
+     JSON 字符串路径命中敏感内容直接拒绝（与 Python 规则对齐）。
 
 实现入口：
 
 - Python: `app/memory/memory_pipeline.py` + `app/memory/memory_write_dispatcher.py`
-- Java:   `AiTaskMemoryService.upsert / complete / abandon`（`PendingAction`
-  体系外独立的状态机）
+- Java:   `AiTaskMemoryService.upsert / complete / abandon`（状态机原子 SQL）；
+  `BusinessActionService.closeMemory`（PendingAction 终态 → Memory 收口）
 
 ---
 

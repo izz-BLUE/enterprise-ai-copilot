@@ -256,18 +256,23 @@ public class LangGraphAgentController {
         PendingActionView pendingAction = null;
         if (pythonResponse.actionProposal() != null) {
             if (!allowBusinessActions) {
+                // Python 在响应出口已写入 Memory；动作链路不可用时收口为 ABANDONED，
+                // 避免"动作未建立但 Memory 持续提示任务进行中"。
+                memoryService.abandon(identity.userId(), conversationId);
                 return safeActionFailure(traceId, "业务动作功能未启用或当前请求无权限。");
             }
             try {
                 pendingAction = businessActionService.createPending(
                         pythonResponse.actionProposal(), traceId, presentedToken,
-                        identity.asDemoIdentity());
+                        identity.asDemoIdentity(), conversationId);
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
+                memoryService.abandon(identity.userId(), conversationId);
                 return safeActionFailure(traceId, "暂时无法生成申请草稿，请检查信息后重试。");
             } catch (RuntimeException exception) {
                 log.error("[{}] PendingAction持久化失败", traceId);
+                memoryService.abandon(identity.userId(), conversationId);
                 return safeActionFailure(traceId, "业务动作处理失败，请稍后重试。");
             }
         }

@@ -37,7 +37,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
             BusinessActionService service = first.getBean(BusinessActionService.class);
             DemoIdentity a = first.getBean(DemoIdentityService.class).requireIdentity("DEMO-001");
             pending = service.createPending(proposal(nextWeekday(new TestActionService(service), 2)),
-                    "restart-owner", null, a);
+                    "restart-owner", null, a, null);
         }
 
         try (ConfigurableApplicationContext second = startContext("9.0")) {
@@ -195,7 +195,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
     private record TestActionService(BusinessActionService delegate) {
         PendingActionView createPending(AnnualLeaveActionProposal proposal, String traceId,
                                         String adminToken) {
-            return delegate.createPending(proposal, traceId, adminToken, USER_A);
+            return delegate.createPending(proposal, traceId, adminToken, USER_A, null);
         }
 
         ActionExecutionResponse confirm(String actionId, String nonce, String idempotencyKey,

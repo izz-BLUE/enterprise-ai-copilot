@@ -84,7 +84,8 @@ class LangGraphAgentActionMappingTest {
                 "business_action", "", List.of(), true, "python-trace-999", proposal, List.of());
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
-        when(actionService.createPending(eq(proposal), eq("java-trace-123"), eq("admin"), eq(identity)))
+        when(actionService.createPending(eq(proposal), eq("java-trace-123"), eq("admin"),
+                eq(identity), anyString()))
                 .thenAnswer(invocation -> {
                     assertEquals(0, bulkhead.snapshot().get("active"));
                     return mock(PendingActionView.class);
@@ -109,8 +110,10 @@ class LangGraphAgentActionMappingTest {
         assertEquals("2026-07-16", entity.getValue().getHeaders().getFirst("X-Business-Date"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Admin-Token"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Demo-User-Id"));
-        verify(actionService).createPending(proposal, "java-trace-123", "admin", identity);
-        verify(actionService, never()).createPending(proposal, "python-trace-999", "admin", identity);
+        verify(actionService).createPending(eq(proposal), eq("java-trace-123"), eq("admin"),
+                eq(identity), anyString());
+        verify(actionService, never()).createPending(eq(proposal), eq("python-trace-999"),
+                eq("admin"), eq(identity), anyString());
     }
 
     @Test

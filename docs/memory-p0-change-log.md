@@ -142,3 +142,28 @@ Phase 标记整理；当前工作区的 Memory 实现尚未形成按阶段拆分
 
 本次 Final Audit 只新增审计文档，不修改 LangGraph、PlannerDecision、AgentState、
 Memory Runtime、Java endpoint contract 或 frontend；不执行 commit、push、deploy。
+
+## 8. 审计修复记录（audit-driven hardening）
+
+对分支 `feat/scoped-conversation-memory-p0` 的 NOT_READY 审计结论，落地四项修复：
+
+1. **状态机由 Java 原子 SQL 强制**：`JdbcAiTaskMemoryRepository.upsert` 改为
+   单条条件语句（无记录仅允许写 ACTIVE；已有记录按白名单条件覆盖），
+   `transitionToTerminal` 提供终态收口；非法转换（无记录写终态 / 终态重新激活 /
+   终态互转）返回 409 `MEMORY_STATE_CONFLICT` 且不落库。文档白名单补充
+   `(ACTIVE, COMPLETE)` / `(ACTIVE, ABANDON)` 两项（归档实现遗漏的业务必需转换）。
+   测试：`AiTaskMemoryStateMachineIntegrationTest`（20 例）。
+2. **Memory 生命周期由 Java 收口**：`business_action` 增加
+   `owner_user_id + conversation_id`（V4 migration）；`BusinessActionService`
+   在确认成功 → COMPLETED、取消 / 过期 / 创建失败 / 处理失败 → ABANDONED，
+   与 PendingAction 状态变更同一事务；`LangGraphAgentController` 在
+   PendingAction 创建失败时同步收口。测试：`BusinessActionPersistenceIntegrationTest`
+   新增 7 例生命周期用例。
+3. **脱敏长度绕过修复**：Python `memory_write_policy` 删除 4096 字符短路，
+   任意长度完整扫描；Java `AiTaskMemoryService` 增加独立内容安全边界
+   （结构化路径替换 `[REDACTED]`，JSON 字符串路径拒绝）。
+   测试：Python 超长反例 4 例 + Java 脱敏 3 例。
+4. **Trigger 失败终态短路**：`route=error` 或 `stop_reason ∈
+   {provider_error, invalid_decision, step_budget_exhausted}` 时不进入
+   Extractor（reason=`agent_failure_terminal`）。测试：
+   `TestAgentFailureShortCircuit` 6 例。

@@ -310,8 +310,10 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 - Java Read Path 只把当前 `(trusted user_id, conversationId)` 命中的 `ACTIVE` 记录转换为内部 `memoryContext`，注入 Python Planner；`COMPLETED` / `ABANDONED` 不注入。
 - Python Memory Extractor 消费不可信的历史任务数据，经过 `MemoryWritePolicy` 的 trusted-key 递归过滤、16 KiB task state 和 500 字符 summary 限制后才形成 command。
 - `MEMORY_WRITE_MODE=DISABLED`（默认）不调用 Extractor；`AUDIT_ONLY` 运行 Trigger/Extractor/Policy 但只记录元数据；`ENABLED` 通过 Java 签发的短时 scope 调用 `POST /api/internal/memory/conversations/{conversationId}/write`。
-- Memory write endpoint 只接受 `X-Internal-Token` 与 Java 签发的 `X-Memory-Write-Scope`，user_id 不来自前端、Python body、LLM 或 Memory。Memory 与 PendingAction 是两条独立生命周期。
-- Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发。
+- Memory write endpoint 只接受 `X-Internal-Token` 与 Java 签发的 `X-Memory-Write-Scope`，user_id 不来自前端、Python body、LLM 或 Memory。
+- Memory 写入受状态机白名单约束（无记录仅允许 ACTIVE；终态不可重新激活），非法转换返回 `409 MEMORY_STATE_CONFLICT` 且不落库。
+- Memory 终态由 Java 收口：PendingAction 状态变更（确认成功 → COMPLETED；取消 / 过期 / 创建失败 / 处理失败 → ABANDONED）在同一事务内终结对应 ACTIVE memory，不依赖 LLM 猜测。
+- Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发；Agent 失败终态（`route=error` 或 `provider_error` / `invalid_decision` / `step_budget_exhausted`）直接短路，不进入 Extractor。
 
 **应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
 ```json

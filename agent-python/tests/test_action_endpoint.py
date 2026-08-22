@@ -48,6 +48,7 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         trace_id="java-trace",
         employee_id="",
         use_planner=False,
+        memory_context=None,
     )
     assert response.traceId == "java-trace"
     assert response.missing_fields == ["start_date", "end_date"]

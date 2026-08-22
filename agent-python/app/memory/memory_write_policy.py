@@ -80,10 +80,12 @@ _FORBIDDEN_TASK_STATE_KEYS = frozenset({
 })
 
 # 敏感字符串值脱敏规则（非 NLP；仅保守匹配显式关键字）。
-# 子串匹配（大小写不敏感）以减小误杀面；同时限制最大匹配长度避免在长字符串上耗费过多 CPU。
+# 子串匹配（大小写不敏感）以减小误杀面。**不做长度短路**：task_state 允许到
+# 16 KiB，超长字符串同样必须完整扫描，否则 "A"*5000 + " Bearer token" 这类
+# 构造会绕过脱敏（历史缺陷，见审计）。单值最坏 16 KiB × 8 个 marker 的扫描
+# 成本远低于一次 LLM 调用，不构成性能风险。
 _REDACT_MARKERS = ('bearer ', 'jwt', 'password=', 'password:', 'token=', 'token:',
                    'nonce=', 'idempotency-key=')
-_MAX_SCAN_VALUE_LEN = 4096
 
 
 def _redact_string_value(value: str) -> tuple[str, bool]:
@@ -91,8 +93,9 @@ def _redact_string_value(value: str) -> tuple[str, bool]:
 
     返回 (新值, 是否发生脱敏)。保守策略：任意关键字命中即整串替换，
     避免错配位置产生不完整 redaction。
+    对任意长度字符串完整扫描（无长度短路）。
     """
-    if not value or len(value) > _MAX_SCAN_VALUE_LEN:
+    if not value:
         return value, False
     lowered = value.lower()
     if any(marker in lowered for marker in _REDACT_MARKERS):

@@ -3,6 +3,7 @@ package com.fantuan.copilot.repository.action;
 import com.fantuan.copilot.model.action.PendingAction;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,6 +18,8 @@ public interface PendingActionRepository {
     void markCancelled(String actionId, String message, Instant completedAt);
     void markFailed(String actionId, String failureCode, Instant completedAt);
     void markExpired(String actionId, Instant completedAt);
+    /** 待过期动作快照：供调用方在批量过期前做 Memory 收口（需 owner/conversation 关联信息）。 */
+    List<PendingAction> findExpired(Instant now);
     int expirePending(Instant now);
     void maintainBounds(int maxCompleted);
     int size();
