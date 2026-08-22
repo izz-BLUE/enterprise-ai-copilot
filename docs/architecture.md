@@ -180,6 +180,8 @@ flowchart TD
 - **tool_calling_service**：`plan_annual_leave_action` 的实现入口，由 `leave_proposal_tool` 复用；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
 - **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
 - **java_client**：Python → Java 内部只读 HTTP 客户端；仅供 `leave_balance_tool` / `leave_request_tool` 使用；不做 retry / fallback
+- **memory runtime hook**：Agent 响应出口旁路；按 `MEMORY_WRITE_MODE` 组装现有 LLM service、Trigger/Extractor/WritePolicy、Dispatcher 与 `JavaMemoryClient`，失败不阻断主响应
+- **Memory Write endpoint**：Java 只接受 `X-Internal-Token` 与 Java 签发的短时 conversation-bound scope，以 scope 的 trusted userId 进入 `AiTaskMemoryService`
 
 受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
 
@@ -322,6 +324,32 @@ POST /api/agent/langgraph/chat
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
 > **身份边界：** 正常请求使用 `app_user` 签发的 JWT；`X-Demo-User-Id` 只用于完全没有 Bearer 时的本地或受控兼容 fallback，不是认证凭证。Manager 没有审批权限。未来 DingTalk/Feishu/WeCom 等真实 OA Gateway 需要 Outbox 与异步一致性机制，不能参与当前本地 PostgreSQL 事务。
+
+### Scoped Conversation Memory P0（Agent 出口旁路）
+
+Memory 不改变 Planner / Tool Executor 的授权边界，也不属于 PendingAction。完整运行时链路为：
+
+```text
+React sessionStorage conversationId
+  → Java LangGraphAgentController
+    → VerifiedIdentity.userId() + conversationId 复合 key 读取 ACTIVE ai_task_memory
+    → 内部 body.memoryContext 注入 Python
+    → Planner 只把 memoryContext 当作不可信历史数据
+  → run_langgraph_agent result
+  → MemoryTriggerPolicy
+    → leave_proposal_tool 成功或已有 ACTIVE memory 才进入 Extractor
+  → MemoryExtractor(MemoryLLMAdapter → 现有 llm_service.call_llm)
+  → MemoryWritePolicy（trusted key / 16 KiB / 500 字符 / 状态映射）
+  → MEMORY_WRITE_MODE
+    ├─ DISABLED：入口短路，不调用 Extractor
+    ├─ AUDIT_ONLY：生成 command，仅记录元数据
+    └─ ENABLED：MemoryWriteDispatcher → JavaMemoryClient
+          → X-Internal-Token + Java 签发的短时 X-Memory-Write-Scope
+          → /api/internal/memory/conversations/{conversationId}/write
+          → Java 验签 scope 后以 scope.userId() 写入
+```
+
+身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Python 只透传 Java scope。`conversationId` 只作 namespace，Java 写入前同时校验 path 与 scope 绑定。Read Path 只注入 `ACTIVE`；`COMPLETE → COMPLETED`、`ABANDON → ABANDONED`，无 TTL、归档、向量或 Profile Memory。
 
 ## 离线知识库构建流程
 

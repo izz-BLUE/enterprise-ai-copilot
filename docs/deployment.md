@@ -112,7 +112,7 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
 | Admin Token / Evaluation 权限 | Java 后端校验 `X-Admin-Token`，通过 `X-Allow-Eval` 内部 header 告知 Python | compose `:?` 强制 `ADMIN_TOKEN` 非空 ⇒ 生产必填 | 仓库无证据 |
 
-**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署会让 Planner-first 默认开启，但受控业务动作、只读企业 Tool 仍默认关闭。对外宣称的“Planner-first + 受控业务动作公网演示”需要服务器 `.env` 显式打开 `BUSINESS_ACTIONS_ENABLED=true` 与 `DEMO_IDENTITY_ENABLED=true`；若演示包含只读企业 Tool，还需额外设置 `JAVA_INTERNAL_TOKEN` 与 `JAVA_BASE_URL`。这些 Java read 配置不是整个 Agent Loop 或 Proposal 的启动前置条件；显式设置 `AGENT_LOOP_ENABLED=false` 保留 legacy 回退能力。**且这些事实仓库不掌握**。
+**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署会让 Planner-first 默认开启，但受控业务动作、只读企业 Tool 与 Scoped Conversation Memory 写入仍默认关闭。对外宣称的“Planner-first + 受控业务动作公网演示”需要服务器 `.env` 显式打开 `BUSINESS_ACTIONS_ENABLED=true` 与 `DEMO_IDENTITY_ENABLED=true`；若演示包含只读企业 Tool，还需额外设置 `JAVA_INTERNAL_TOKEN` 与 `JAVA_BASE_URL`。Memory 真实写入还需显式设置 `MEMORY_WRITE_MODE=ENABLED`，并依赖 Java LangGraph 链路签发 scope。这些 Java read 配置不是整个 Agent Loop 或 Proposal 的启动前置条件；显式设置 `AGENT_LOOP_ENABLED=false` 保留 legacy 回退能力。**且这些事实仓库不掌握**。
 
 ### 域名和证书
 
@@ -263,16 +263,17 @@ graph LR
 | DEMO_AUTH_DEFAULT_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；不写入前端 bundle |
 | DEMO_IDENTITY_ENABLED | compose 默认未注入；仅受控演示环境显式设置 true |
 | BUSINESS_ACTIONS_ENABLED | compose 默认 `${:-false}`；启用后 Java 才接收 Proposal 并创建 PendingAction |
-| JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时 `leave_balance_tool` / `leave_request_tool` 返回 `LEAVE_READ_FORBIDDEN` |
-| JAVA_BASE_URL | compose 默认未注入；缺值时上述两个 Tool 返回 `LEAVE_READ_DISABLED` |
+| JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时只读企业 Tool 与 Memory writer 不可用，Java 不签发 Memory write scope |
+| JAVA_BASE_URL | compose 默认未注入；缺值时只读企业 Tool 返回 `LEAVE_READ_DISABLED`，Memory writer 不发起写请求 |
 | JAVA_TIMEOUT_SECONDS | compose 默认未注入；Python 端 `.env.example` 默认 5 |
+| MEMORY_WRITE_MODE | compose 默认未注入；Python 默认 `DISABLED`；`AUDIT_ONLY` 仅审计，`ENABLED` 还要求 Java LangGraph scope |
 | AGENT_LOOP_ENABLED | compose 默认 `${:-true}` 注入；Python 端镜像内默认 `true` ⇒ 走 Planner-first；显式 `false` 回退 legacy |
 
 PostgreSQL 是 Java 受控业务动作的生产强依赖：Java 等待数据库健康后启动，Flyway 自动迁移；数据库不可用时启动或健康检查失败，不会降级为内存存储。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
 本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true` 与 `DEMO_AUTH_DEFAULT_PASSWORD`；受控请假兼容演示还需 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
 
-Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。
+Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；启用真实写入还需要 Java 签发的短时 scope。
 
 ## Secret 管理
 

@@ -58,6 +58,12 @@ class AgentState(TypedDict):
     observation: str
     planner_decision: dict | None
     stop_reason: str
+    # Scoped Conversation Memory / Task Continuity P0 — Phase 2 (Read Path)。
+    # memory_context 由 Java 侧基于 (trusted user_id, conversation_id) 复合 key
+    # 仅在 ACTIVE 时注入；它属于不可信历史上下文，不会改变 Capability Gate、
+    # 当前可见 Tool 集合或任何 trusted 系统字段（employee_id / business_date /
+    # allow_eval / allow_business_actions）。
+    memory_context: dict | None
 
 
 def safety_node(state: AgentState) -> dict:
@@ -438,6 +444,7 @@ def run_langgraph_agent(
     trace_id: str = '',
     use_planner: bool = False,
     employee_id: str = '',
+    memory_context: dict | None = None,
 ) -> dict:
     """运行 LangGraph Agent。
 
@@ -450,6 +457,10 @@ def run_langgraph_agent(
       1. _finalize_action_proposal  — action_proposal / missing_fields 合法收口
       2. _finalize_response_contract — route / category / reason 公共响应契约收敛
     employee_id 由 Java 侧身份校验后注入，仅供只读企业 Tool 使用；Planner 不可见。
+
+    memory_context 为可选的 Phase 2 内存上下文：仅在 Java 侧 (userId, conversationId)
+    命中 ACTIVE 记录时由调用方通过内部请求 body 注入；缺省 None 等价于历史行为
+   （Planner 不渲染 memory block）。
     """
     graph = build_agent_loop_graph() if use_planner else build_agent_graph()
     initial: AgentState = {
@@ -469,6 +480,7 @@ def run_langgraph_agent(
         "observation": "",
         "planner_decision": None,
         "stop_reason": "",
+        "memory_context": memory_context,
     }
     # LangSmith metadata：业务 trace_id 仅用于关联定位，不覆盖 LangSmith 自身 Trace ID；
     # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。

@@ -13,6 +13,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,10 +21,10 @@ import java.util.UUID;
 @Repository
 public class JdbcPendingActionRepository implements PendingActionRepository {
     private static final String COLUMNS = """
-            action_id, action_type, origin_trace_id, employee_id, display_name,
-            start_date, end_date, half_day, reason, days, balance_before, balance_after,
-            confirmation_nonce_digest, status, idempotency_key, request_id,
-            execution_message, failure_code, created_at, expires_at, completed_at
+            action_id, action_type, origin_trace_id, owner_user_id, conversation_id,
+            employee_id, display_name, start_date, end_date, half_day, reason, days,
+            balance_before, balance_after, confirmation_nonce_digest, status, idempotency_key,
+            request_id, execution_message, failure_code, created_at, expires_at, completed_at
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -44,12 +45,13 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
         MapSqlParameterSource p = parameters(action);
         jdbc.update("""
                 INSERT INTO business_action (
-                    action_id, action_type, origin_trace_id, employee_id, display_name,
-                    start_date, end_date, half_day, reason, days, balance_before, balance_after,
-                    confirmation_nonce_digest, status, created_at, expires_at)
-                VALUES (:actionId, :actionType, :originTraceId, :employeeId, :displayName,
-                    :startDate, :endDate, :halfDay, :reason, :days, :balanceBefore, :balanceAfter,
-                    :nonceDigest, :status, :createdAt, :expiresAt)
+                    action_id, action_type, origin_trace_id, owner_user_id, conversation_id,
+                    employee_id, display_name, start_date, end_date, half_day, reason, days,
+                    balance_before, balance_after, confirmation_nonce_digest, status,
+                    created_at, expires_at)
+                VALUES (:actionId, :actionType, :originTraceId, :ownerUserId, :conversationId,
+                    :employeeId, :displayName, :startDate, :endDate, :halfDay, :reason, :days,
+                    :balanceBefore, :balanceAfter, :nonceDigest, :status, :createdAt, :expiresAt)
                 """, p);
     }
 
@@ -72,6 +74,18 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                         + "WHERE status IN ('PENDING_CONFIRMATION', 'PROCESSING')",
                 Map.of(), Integer.class);
         return count == null ? 0 : count;
+    }
+
+    @Override
+    public boolean hasActiveByOwnerAndConversation(String ownerUserId, String conversationId) {
+        if (ownerUserId == null || conversationId == null) {
+            return false;
+        }
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM business_action "
+                        + "WHERE owner_user_id = :owner AND conversation_id = :conversation "
+                        + "AND status IN ('PENDING_CONFIRMATION', 'PROCESSING')",
+                Map.of("owner", ownerUserId, "conversation", conversationId), Integer.class);
+        return count != null && count > 0;
     }
 
     @Override
@@ -127,6 +141,14 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
     }
 
     @Override
+    public List<PendingAction> findExpired(Instant now) {
+        return jdbc.query("SELECT " + COLUMNS
+                        + " FROM business_action WHERE status = 'PENDING_CONFIRMATION' "
+                        + "AND expires_at <= :now",
+                Map.of("now", Timestamp.from(now)), rowMapper);
+    }
+
+    @Override
     public void maintainBounds(int maxCompleted) {
         jdbc.update("""
                 DELETE FROM business_action
@@ -149,6 +171,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 .addValue("actionId", action.actionId())
                 .addValue("actionType", action.actionType().name())
                 .addValue("originTraceId", action.originTraceId())
+                .addValue("ownerUserId", action.ownerUserId())
+                .addValue("conversationId", action.conversationId())
                 .addValue("employeeId", action.employeeId())
                 .addValue("displayName", action.displayName())
                 .addValue("startDate", action.startDate())
@@ -167,7 +191,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
     private PendingAction map(ResultSet rs, int rowNum) throws SQLException {
         return new PendingAction(
                 rs.getString("action_id"), BusinessActionType.valueOf(rs.getString("action_type")),
-                rs.getString("origin_trace_id"), rs.getString("employee_id"),
+                rs.getString("origin_trace_id"), rs.getString("owner_user_id"),
+                rs.getString("conversation_id"), rs.getString("employee_id"),
                 rs.getString("display_name"), rs.getObject("start_date", java.time.LocalDate.class),
                 rs.getObject("end_date", java.time.LocalDate.class),
                 HalfDay.valueOf(rs.getString("half_day")), rs.getString("reason"),

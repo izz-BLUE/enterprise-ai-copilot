@@ -33,6 +33,8 @@ class ActionAuditLoggingTest {
                 BusinessActionType.ANNUAL_LEAVE_REQUEST,
                 "origin-log",
                 "DEMO-001",
+                null,
+                "DEMO-001",
                 "Demo User",
                 LocalDate.of(2026, 7, 20),
                 LocalDate.of(2026, 7, 20),
@@ -51,6 +53,7 @@ class ActionAuditLoggingTest {
                 mock(com.fantuan.copilot.repository.action.LeaveAccountRepository.class),
                 mock(com.fantuan.copilot.gateway.leave.LeaveExecutionGateway.class),
                 new ActionNonceService(),
+                mock(com.fantuan.copilot.service.memory.AiTaskMemoryService.class),
                 java.time.Clock.systemUTC());
 
         Logger logger = (Logger) LoggerFactory.getLogger(BusinessActionService.class);

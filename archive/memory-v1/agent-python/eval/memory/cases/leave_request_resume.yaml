@@ -1,0 +1,56 @@
+case_id: leave_request_resume
+description: |
+  Leave request workflow: first turn creates an ACTIVE LEAVE_REQUEST memory,
+  second turn resumes the task and the assistant must consume the existing
+  memory rather than re-asking from scratch.
+initial_context:
+  taskType: LEAVE_REQUEST
+  status: ACTIVE
+  taskState:
+    waiting_for: leave_date
+    requested_days: null
+turns:
+  - turn_index: 1
+    role: user
+    user: 我想申请年假，先帮我记一下我的进度，等下我补日期
+    memory_observation:
+      triggered: true
+      proposal:
+        action: UPSERT
+        task_type: LEAVE_REQUEST
+        status: ACTIVE
+      use_memory: false
+      recovered: false
+      tool_behavior:
+        called:
+          - leave_proposal_tool
+        blocked: []
+  - turn_index: 2
+    role: user
+    user: 接着上次，我想请 2026-09-01 到 2026-09-03 共 3 天年假
+    memory_context:
+      taskType: LEAVE_REQUEST
+      status: ACTIVE
+      taskState:
+        waiting_for: leave_date
+    memory_observation:
+      triggered: true
+      proposal:
+        action: UPSERT
+        task_type: LEAVE_REQUEST
+        status: ACTIVE
+      use_memory: true
+      recovered: true
+      tool_behavior:
+        called:
+          - leave_proposal_tool
+        blocked: []
+expected_trigger: true
+expected_action: UPSERT
+expected_task_type: LEAVE_REQUEST
+expected_status: ACTIVE
+expected_use_memory: true
+expected_tool_behavior:
+  called:
+    - leave_proposal_tool
+  blocked: []

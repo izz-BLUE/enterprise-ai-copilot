@@ -7,11 +7,13 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoRole;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,13 +55,17 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     @Autowired LeaveAccountRepository accounts;
     @Autowired LeaveRequestRepository requests;
     @Autowired BusinessActionProperties properties;
+    @Autowired AiTaskMemoryService memoryService;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactionTemplate;
     @Autowired DataSource dataSource;
 
+    private static final String CONV_LIFECYCLE = "conv-lifecycle-test";
+
     @BeforeEach
     void resetDatabase() {
         service = new TestActionService(actionService);
+        jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
@@ -77,7 +83,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     void flywaySchemaAndPendingDigestArePersisted() {
         Integer migrations = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success", Integer.class);
-        assertEquals(2, migrations);
+        assertEquals(4, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());
@@ -243,6 +249,203 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(1, actions.countActive());
     }
 
+    // ---- 同会话活动 Action 唯一性：ai_task_memory 单条记录与多活动 Action 互斥 ----
+
+    @Test
+    void sameConversationRejectsSecondActiveAction() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        ActionException exception = assertThrows(ActionException.class,
+                () -> service.createPending(proposal(nextWeekday(3)), "second", null, CONV_LIFECYCLE));
+        assertEquals("ACTION_CONVERSATION_IN_PROGRESS", exception.errorCode());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(first.actionId()).orElseThrow().status());
+        assertEquals(1, actions.countActive());
+    }
+
+    @Test
+    void rejectedDuplicateKeepsExistingMemoryActiveAndConfirmable() {
+        // 第一个动作的任务记忆为 ACTIVE
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "first task");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        // 同会话第二次创建被拒（Controller 侧不得收口既有 Memory）
+        ActionException exception = assertThrows(ActionException.class,
+                () -> service.createPending(proposal(nextWeekday(3)), "second", null, CONV_LIFECYCLE));
+        assertEquals("ACTION_CONVERSATION_IN_PROGRESS", exception.errorCode());
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status(),
+                "重复请求被拒后既有动作的 Memory 必须保持 ACTIVE");
+        // 第一个动作仍可正常确认，确认后 Memory 收口为 COMPLETED
+        service.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "first-confirm");
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+    }
+
+    @Test
+    void cancelledActionFreesSameConversationSlot() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        service.cancel(first.actionId(), first.confirmationNonce(), null, "cancel");
+        PendingActionView second = service.createPending(proposal(nextWeekday(3)), "second", null,
+                CONV_LIFECYCLE);
+        assertNotNull(second.confirmationNonce());
+    }
+
+    @Test
+    void expiredActionFreesSameConversationSlot() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        jdbc.update("UPDATE business_action SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' "
+                + "WHERE action_id = ?", first.actionId());
+        // createPending 内先批量过期，随后同会话检查应通过
+        PendingActionView second = service.createPending(proposal(nextWeekday(3)), "second", null,
+                CONV_LIFECYCLE);
+        assertNotNull(second.confirmationNonce());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void sameConversationGuardIsScopedPerConversation() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        // 不同 conversation 不受影响
+        PendingActionView other = service.createPending(proposal(nextWeekday(3)), "other", null,
+                "conv-lifecycle-other");
+        assertNotNull(other.confirmationNonce());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(first.actionId()).orElseThrow().status());
+    }
+
+    @Test
+    void concurrentCreationSameConversationAllowsAtMostOne() throws Exception {
+        List<Object> results = runTogether(
+                () -> createResultWithConversation(nextWeekday(2), CONV_LIFECYCLE),
+                () -> createResultWithConversation(nextWeekday(3), CONV_LIFECYCLE));
+        assertEquals(1, results.stream().filter(PendingActionView.class::isInstance).count());
+        assertEquals(1, results.stream()
+                .filter(value -> "ACTION_CONVERSATION_IN_PROGRESS".equals(value)).count());
+        assertEquals(1, actions.countActive());
+    }
+
+    // ---- Memory 生命周期收口：PendingAction 终态驱动 ACTIVE Memory 终结 ----
+
+    @Test
+    void confirmClosesActiveMemoryAsCompleted() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null,
+                CONV_LIFECYCLE);
+        service.confirm(pending.actionId(), pending.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "confirm");
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void confirmReplayKeepsMemoryCompleted() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null,
+                CONV_LIFECYCLE);
+        service.confirm(pending.actionId(), pending.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "first");
+        // 幂等重放确认：Memory 保持 COMPLETED（COMPLETED → COMPLETE 白名单幂等）
+        service.confirm(pending.actionId(), pending.confirmationNonce(),
+                actions.find(pending.actionId()).orElseThrow().idempotencyKey().toString(),
+                null, "replay");
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void cancelClosesActiveMemoryAsAbandoned() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null,
+                CONV_LIFECYCLE);
+        service.cancel(pending.actionId(), pending.confirmationNonce(), null, "cancel");
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void expiryClosesActiveMemoryAsAbandoned() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null,
+                CONV_LIFECYCLE);
+        jdbc.update("UPDATE business_action SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' "
+                + "WHERE action_id = ?", pending.actionId());
+        assertThrows(ActionException.class, () -> service.confirm(pending.actionId(),
+                pending.confirmationNonce(), UUID.randomUUID().toString(), null, "expired"));
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void batchExpiryDuringCreateClosesMemories() {
+        // Python 先写 Memory，Java 后创建 PendingAction（生产顺序）
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "first task");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "origin", null,
+                CONV_LIFECYCLE);
+        jdbc.update("UPDATE business_action SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' "
+                + "WHERE action_id = ?", first.actionId());
+
+        memoryService.upsert(USER_A.userId(), "conv-lifecycle-b", "GENERIC", TaskStatus.ACTIVE,
+                "{}", "second task");
+        service.createPending(proposal(nextWeekday(3)), "origin", null, "conv-lifecycle-b");
+
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status(),
+                "批量过期应同步收口关联 Memory");
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER_A.userId(), "conv-lifecycle-b").orElseThrow().status(),
+                "未过期的动作 Memory 不受影响");
+    }
+
+    @Test
+    void staleFailureClosesActiveMemoryAsAbandoned() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        // 两个 action 都在余额 5.0 时创建（创建不扣余额）；first 确认后余额变为 4.0，
+        // stale 的 balanceBefore(5.0) 与当前余额不一致 → ACTION_STALE
+        memoryService.upsert(USER_A.userId(), "conv-lifecycle-stale", "GENERIC", TaskStatus.ACTIVE,
+                "{}", "stale task");
+        PendingActionView stale = service.createPending(proposal(nextWeekday(3)), "stale", null,
+                "conv-lifecycle-stale");
+        service.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "first-confirm");
+
+        ActionException exception = assertThrows(ActionException.class, () -> service.confirm(
+                stale.actionId(), stale.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "stale-confirm"));
+        assertEquals("ACTION_STALE", exception.errorCode());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), "conv-lifecycle-stale").orElseThrow().status());
+    }
+
+    @Test
+    void actionWithoutMemoryLinkSkipsClosure() {
+        // conversationId=null 的历史路径：收口无副作用跳过，Memory 保持 ACTIVE
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "unlinked");
+        PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
+        service.confirm(pending.actionId(), pending.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "confirm");
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
     private Object confirmResult(PendingActionView pending) {
         try {
             return service.confirm(pending.actionId(), pending.confirmationNonce(),
@@ -255,6 +458,15 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     private Object createResult(LocalDate date) {
         try {
             return service.createPending(proposal(date), UUID.randomUUID().toString(), null);
+        } catch (ActionException exception) {
+            return exception.errorCode();
+        }
+    }
+
+    private Object createResultWithConversation(LocalDate date, String conversationId) {
+        try {
+            return service.createPending(proposal(date), UUID.randomUUID().toString(), null,
+                    conversationId);
         } catch (ActionException exception) {
             return exception.errorCode();
         }
@@ -320,7 +532,12 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     private record TestActionService(BusinessActionService delegate) {
         PendingActionView createPending(AnnualLeaveActionProposal proposal, String traceId,
                                         String adminToken) {
-            return delegate.createPending(proposal, traceId, adminToken, USER_A);
+            return delegate.createPending(proposal, traceId, adminToken, USER_A, null);
+        }
+
+        PendingActionView createPending(AnnualLeaveActionProposal proposal, String traceId,
+                                        String adminToken, String conversationId) {
+            return delegate.createPending(proposal, traceId, adminToken, USER_A, conversationId);
         }
 
         ActionExecutionResponse confirm(String actionId, String nonce, String idempotencyKey,

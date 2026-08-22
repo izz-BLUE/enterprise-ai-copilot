@@ -117,7 +117,7 @@
 
 ## 中期计划（Planned）
 
-- [ ] 多轮对话上下文管理
+- [ ] 扩展 P0 scoped task memory 的场景覆盖与质量评估（不包含 Profile/Vector Memory）
 - [ ] 文档上传与知识库管理接口
 - [ ] 结构化日志（JSON 格式）
 

@@ -11,6 +11,7 @@ import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoRole;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -48,7 +49,7 @@ class BusinessActionServiceTest {
     @Test
     void validProposalStoresOnlyNonceDigestAndDoesNotDeductBalance() {
         Fixture f = fixture();
-        PendingActionView view = f.service.createPending(standardProposal(), "origin", ADMIN, USER_A);
+        PendingActionView view = f.service.createPending(standardProposal(), "origin", ADMIN, USER_A, null);
         ArgumentCaptor<PendingAction> captor = ArgumentCaptor.forClass(PendingAction.class);
         verify(f.actions).saveNew(captor.capture());
         assertNotNull(view.confirmationNonce());
@@ -62,38 +63,56 @@ class BusinessActionServiceTest {
         Fixture f = fixture();
         f.properties.setEnabled(false);
         assertCode("BUSINESS_ACTIONS_DISABLED", () -> f.service.createPending(
-                standardProposal(), "o", ADMIN, USER_A));
+                standardProposal(), "o", ADMIN, USER_A, null));
         f.properties.setEnabled(true);
         assertCode("ADMIN_REQUIRED", () -> f.service.createPending(
-                standardProposal(), "o", "wrong", USER_A));
+                standardProposal(), "o", "wrong", USER_A, null));
 
         when(f.actions.countActive()).thenReturn(100);
         assertCode("ACTION_CAPACITY_EXCEEDED", () -> f.service.createPending(
-                standardProposal(), "o", ADMIN, USER_A));
+                standardProposal(), "o", ADMIN, USER_A, null));
         when(f.actions.countActive()).thenReturn(0);
         when(f.accounts.findBalanceForUpdate(anyString())).thenReturn(Optional.of(BigDecimal.ZERO));
         assertCode("BUSINESS_RULE_VIOLATION", () -> f.service.createPending(
-                standardProposal(), "o", ADMIN, USER_A));
+                standardProposal(), "o", ADMIN, USER_A, null));
         when(f.accounts.findBalanceForUpdate(anyString())).thenReturn(Optional.of(new BigDecimal("5.0")));
         when(f.gateway.hasConflict(anyString(), any(), any())).thenReturn(true);
         assertCode("BUSINESS_RULE_VIOLATION", () -> f.service.createPending(
-                standardProposal(), "o", ADMIN, USER_A));
+                standardProposal(), "o", ADMIN, USER_A, null));
+    }
+
+    @Test
+    void sameConversationRejectsSecondActiveAction() {
+        Fixture f = fixture();
+        when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1")).thenReturn(true);
+        assertCode("ACTION_CONVERSATION_IN_PROGRESS", () -> f.service.createPending(
+                standardProposal(), "o", ADMIN, USER_A, "conv-1"));
+        verify(f.actions, never()).saveNew(any());
+    }
+
+    @Test
+    void nullConversationSkipsSameConversationGuard() {
+        Fixture f = fixture();
+        PendingActionView view = f.service.createPending(
+                standardProposal(), "o", ADMIN, USER_A, null);
+        assertNotNull(view.confirmationNonce());
+        verify(f.actions, never()).hasActiveByOwnerAndConversation(anyString(), anyString());
     }
 
     @ParameterizedTest
     @MethodSource("invalidProposals")
     void javaRevalidatesUntrustedProposal(AnnualLeaveActionProposal proposal) {
         assertCode("BUSINESS_RULE_VIOLATION",
-                () -> fixture().service.createPending(proposal, "origin", ADMIN, USER_A));
+                () -> fixture().service.createPending(proposal, "origin", ADMIN, USER_A, null));
     }
 
     @Test
     void weekendAndHalfDayCalculationsAreAuthoritative() {
         Fixture f = fixture();
         PendingActionView range = f.service.createPending(proposal(LocalDate.of(2026, 7, 17),
-                LocalDate.of(2026, 7, 20), HalfDay.NONE, "x"), "o", ADMIN, USER_A);
+                LocalDate.of(2026, 7, 20), HalfDay.NONE, "x"), "o", ADMIN, USER_A, null);
         PendingActionView half = f.service.createPending(proposal(LocalDate.of(2026, 7, 21),
-                LocalDate.of(2026, 7, 21), HalfDay.AM, "x"), "o", ADMIN, USER_A);
+                LocalDate.of(2026, 7, 21), HalfDay.AM, "x"), "o", ADMIN, USER_A, null);
         assertEquals(new BigDecimal("2.0"), range.summary().days());
         assertEquals(new BigDecimal("0.5"), half.summary().days());
     }
@@ -123,7 +142,7 @@ class BusinessActionServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
         BusinessActionService service = new BusinessActionService(properties,
                 new AdminAccessService(ADMIN), actions, accounts, gateway,
-                new ActionNonceService(), clock);
+                new ActionNonceService(), mock(AiTaskMemoryService.class), clock);
         return new Fixture(properties, actions, accounts, gateway, service);
     }
 

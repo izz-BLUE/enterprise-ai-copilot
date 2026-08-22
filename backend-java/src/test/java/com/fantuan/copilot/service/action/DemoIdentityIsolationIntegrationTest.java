@@ -120,7 +120,7 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
     private PendingActionView create(DemoIdentity identity, LocalDate date) {
         return service.createPending(new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, date, date,
-                "identity isolation test", HalfDay.NONE), "origin", null, identity);
+                "identity isolation test", HalfDay.NONE), "origin", null, identity, null);
     }
 
     private void confirm(PendingActionView pending, DemoIdentity identity) {

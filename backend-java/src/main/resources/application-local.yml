@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/enterprise_ai_copilot}
+    username: ${SPRING_DATASOURCE_USERNAME:copilot}
+    password: ${SPRING_DATASOURCE_PASSWORD:copilot_dev}
+    driver-class-name: org.postgresql.Driver
+
+  flyway:
+    enabled: true

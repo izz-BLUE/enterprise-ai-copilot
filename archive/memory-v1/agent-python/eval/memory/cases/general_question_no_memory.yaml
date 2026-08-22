@@ -1,0 +1,22 @@
+case_id: general_question_no_memory
+description: |
+  Plain RAG-style knowledge question that has no cross-request task state.
+  Memory extractor should observe no trigger and emit a NONE proposal.
+initial_context: {}
+turns:
+  - turn_index: 1
+    role: user
+    user: 公司的年假制度是怎么规定的？一年有几天？
+    memory_observation:
+      triggered: false
+      proposal:
+        action: NONE
+      use_memory: false
+      recovered: false
+      tool_behavior: []
+expected_trigger: false
+expected_action: NONE
+expected_task_type: null
+expected_status: null
+expected_use_memory: false
+expected_tool_behavior: []

@@ -101,6 +101,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
                         .requestMatchers("/api/agent/**").authenticated()
+                        // Memory write authenticates with X-Internal-Token plus a Java-signed,
+                        // conversation-bound scope; it must not require an end-user JWT.
+                        .requestMatchers("/api/internal/memory/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint(errors.authenticationEntryPoint())
@@ -116,6 +119,9 @@ public class SecurityConfig {
         return request -> {
             String path = request.getRequestURI().substring(request.getContextPath().length());
             if (path.startsWith("/api/internal/leave/")) {
+                return null;
+            }
+            if (path.startsWith("/api/internal/memory/")) {
                 return null;
             }
             return delegate.resolve(request);

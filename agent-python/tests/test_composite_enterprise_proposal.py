@@ -125,8 +125,10 @@ class TestAgentLoopProposalPath:
         assert result['stop_reason'] == 'task_complete'
         # Executor 把 action_proposal 写回 State
         assert result['action_proposal']['action_type'] == 'ANNUAL_LEAVE_REQUEST'
-        assert result['action_proposal']['start_date'] == '2026-09-01'
-        assert result['action_proposal']['end_date'] == '2026-09-05'
+        # Executor 解析 Tool observation 时,把 ISO date 还原为 Python date 对象
+        # (对下游 strict Pydantic schema 友好)。本测试断言不依赖序列化方向。
+        assert result['action_proposal']['start_date'] == date(2026, 9, 1)
+        assert result['action_proposal']['end_date'] == date(2026, 9, 5)
         assert result['missing_fields'] == []
         # 不允许把 actionId / nonce / employeeId 等敏感字段泄漏
         serialized = str(result['action_proposal'])
@@ -243,7 +245,7 @@ class TestAgentLoopProposalPath:
 
         proposal_mock.invoke.assert_called_once()
         assert result['stop_reason'] == 'task_complete'
-        assert result['action_proposal']['start_date'] == '2026-09-01'
+        assert result['action_proposal']['start_date'] == date(2026, 9, 1)
 
 
 class TestExecutorPermissionBoundary:
@@ -315,7 +317,7 @@ class TestExecutorPermissionBoundary:
         assert args_dict['question'] == '申请2026-09-01一天年假，原因为私事'
         assert args_dict['business_date'] == BUSINESS_DATE.isoformat()
         assert args_dict['trace_id'] == 'trace-executor'
-        assert result['action_proposal']['start_date'] == '2026-09-01'
+        assert result['action_proposal']['start_date'] == date(2026, 9, 1)
         assert result['missing_fields'] == []
         assert result['stop_reason'] == 'tool_executed'
 
@@ -358,7 +360,7 @@ class TestActionProposalFinalization:
             _proposal_payload('2026-09-01', '2026-09-01'),
         )
         assert result['stop_reason'] == 'task_complete'
-        assert result['action_proposal']['start_date'] == '2026-09-01'
+        assert result['action_proposal']['start_date'] == date(2026, 9, 1)
         assert result['missing_fields'] == []
 
     def test_clarification_then_finish_keeps_missing_fields(self):

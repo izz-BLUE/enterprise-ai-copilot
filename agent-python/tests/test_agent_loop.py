@@ -329,7 +329,7 @@ class TestGuardsPreserved:
             )
         assert result['stop_reason'] == 'task_complete'
         assert result['action_proposal']['action_type'] == 'ANNUAL_LEAVE_REQUEST'
-        assert result['action_proposal']['start_date'] == '2026-07-20'
+        assert result['action_proposal']['start_date'] == date(2026, 7, 20)
         assert result['missing_fields'] == []
         planner.assert_not_called()  # Tool 已 stub，受控链路未直接触发
         serialized = str(result['action_proposal'])

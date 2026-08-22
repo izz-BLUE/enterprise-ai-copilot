@@ -11,10 +11,12 @@ import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -47,6 +50,7 @@ public class BusinessActionService {
     private final LeaveAccountRepository accounts;
     private final LeaveExecutionGateway leaveExecutionGateway;
     private final ActionNonceService nonceService;
+    private final AiTaskMemoryService memoryService;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -56,6 +60,7 @@ public class BusinessActionService {
                                  LeaveAccountRepository accounts,
                                  LeaveExecutionGateway leaveExecutionGateway,
                                  ActionNonceService nonceService,
+                                 AiTaskMemoryService memoryService,
                                  Clock clock) {
         this.properties = properties;
         this.adminAccessService = adminAccessService;
@@ -63,6 +68,7 @@ public class BusinessActionService {
         this.accounts = accounts;
         this.leaveExecutionGateway = leaveExecutionGateway;
         this.nonceService = nonceService;
+        this.memoryService = memoryService;
         this.clock = clock;
     }
 
@@ -77,21 +83,38 @@ public class BusinessActionService {
         requireEnabledAndAdmin(presentedToken);
     }
 
+    /**
+     * 创建待确认动作。conversationId 来自 Java 侧服务端解析的会话 ID（与 Memory
+     * 复合 key 对齐）；ownerUserId 取自 trusted DemoIdentity.userId()。二者用于
+     * 动作终态时收口 ACTIVE Memory，允许为 null（历史数据 / 无 Memory 关联）。
+     */
     @Transactional
     public PendingActionView createPending(AnnualLeaveActionProposal proposal,
                                            String originTraceId,
                                            String presentedToken,
-                                           DemoIdentity identity) {
+                                           DemoIdentity identity,
+                                           String conversationId) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
         ValidatedLeave validated = validate(proposal);
         Instant now = clock.instant();
 
         actions.lockControl();
+        List<PendingAction> expired = actions.findExpired(now);
         actions.expirePending(now);
+        // 批量过期动作先收口 Memory（与 PendingAction 同一事务，避免泄漏 ACTIVE 记忆）
+        expired.forEach(action -> closeMemory(action, TaskStatus.ABANDONED));
         if (actions.countActive() >= properties.getMaxPending()) {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
+        }
+        // 同一会话至多一个活动动作：ai_task_memory 以 (user_id, conversation_id) 为唯一键，
+        // 多活动动作会互相终结对方的任务记忆（任一终态都会收口整条会话 Memory）。
+        // conversationId 为 null（无 Memory 关联的历史路径）时不做限制。
+        if (conversationId != null && identity.userId() != null
+                && actions.hasActiveByOwnerAndConversation(identity.userId(), conversationId)) {
+            throw new ActionException(HttpStatus.CONFLICT, "ACTION_CONVERSATION_IN_PROGRESS",
+                    "当前会话已有待确认的申请，请先确认或取消后再发起新申请。", null, null);
         }
 
         BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
@@ -108,6 +131,7 @@ public class BusinessActionService {
         ActionNonceService.Nonce nonce = nonceService.create();
         PendingAction action = PendingAction.pending(randomActionId(),
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, originTraceId,
+                identity.userId(), conversationId,
                 identity.employeeId(), identity.displayName(),
                 proposal.startDate(), proposal.endDate(), proposal.halfDay(), validated.reason(),
                 validated.days(), balanceBefore, balanceAfter, nonce.digest(), now,
@@ -136,6 +160,8 @@ public class BusinessActionService {
         verifyNonce(action, confirmationNonce);
 
         if (action.status() == ActionStatus.SUCCEEDED) {
+            // 幂等重放：Memory 收口同样幂等（COMPLETED → COMPLETE 白名单内）
+            closeMemory(action, TaskStatus.COMPLETED);
             return succeededResponse(action, traceId, true);
         }
         if (action.status() == ActionStatus.PROCESSING) {
@@ -155,6 +181,7 @@ public class BusinessActionService {
             actions.markFailed(action.actionId(), "ACTION_STALE", now);
             audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.FAILED,
                     "ACTION_STALE", null, now);
+            closeMemory(action, TaskStatus.ABANDONED);
             throw new ActionStaleException(action.actionId());
         }
 
@@ -166,6 +193,8 @@ public class BusinessActionService {
         actions.markSucceeded(action.actionId(), requestId, SUCCESS_MESSAGE, now);
         audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
                 "ACTION_SUCCEEDED", requestId, now);
+        // 动作最终成功：Memory 在同一事务内收口为 COMPLETED，不再注入后续 Planner
+        closeMemory(action, TaskStatus.COMPLETED);
         return new ActionExecutionResponse(action.actionId(), action.actionType(),
                 ActionStatus.SUCCEEDED, requestId, SUCCESS_MESSAGE, false, now,
                 action.originTraceId(), traceId);
@@ -183,6 +212,7 @@ public class BusinessActionService {
         expireIfNeeded(action, now);
         verifyNonce(action, confirmationNonce);
         if (action.status() == ActionStatus.CANCELLED) {
+            closeMemory(action, TaskStatus.ABANDONED);
             return cancelledResponse(action, traceId, true);
         }
         if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
@@ -191,6 +221,7 @@ public class BusinessActionService {
         actions.markCancelled(action.actionId(), CANCELLED_MESSAGE, now);
         audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.CANCELLED,
                 "ACTION_CANCELLED", null, now);
+        closeMemory(action, TaskStatus.ABANDONED);
         return new ActionExecutionResponse(action.actionId(), action.actionType(),
                 ActionStatus.CANCELLED, null, CANCELLED_MESSAGE, false, now,
                 action.originTraceId(), traceId);
@@ -221,10 +252,29 @@ public class BusinessActionService {
     private void expireIfNeeded(PendingAction action, Instant now) {
         if (action.status() == ActionStatus.PENDING_CONFIRMATION && !now.isBefore(action.expiresAt())) {
             actions.markExpired(action.actionId(), now);
+            closeMemory(action, TaskStatus.ABANDONED);
             throw new ActionExpiredAfterUpdateException(action.actionId());
         }
         if (action.status() == ActionStatus.EXPIRED) {
             throw error(HttpStatus.GONE, "ACTION_EXPIRED", "该申请草稿已过期，请重新生成。", action);
+        }
+    }
+
+    /**
+     * Memory 生命周期收口：PendingAction 进入终态时同步终结 ACTIVE 任务记忆，
+     * 保证"动作已确认 / 取消 / 过期后 Memory 不再注入 Planner"。
+     * ownerUserId / conversationId 为 null（历史数据）时跳过；
+     * 记录不存在或已是另一终态时由 AiTaskMemoryService 幂等返回 false。
+     * 与 PendingAction 状态变更在同一事务内执行。
+     */
+    private void closeMemory(PendingAction action, TaskStatus target) {
+        if (action.ownerUserId() == null || action.conversationId() == null) {
+            return;
+        }
+        if (target == TaskStatus.COMPLETED) {
+            memoryService.complete(action.ownerUserId(), action.conversationId());
+        } else {
+            memoryService.abandon(action.ownerUserId(), action.conversationId());
         }
     }
 
