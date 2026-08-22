@@ -32,8 +32,15 @@ class MemoryWriteScopeServiceTest {
     void tamperedScopeIsRejected() {
         MemoryWriteScopeService service = serviceAt(NOW);
         String token = service.issue("U10001", "conversation-a");
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("A") ? "B" : "A");
+
+        // 篡改语义字段（expiry 数值），确定性触发签名校验失败。
+        // 注意：不能只篡改 sig 的最后一个 base64url 字符 —— 其低 2 bit 是
+        // padding 冗余位，sig 以 A/B/C/D 结尾时（约 6.25% 概率）篡改后解码
+        // 字节不变，验证仍通过，导致断言不稳定（历史偶发失败根因）。
+        String[] parts = token.split("\\.", -1);
+        long expiresAt = Long.parseLong(parts[3]) + 1;
+        String tampered = String.join(".", parts[0], parts[1], parts[2],
+                String.valueOf(expiresAt), parts[4], parts[5]);
 
         assertThrows(IllegalArgumentException.class, () -> service.verify(tampered));
     }

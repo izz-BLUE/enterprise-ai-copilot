@@ -96,7 +96,20 @@ public class MemoryWriteController {
                 traceId, scope.userId(), safeConversationId,
                 request.action(), request.taskType(), request.status());
 
-        // 4. 委托 Service 写入
+        // 4. Python 写入口只接受 UPSERT + ACTIVE：
+        //    终态（COMPLETED / ABANDONED）由 Java PendingAction 生命周期在同一
+        //    事务内收口（BusinessActionService.closeMemory → complete/abandon），
+        //    Python / LLM 不得因为输出或重复请求而终结业务动作对应的 Memory。
+        //    拒绝不落库，返回明确错误码（与 AiTaskMemoryService 状态机 409 语义对齐）。
+        if (isTerminalAction(request.action()) || isTerminalStatus(request.status())) {
+            log.warn("[{}] Memory write 拒绝: Python 写入口不允许终态命令 action={} status={}",
+                    traceId, request.action(), request.status());
+            throw new MemoryWriteException(HttpStatus.CONFLICT,
+                    "MEMORY_TERMINAL_NOT_ALLOWED",
+                    "Memory 写入口只接受 UPSERT + ACTIVE；终态由 Java 业务生命周期收口。");
+        }
+
+        // 5. 委托 Service 写入
         AiTaskMemory saved;
         try {
             saved = memoryService.writeFromCommand(
@@ -143,6 +156,14 @@ public class MemoryWriteController {
             HttpServletRequest httpRequest) {
         return write(conversationId, internalToken,
                 httpRequest.getHeader("X-Memory-Write-Scope"), request, httpRequest);
+    }
+
+    private static boolean isTerminalAction(String action) {
+        return "COMPLETE".equals(action) || "ABANDON".equals(action);
+    }
+
+    private static boolean isTerminalStatus(String status) {
+        return "COMPLETED".equals(status) || "ABANDONED".equals(status);
     }
 
     private static String sanitizeConversationId(String raw) {

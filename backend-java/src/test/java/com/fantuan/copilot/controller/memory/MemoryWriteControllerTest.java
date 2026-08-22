@@ -152,6 +152,41 @@ class MemoryWriteControllerTest {
     }
 
     @Test
+    void pythonWriteEndpointRejectsTerminalActions() {
+        // 终态只能由 Java PendingAction 生命周期收口；Python 写入口一律拒绝。
+        InternalMemoryWriteRequest complete = new InternalMemoryWriteRequest(
+                "COMPLETE", "LEAVE_REQUEST", "COMPLETED", new LinkedHashMap<>(), "done");
+        var exception = assertThrows(MemoryWriteException.class,
+                () -> call(USER_A, CONV, complete, INTERNAL_TOKEN));
+        assertEquals("MEMORY_TERMINAL_NOT_ALLOWED", exception.errorCode());
+        assertEquals(409, exception.httpStatus().value());
+
+        InternalMemoryWriteRequest abandon = new InternalMemoryWriteRequest(
+                "ABANDON", "LEAVE_REQUEST", "ABANDONED", new LinkedHashMap<>(), "cancelled");
+        exception = assertThrows(MemoryWriteException.class,
+                () -> call(USER_A, CONV, abandon, INTERNAL_TOKEN));
+        assertEquals("MEMORY_TERMINAL_NOT_ALLOWED", exception.errorCode());
+        verify(memoryService, never()).writeFromCommand(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void pythonWriteEndpointRejectsTerminalStatusViaUpsert() {
+        // UPSERT + COMPLETED / ABANDONED 是终态的伪装写法，同样拒绝且不落库。
+        InternalMemoryWriteRequest upsertCompleted = new InternalMemoryWriteRequest(
+                "UPSERT", "LEAVE_REQUEST", "COMPLETED", new LinkedHashMap<>(), "done");
+        var exception = assertThrows(MemoryWriteException.class,
+                () -> call(USER_A, CONV, upsertCompleted, INTERNAL_TOKEN));
+        assertEquals("MEMORY_TERMINAL_NOT_ALLOWED", exception.errorCode());
+
+        InternalMemoryWriteRequest upsertAbandoned = new InternalMemoryWriteRequest(
+                "UPSERT", "LEAVE_REQUEST", "ABANDONED", new LinkedHashMap<>(), "cancelled");
+        exception = assertThrows(MemoryWriteException.class,
+                () -> call(USER_A, CONV, upsertAbandoned, INTERNAL_TOKEN));
+        assertEquals("MEMORY_TERMINAL_NOT_ALLOWED", exception.errorCode());
+        verify(memoryService, never()).writeFromCommand(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void responseDoesNotExposeScopeOwner() {
         when(memoryService.writeFromCommand(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(saved(USER_A, CONV, TaskStatus.ACTIVE));

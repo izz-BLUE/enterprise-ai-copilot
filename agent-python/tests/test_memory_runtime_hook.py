@@ -32,7 +32,12 @@ from app.memory.memory_pipeline import (
     MemoryPipelineError,
     MemoryPipelineResult,
 )
-from app.memory.memory_runtime_hook import MemoryRuntimeHook, MemoryRuntimeResult
+from app.memory.memory_runtime_hook import (
+    TERMINAL_COMMAND_BLOCKED,
+    MemoryRuntimeHook,
+    MemoryRuntimeResult,
+)
+from app.memory.memory_audit import LoggingAuditRecorder
 from app.memory.memory_write_dispatcher import (
     MemoryWriteDispatcher,
     MemoryWriteDispatcherError,
@@ -640,6 +645,154 @@ class TestPipelineResultPassthrough:
 
         assert result.pipeline_result is full_result
         assert result.pipeline_result.error is err
+
+
+# ---------------------------------------------------------------------------
+# 业务动作链路终态命令拦截（terminal_command_blocked）
+# ---------------------------------------------------------------------------
+
+
+class TestBusinessActionTerminalBlocked:
+    """业务动作链路（action_proposal 非空 / leave_proposal_tool 成功）下，
+    COMPLETE / ABANDON 终态命令必须被程序层拦截：
+      - Dispatcher 不被调用（不写 Java）；
+      - written=False；
+      - audit 记录 error_type=terminal_command_blocked；
+      - 主响应不被阻断（error=None）。
+    终态只能由 Java PendingAction 生命周期收口。
+    """
+
+    def _hook_with_audit(self, pipeline, dispatcher):
+        audit = LoggingAuditRecorder()
+        hook = MemoryRuntimeHook(
+            pipeline=pipeline,
+            dispatcher=dispatcher,
+            audit_recorder=audit,
+            write_execution_policy=make_execution_policy('ENABLED'),
+        )
+        return hook, audit
+
+    def test_business_action_complete_blocked(self):
+        pipeline = _make_pipeline(
+            triggered=True,
+            command=_make_command(action='COMPLETE', status='COMPLETED'),
+            proposal=_make_proposal(action='COMPLETE', status='COMPLETED'),
+        )
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(action_proposal={'action_type': 'ANNUAL_LEAVE_REQUEST'}),
+            CONV_ID,
+        )
+
+        assert result.triggered is True
+        assert result.written is False
+        assert result.error is None  # 策略拦截不是错误，主响应不阻断
+        assert dispatcher.received == []  # Dispatcher 不被调用
+        assert audit.events[-1].error_type == TERMINAL_COMMAND_BLOCKED
+        assert audit.events[-1].write_attempted is False
+
+    def test_business_action_abandon_blocked(self):
+        pipeline = _make_pipeline(
+            triggered=True,
+            command=_make_command(action='ABANDON', status='ABANDONED'),
+            proposal=_make_proposal(action='ABANDON', status='ABANDONED'),
+        )
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(action_proposal={'action_type': 'ANNUAL_LEAVE_REQUEST'}),
+            CONV_ID,
+        )
+
+        assert result.written is False
+        assert result.error is None
+        assert dispatcher.received == []
+        assert audit.events[-1].error_type == TERMINAL_COMMAND_BLOCKED
+        assert audit.events[-1].write_attempted is False
+
+    def test_business_action_tool_success_path_blocked(self):
+        """tool_history 中 leave_proposal_tool 成功（Clarification 场景，
+        action_proposal 可能为空）同样视为业务动作链路。"""
+        pipeline = _make_pipeline(
+            triggered=True,
+            command=_make_command(action='COMPLETE', status='COMPLETED'),
+            proposal=_make_proposal(action='COMPLETE', status='COMPLETED'),
+        )
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(
+                tool_history=[
+                    {'tool_name': 'leave_proposal_tool', 'status': 'success',
+                     'arguments': {}, 'observation': 'ok'},
+                ],
+            ),
+            CONV_ID,
+        )
+
+        assert result.written is False
+        assert dispatcher.received == []
+        assert audit.events[-1].error_type == TERMINAL_COMMAND_BLOCKED
+
+    def test_business_action_upsert_still_dispatched(self):
+        """业务动作链路 + UPSERT + ACTIVE：上下文更新正常 dispatch。"""
+        command = _make_command()
+        pipeline = _make_pipeline(triggered=True, command=command)
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(action_proposal={'action_type': 'ANNUAL_LEAVE_REQUEST'}),
+            CONV_ID,
+        )
+
+        assert result.written is True
+        assert result.error is None
+        assert dispatcher.received == [command]
+        assert audit.events[-1].error_type is None  # 非拦截、非失败
+
+    def test_plain_flow_complete_keeps_existing_behavior(self):
+        """非业务动作链路（无 action_proposal / 无 eligible tool）保持既有行为：
+        COMPLETE 正常 dispatch（Python 可终结普通任务的 Memory）。"""
+        command = _make_command(action='COMPLETE', status='COMPLETED')
+        pipeline = _make_pipeline(triggered=True, command=command)
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(action_proposal=None),
+            CONV_ID,
+        )
+
+        assert result.written is True
+        assert dispatcher.received == [command]
+        assert audit.events[-1].error_type is None
+
+    def test_pipeline_level_blocked_command_also_audited(self):
+        """Pipeline 层已拦截（command=None + 终态 proposal）时，Hook 同样补记
+        terminal_command_blocked，两条拦截路径审计语义一致。"""
+        pipeline = _make_pipeline(
+            triggered=True,
+            command=None,
+            proposal=_make_proposal(action='COMPLETE', status='COMPLETED'),
+        )
+        dispatcher = _make_dispatcher()
+        hook, audit = self._hook_with_audit(pipeline, dispatcher)
+
+        result = hook.after_agent_response(
+            _make_agent_result(action_proposal={'action_type': 'ANNUAL_LEAVE_REQUEST'}),
+            CONV_ID,
+        )
+
+        assert result.triggered is True
+        assert result.written is False
+        assert result.error is None
+        assert dispatcher.received == []
+        assert audit.events[-1].error_type == TERMINAL_COMMAND_BLOCKED
 
 
 # ---------------------------------------------------------------------------

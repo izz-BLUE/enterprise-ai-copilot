@@ -50,6 +50,16 @@ MAX_TASK_STATE_JSON_BYTES = 16 * 1024
 # Command 输出 action（不含 NONE —— NONE 在 policy 层就返回 None，不会走到 command）
 CommandAction = Literal['UPSERT', 'COMPLETE', 'ABANDON']
 
+
+class MemoryTerminalActionNotAllowed(ValueError):
+    """业务动作链路禁止 Python 侧发出终态命令（COMPLETE / ABANDON）。
+
+    终态（COMPLETED / ABANDONED）只能由 Java PendingAction 生命周期收口
+    （BusinessActionService.closeMemory → AiTaskMemoryService.complete/abandon）；
+    Python 不得因为 LLM 输出或重复请求而终结业务动作对应的 Memory。
+    这是 MemoryWritePolicy 的第二层程序约束（第一层在 MemoryRuntimeHook）。
+    """
+
 # trusted 字段兜底集：必须在 task_state 内（递归）剥离。
 # 与 MemoryProposal 顶层 extra='forbid' 互补：
 #  - 顶层：schema 校验直接拒绝；
@@ -87,7 +97,6 @@ _FORBIDDEN_TASK_STATE_KEYS = frozenset({
 _REDACT_MARKERS = ('bearer ', 'jwt', 'password=', 'password:', 'token=', 'token:',
                    'nonce=', 'idempotency-key=')
 
-
 def _redact_string_value(value: str) -> tuple[str, bool]:
     """对单字符串做敏感字段扫描；命中则整串视为 [REDACTED]。
 
@@ -104,7 +113,11 @@ def _redact_string_value(value: str) -> tuple[str, bool]:
 
 
 def _scrub_task_state(state: dict[str, Any]) -> dict[str, Any]:
-    """递归剥离 forbidden 键 + 脱敏字符串值；保持结构稳定。"""
+    """递归剥离 forbidden 键 + 脱敏字符串值；保持结构稳定。
+
+    生命周期控制字段（status / lifecycle_state 等）由 Java
+    AiTaskMemoryService.LIFECYCLE_CONTROL_KEYS 在写入边界剥离，本层不再重复。
+    """
     cleaned: dict[str, Any] = {}
     for key, value in state.items():
         if key in _FORBIDDEN_TASK_STATE_KEYS:
@@ -202,12 +215,26 @@ class MemoryWritePolicy:
     def task_type_policy(self) -> MemoryTaskTypePolicy:
         return self._task_type_policy
 
-    def evaluate(self, proposal: MemoryProposal) -> MemoryWriteCommand | None:
+    def evaluate(
+        self,
+        proposal: MemoryProposal,
+        *,
+        allow_terminal_actions: bool = True,
+    ) -> MemoryWriteCommand | None:
         """评估 MemoryProposal → MemoryWriteCommand（或 None）。
+
+        参数：
+          allow_terminal_actions —— 是否允许产出 COMPLETE / ABANDON 终态命令。
+            业务动作链路（action_proposal 非空 / leave_proposal_tool 成功）由
+            Pipeline 传 False：终态只能由 Java PendingAction 生命周期收口，
+            Python 侧发出终态命令是程序级禁止（抛 MemoryTerminalActionNotAllowed），
+            不依赖 LLM prompt。
 
         抛出：
           ValueError —— 输入结构不合法 / task_type 不在 policy 白名单内
                        （policy 层 fail-loud，调用方应降级为 noop）。
+          MemoryTerminalActionNotAllowed —— allow_terminal_actions=False 且
+                       proposal.action 是 COMPLETE / ABANDON（业务动作链路终态拦截）。
         """
         action = proposal.action
         if action == 'NONE':
@@ -215,6 +242,12 @@ class MemoryWritePolicy:
         if action not in ('UPSERT', 'COMPLETE', 'ABANDON'):
             # schema 已校验，但 policy 再兜底一次（防御未来 schema 调整）
             raise ValueError(f'未知的 MemoryProposal.action: {action}')
+
+        if not allow_terminal_actions and action in ('COMPLETE', 'ABANDON'):
+            raise MemoryTerminalActionNotAllowed(
+                f'业务动作链路禁止 Python 侧终态命令: action={action}；'
+                f'终态（COMPLETED / ABANDONED）只能由 Java PendingAction 生命周期收口'
+            )
 
         status = proposal.status
         task_type = proposal.task_type or self._task_type_policy.fallback_task_type()

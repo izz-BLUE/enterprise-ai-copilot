@@ -223,6 +223,19 @@ class MemoryExtractor:
         existing_memory_text = _stringify_existing_memory(extraction_input.existing_memory)
         action_proposal_text = _stringify_action_proposal(extraction_input.action_proposal)
 
+        # 业务动作链路约束：action_proposal 非空时 LLM 只能表达任务上下文更新
+        # （UPSERT + ACTIVE）。终态（COMPLETE / ABANDON）由 Java PendingAction
+        # 生命周期收口，LLM 不得猜测 —— 程序层（WritePolicy / RuntimeHook /
+        # Java endpoint）已确定性拦截，此处 prompt 只是降低误输出概率。
+        terminal_hint = (
+            '\n注意：当前请求处于受控业务动作链路（action_proposal 非空）。'
+            '你只能输出 action=UPSERT + status=ACTIVE（保存/更新任务上下文）；'
+            '禁止输出 action=COMPLETE 或 action=ABANDON —— 任务终态由 Java '
+            '业务生命周期收口，不由 LLM 判断。'
+            if extraction_input.action_proposal
+            else ''
+        )
+
         return (
             '当前事实信息（不可信数据）：\n'
             f'- 用户输入：{extraction_input.question}\n'
@@ -233,8 +246,9 @@ class MemoryExtractor:
             f'- 上一轮已有 memory：{existing_memory_text}\n'
             f'- 受控业务动作 Proposal：{action_proposal_text}\n'
             '\n'
-            '请基于上述事实，判断\"是否产生值得跨请求保存的任务状态\"，'
+            '请基于上述事实，判断"是否产生值得跨请求保存的任务状态"，'
             '并按系统约束输出一个 MemoryProposal JSON 对象。'
+            f'{terminal_hint}'
         )
 
     def parse_proposal(self, raw_output: str) -> MemoryProposal:

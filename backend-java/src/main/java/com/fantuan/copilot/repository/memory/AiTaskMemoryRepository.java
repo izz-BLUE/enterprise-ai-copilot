@@ -9,7 +9,7 @@ import java.util.Optional;
  * 任务记忆仓储接口。所有方法都强制以 (userId, conversationId) 复合 key 定位，
  * 杜绝只按 conversationId 查询的可能 —— 这是 P0 的安全 invariant。
  *
- * 状态机（与 docs/memory-p0-architecture.md 白名单对齐，实现为原子条件 SQL）：
+ * 状态机（与 docs/memory-architecture.md 第 3 节状态机白名单对齐，实现为原子条件 SQL）：
  *   - 无记录 → 仅允许写入 ACTIVE（首条创建）；
  *   - ACTIVE → 允许写入任意状态（UPSERT 续写 / COMPLETE / ABANDON 终结）；
  *   - COMPLETED → 仅允许幂等重放 COMPLETE；

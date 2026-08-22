@@ -57,6 +57,22 @@ public class AiTaskMemoryService {
     );
 
     /**
+     * taskState 中被解释为"生命周期控制"的保留字段（顶层 / 嵌套一律剥离，不拒绝写入）。
+     * 与 Python memory_write_policy._LIFECYCLE_CONTROL_TASK_STATE_KEYS 对齐。
+     * 背景：顶层 Memory 状态由 Java 状态机独占；task_state 中嵌套的 status /
+     * lifecycle_state 等字段会被 Read Path 渲染进 Agent 上下文（Extractor / Planner
+     * prompt），导致正常任务被 LLM 误判为已终结。剥离是避免上下文污染，不是状态机
+     * 绕过 —— 终态（COMPLETED / ABANDONED）仍只能由 Java 业务生命周期收口。
+     */
+    static final java.util.Set<String> LIFECYCLE_CONTROL_KEYS = java.util.Set.of(
+            "status",
+            "lifecycle_state", "lifecycleState",
+            "task_status", "taskStatus",
+            "terminal_state", "terminalState",
+            "completed", "abandoned"
+    );
+
+    /**
      * 敏感字符串内容 marker（子串匹配、大小写不敏感），与 Python
      * memory_write_policy._REDACT_MARKERS 对齐。结构化路径（Map）命中后
      * 整串替换为 [REDACTED]；JSON 字符串路径（无法安全替换序列化内容）命中后拒绝。
@@ -265,6 +281,10 @@ public class AiTaskMemoryService {
                 throw new IllegalArgumentException(
                         "taskState 包含 trusted 字段，禁止写入: " + key);
             }
+            if (LIFECYCLE_CONTROL_KEYS.contains(key)) {
+                // 剥离生命周期控制字段（避免污染 Agent 上下文），不拒绝业务写入
+                continue;
+            }
             cleaned.put(key, scrubValue(entry.getValue()));
         }
         return cleaned;
@@ -280,6 +300,10 @@ public class AiTaskMemoryService {
                 if (FORBIDDEN_TASK_STATE_KEYS.contains(key)) {
                     throw new IllegalArgumentException(
                             "taskState 嵌套字段包含 trusted key，禁止写入: " + key);
+                }
+                if (LIFECYCLE_CONTROL_KEYS.contains(key)) {
+                    // 嵌套生命周期控制字段同样剥离（顶层 Memory 状态由 Java 独占）
+                    continue;
                 }
                 cleaned.put(key, scrubValue(entry.getValue()));
             }

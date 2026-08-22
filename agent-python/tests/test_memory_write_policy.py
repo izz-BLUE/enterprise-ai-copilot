@@ -35,6 +35,7 @@ from pydantic import ValidationError
 
 from app.memory.memory_write_policy import (
     MAX_TASK_STATE_JSON_BYTES,
+    MemoryTerminalActionNotAllowed,
     MemoryWriteCommand,
     MemoryWritePolicy,
 )
@@ -103,6 +104,46 @@ class TestHappyPath:
         )
         cmd = policy.evaluate(proposal)
         assert cmd.task_type == 'GENERIC'
+
+
+# ---------- 业务动作链路终态拦截（allow_terminal_actions=False）----------
+
+class TestTerminalActionGuard:
+    """业务动作链路（Pipeline 传 allow_terminal_actions=False）下，Python 侧
+    COMPLETE / ABANDON 终态命令被程序级拒绝 —— 终态只能由 Java PendingAction
+    生命周期收口。UPSERT + ACTIVE 上下文更新不受影响。"""
+
+    def test_business_action_complete_rejected(self, policy):
+        proposal = MemoryProposal(action='COMPLETE', status='COMPLETED')
+        with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
+            policy.evaluate(proposal, allow_terminal_actions=False)
+
+    def test_business_action_abandon_rejected(self, policy):
+        proposal = MemoryProposal(action='ABANDON', status='ABANDONED')
+        with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
+            policy.evaluate(proposal, allow_terminal_actions=False)
+
+    def test_business_action_upsert_allowed(self, policy):
+        proposal = MemoryProposal(
+            action='UPSERT',
+            task_type='LEAVE_REQUEST',
+            status='ACTIVE',
+            task_state={'waiting_for': 'date'},
+            summary='等待补充日期',
+        )
+        cmd = policy.evaluate(proposal, allow_terminal_actions=False)
+        assert cmd is not None
+        assert cmd.action == 'UPSERT'
+        assert cmd.status == 'ACTIVE'
+
+    def test_default_allow_terminal_actions_true_keeps_complete(self, policy):
+        """默认（非业务链路调用方）仍允许 COMPLETE / ABANDON，兼容既有行为。"""
+        cmd = policy.evaluate(MemoryProposal(action='COMPLETE', status='COMPLETED'))
+        assert cmd is not None
+        assert cmd.action == 'COMPLETE'
+        cmd = policy.evaluate(MemoryProposal(action='ABANDON', status='ABANDONED'))
+        assert cmd is not None
+        assert cmd.action == 'ABANDON'
 
 
 # ---------- 边界 / 拒绝 ----------

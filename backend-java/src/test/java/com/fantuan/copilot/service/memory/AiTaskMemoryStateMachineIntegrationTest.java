@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Scoped Conversation Memory / Task Continuity P0 —— 状态机白名单测试。
  *
- * 合法转换（与 docs/memory-p0-architecture.md 白名单一致）：
+ * 合法转换（与 docs/memory-architecture.md 第 3 节状态机白名单一致）：
  *   - (None, UPSERT-ACTIVE)         首条创建
  *   - (ACTIVE, UPSERT-ACTIVE)       续写
  *   - (ACTIVE, UPSERT-COMPLETED)    终结（COMPLETE 语义）
@@ -219,6 +219,53 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
         service.writeFromCommand(U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "safe");
         AiTaskMemory row = service.find(U1, CONV_A).orElseThrow();
         assertEquals("{\"waiting_for\":\"date\",\"note\":\"normal note\"}", row.taskStateJson());
+    }
+
+    // ---- 嵌套生命周期字段剥离（上下文污染防御） ----
+
+    @Test
+    void writeFromCommandStripsNestedLifecycleFields() {
+        java.util.LinkedHashMap<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("pending_step", "confirmation");
+        state.put("status", "COMPLETED");  // 顶层生命周期字段
+        java.util.LinkedHashMap<String, Object> nested = new java.util.LinkedHashMap<>();
+        nested.put("status", "COMPLETED");
+        nested.put("lifecycle_state", "ABANDONED");
+        nested.put("kept", 1);
+        state.put("nested", nested);
+        java.util.ArrayList<Object> items = new java.util.ArrayList<>();
+        java.util.LinkedHashMap<String, Object> item = new java.util.LinkedHashMap<>();
+        item.put("task_status", "done");
+        item.put("value", "a");
+        items.add(item);
+        state.put("items", items);
+
+        AiTaskMemory saved = service.writeFromCommand(
+                U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "ok");
+        // 生命周期字段（顶层 / 嵌套 / list 内）一律剥离，业务字段保留
+        assertFalse(saved.taskStateJson().contains("COMPLETED"), saved.taskStateJson());
+        assertFalse(saved.taskStateJson().contains("ABANDONED"), saved.taskStateJson());
+        assertFalse(saved.taskStateJson().contains("lifecycle_state"), saved.taskStateJson());
+        assertFalse(saved.taskStateJson().contains("task_status"), saved.taskStateJson());
+        assertTrue(saved.taskStateJson().contains("\"pending_step\":\"confirmation\""), saved.taskStateJson());
+        assertTrue(saved.taskStateJson().contains("\"kept\":1"), saved.taskStateJson());
+        assertTrue(saved.taskStateJson().contains("\"value\":\"a\""), saved.taskStateJson());
+        // 顶层 Memory 状态仍由 Java 控制：写入保持 ACTIVE
+        assertEquals(TaskStatus.ACTIVE, saved.status());
+    }
+
+    @Test
+    void writeFromCommandStripsCamelCaseLifecycleFields() {
+        java.util.LinkedHashMap<String, Object> state = new java.util.LinkedHashMap<>();
+        state.put("lifecycleState", "ABANDONED");
+        state.put("taskStatus", "COMPLETED");
+        state.put("terminalState", "finished");
+        state.put("completed", true);
+        state.put("abandoned", false);
+        state.put("leave_date", "2026-09-01");
+        AiTaskMemory saved = service.writeFromCommand(
+                U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "ok");
+        assertEquals("{\"leave_date\":\"2026-09-01\"}", saved.taskStateJson());
     }
 
     // ---- 终态不再被 Read Path 注入（与只读 ACTIVE 的 invariant 联动验证） ----

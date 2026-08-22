@@ -87,6 +87,9 @@ Cross Encoder 精排和 Retrieval Shadow Gate 均做过实验，但在当前数�
 | [Performance](docs/performance.md) | ONNX 优化、内存对比、向量一致性 |
 | [Concurrency & Load Test](docs/concurrency-and-load-test.md) | 有界并发设计、超时预算、k6 分层压测 |
 | [Quality Assurance](docs/quality-assurance.md) | CI、检索评估、安全检查、发布验证与已知边界 |
+| [Memory Architecture](docs/memory-architecture.md) | Scoped Conversation Memory P0 运行时链路、Read / Write Path、模块依赖边界 |
+| [Memory Security](docs/memory-security.md) | Memory P0 安全边界勾选项与运行时错误分类（Python / Java） |
+| [Memory P0 Acceptance](docs/memory-p0-acceptance.md) | Memory P0 最终审计、Pre-commit Gates、归档组件与最近一次验收结果 |
 | [v0.4.0 Release Notes](docs/releases/v0.4.0.md) | 有界并发、目标服务器验收摘要、升级与回滚说明 |
 | [API](docs/api.md) | 接口文档、请求响应格式 |
 | [Demo Guide](docs/demo-guide.md) | 多用户请假演示、越权拒绝、幂等与持久化恢复操作手册 |

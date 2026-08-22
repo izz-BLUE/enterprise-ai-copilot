@@ -181,7 +181,12 @@ class TestTriggeredFullPath:
         assert result.command.summary == '等待用户补充请假日期'
         assert result.error is None
 
-    def test_extractor_complete_yields_command(self):
+    def test_business_action_complete_is_blocked(self):
+        """业务动作链路（action_proposal 非空）+ LLM 输出 COMPLETE → 终态命令被拦截。
+
+        终态只能由 Java PendingAction 生命周期收口；Python 侧不得终结业务动作
+        对应的 Memory（WritePolicy allow_terminal_actions=False 程序级拒绝）。
+        """
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'COMPLETE',
@@ -194,11 +199,11 @@ class TestTriggeredFullPath:
             'action_proposal': {'action_type': 'ANNUAL_LEAVE_REQUEST'},
         })
         assert result.proposal.action == 'COMPLETE'
-        assert result.command is not None
-        assert result.command.action == 'COMPLETE'
+        assert result.command is None
         assert result.error is None
 
-    def test_extractor_abandon_yields_command(self):
+    def test_business_action_abandon_is_blocked(self):
+        """业务动作链路 + LLM 输出 ABANDON → 终态命令被拦截（同上）。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'ABANDON',
@@ -211,12 +216,71 @@ class TestTriggeredFullPath:
             'action_proposal': {'action_type': 'ANNUAL_LEAVE_REQUEST'},
         })
         assert result.proposal.action == 'ABANDON'
-        assert result.command is not None
-        assert result.command.action == 'ABANDON'
+        assert result.command is None
         assert result.error is None
 
+    def test_business_action_upsert_still_yields_command(self):
+        """业务动作链路 + UPSERT + ACTIVE：上下文更新仍然正常通过。"""
+        def fake_llm(system, user):
+            return json.dumps({
+                'action': 'UPSERT',
+                'task_type': 'LEAVE_REQUEST',
+                'status': 'ACTIVE',
+                'task_state': {'waiting_for': 'date'},
+                'summary': '等待用户补充请假日期',
+            }, ensure_ascii=False)
 
-# ---------- Error Boundary（Phase 3C-Fix：不再吞所有异常）----------
+        pipeline = MemoryPipeline(llm_callable=fake_llm)
+        result = pipeline.process({
+            'action_proposal': {'action_type': 'ANNUAL_LEAVE_REQUEST'},
+        })
+        assert result.command is not None
+        assert result.command.action == 'UPSERT'
+        assert result.command.status == 'ACTIVE'
+        assert result.error is None
+
+    def test_leave_proposal_tool_success_is_business_action_path(self):
+        """tool_history 中 leave_proposal_tool 成功（即使 action_proposal 为空，
+        如 Clarification）同样视为业务动作链路，终态命令被拦截。"""
+        def fake_llm(system, user):
+            return json.dumps({
+                'action': 'ABANDON',
+                'status': 'ABANDONED',
+                'summary': 'cancelled',
+            }, ensure_ascii=False)
+
+        pipeline = MemoryPipeline(llm_callable=fake_llm)
+        result = pipeline.process({
+            'tool_history': [
+                {'tool_name': 'leave_proposal_tool', 'status': 'success',
+                 'arguments': {}, 'observation': 'ok'},
+            ],
+        })
+        assert result.proposal.action == 'ABANDON'
+        assert result.command is None
+        assert result.error is None
+
+    def test_plain_flow_complete_still_yields_command(self):
+        """非业务动作链路（仅 existing_memory 触发）保持既有行为：COMPLETE 正常生成
+        command，不拦截（Python 可以终结普通任务的 Memory，不能终结业务动作的）。"""
+        def fake_llm(system, user):
+            return json.dumps({
+                'action': 'COMPLETE',
+                'status': 'COMPLETED',
+                'summary': 'done',
+            }, ensure_ascii=False)
+
+        pipeline = MemoryPipeline(llm_callable=fake_llm)
+        result = pipeline.process({
+            'memory_context': {'task_type': 'GENERIC', 'status': 'ACTIVE'},
+        })
+        assert result.triggered is True
+        assert result.proposal.action == 'COMPLETE'
+        assert result.command is not None
+        assert result.command.action == 'COMPLETE'
+        assert result.error is None
+
+    # ---------- Error Boundary（Phase 3C-Fix：不再吞所有异常）----------
 
 class TestErrorBoundary:
     """Pipeline 不再吞所有异常；只 swallow 子组件显式声明的可预期失败，

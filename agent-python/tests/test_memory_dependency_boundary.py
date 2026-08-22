@@ -1,6 +1,6 @@
 """Scoped Conversation Memory Phase 6 依赖边界审计。
 
-约束（与 ``docs/memory-p0-architecture.md`` 章节 F 对齐）：
+约束（与 ``docs/memory-architecture.md`` 第 8 节模块依赖边界对齐）：
 
   ``app/memory/`` 内所有模块在 import 时不得直接依赖：
 

@@ -10,11 +10,26 @@ trace_id 等系统字段,这些字段统一由 Executor 从 AgentState 注入。
 """
 
 import json
+from datetime import date
 from typing import Any
 
 from langchain_core.tools import tool
 
 from app.clients.java_client import JavaClientError, get_java_client
+
+
+def _json_default(obj: Any) -> Any:
+    """企业 Tool 输出边界序列化:date 等非 JSON 原生类型在该边界写为 ISO 字符串。
+
+    与 Tool Executor 端的反序列化语义对齐:
+      - Tool _payload 输出 (JSON 字符串,含 ISO date)
+      - Executor json.loads 还原 dict,并对 ISO date 字段手动 fromisoformat 还原 date 对象
+      - 下游 (包括 AnnualLeaveActionProposal.strict=True schema) 拿到的是 Python date
+    这样保持内部 Python 对象类型稳定,只在 HTTP 工具输出边界做一次确定性序列化。
+    """
+    if isinstance(obj, date):
+        return obj.isoformat()
+    raise TypeError(f'企业 Tool 输出边界不支持序列化类型: {type(obj).__name__}')
 
 
 def _payload(success: bool, data: dict[str, Any] | None, error_code: str | None,
@@ -26,7 +41,7 @@ def _payload(success: bool, data: dict[str, Any] | None, error_code: str | None,
         body['error_code'] = error_code
     if message:
         body['message'] = message
-    return json.dumps(body, ensure_ascii=False)
+    return json.dumps(body, ensure_ascii=False, default=_json_default)
 
 
 def _require_identity(employee_id: str) -> str | None:
@@ -148,7 +163,11 @@ def leave_proposal_tool(
             True,
             {
                 'kind': 'proposal',
-                'action_proposal': result.proposal.model_dump(mode='json'),
+                # 内部 Python 对象保持原类型(start_date/end_date 为 date);
+                # ISO 序列化只在 _payload 的 JSON 输出边界发生,
+                # 下游 Tool Executor 会在解析端把 ISO 字符串还原回 date 对象,
+                # 满足 AnnualLeaveActionProposal.strict=True schema 的类型契约。
+                'action_proposal': result.proposal.model_dump(),
                 'missing_fields': [],
                 'message': '已生成年假申请草稿，请确认后提交。',
             },

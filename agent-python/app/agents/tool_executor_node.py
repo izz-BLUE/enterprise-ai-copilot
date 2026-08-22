@@ -9,6 +9,7 @@ tool_executor_node.py —— Tool 执行节点
 """
 
 import json
+from datetime import date
 
 from pydantic import ValidationError
 
@@ -57,6 +58,33 @@ _ERROR_MESSAGES = {
     'tool_timeout': '工具执行超时，已终止本次调用。',
     'tool_execution_failed': '工具执行失败，已终止本次调用。',
 }
+
+# leave_proposal_tool 输出 action_proposal 时,Tool 出口把 Python date 序列化为
+# ISO 字符串以越过 HTTP / Tool 输出边界。Executor 解析回 dict 后,在此还原
+# 关键日期字段回 Python date 对象,使下游 Pydantic strict schema (AnnualLeaveActionProposal,
+# strict=True) 接受 —— 这与"内部 Pydantic 对象之间传递保持 date 类型"对齐。
+_LEAVE_PROPOSAL_DATE_FIELDS = ('start_date', 'end_date')
+
+
+def _restore_iso_date_fields(payload: dict | None) -> dict | None:
+    """只在 leave_proposal_tool 的 action_proposal dict 上还原 ISO 日期字段。
+
+    - 仅识别合法 ISO-8601 (YYYY-MM-DD) 字符串;其它字符串值保持原状(不抛错,
+      保留后续 schema 校验作为最终防线)。
+    - 不修改其他字段;不修改 missing_fields(Literal 集合,本来就是 list[str])。
+    - 缺失或非字典值原样返回。
+    """
+    if not isinstance(payload, dict):
+        return payload
+    for key in _LEAVE_PROPOSAL_DATE_FIELDS:
+        value = payload.get(key)
+        if isinstance(value, str) and len(value) == 10:
+            try:
+                payload[key] = date.fromisoformat(value)
+            except ValueError:
+                # 非合法 ISO 日期:不抛错,留给 schema 校验拒绝。
+                pass
+    return payload
 
 
 def _error_code(exc: Exception) -> str:
@@ -276,6 +304,8 @@ def tool_executor_node(state: dict) -> dict:
             parsed = json.loads(observation) if isinstance(observation, str) else {}
         except json.JSONDecodeError:
             parsed = {}
-        updates['action_proposal'] = parsed.get('action_proposal')
+        # ISO -> date 还原(详见 _restore_iso_date_fields 注释)。
+        # 仅针对 action_proposal 这一个嵌套 dict;不修改 outer observation。
+        updates['action_proposal'] = _restore_iso_date_fields(parsed.get('action_proposal'))
         updates['missing_fields'] = parsed.get('missing_fields', [])
     return updates
