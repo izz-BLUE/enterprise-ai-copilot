@@ -91,9 +91,9 @@ AGENT_LOOP_ENABLED = os.getenv('AGENT_LOOP_ENABLED', 'true').strip().lower() == 
 # Input Validation
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
 
-# 企业 Tool P0：Python → Java 内部 HTTP 客户端配置（仅供只读企业 Tool 使用）。
+# 企业 Tool / Scoped Memory P0：Python → Java 内部 HTTP 客户端配置。
 # JAVA_BASE_URL: Java 后端地址，示例 http://localhost:8080；空值 = Tool 直接返回 LEAVE_READ_DISABLED。
-# JAVA_INTERNAL_TOKEN: 与 Java leave.read.internal-token 完全一致；缺失时 Tool 返回鉴权失败。
+# JAVA_INTERNAL_TOKEN: 与 Java leave.read.internal-token 完全一致；缺失时只读 Tool 与 Memory writer 均不可用。
 # JAVA_TIMEOUT_SECONDS: 固定请求超时，不做重试 / fallback。
 JAVA_BASE_URL = os.getenv('JAVA_BASE_URL', '').strip()
 JAVA_INTERNAL_TOKEN = os.getenv('JAVA_INTERNAL_TOKEN', '').strip()
@@ -103,6 +103,10 @@ except ValueError:
     JAVA_TIMEOUT_SECONDS = 5
 if JAVA_TIMEOUT_SECONDS < 1:
     raise ValueError('JAVA_TIMEOUT_SECONDS 必须大于等于 1')
+
+# Scoped Conversation Memory P0：写入模式默认关闭，避免未显式配置时产生额外
+# Extractor LLM 成本或任何 Java 写入。模式合法性在 Runtime Hook 构造时再次校验。
+MEMORY_WRITE_MODE = os.getenv('MEMORY_WRITE_MODE', 'DISABLED').strip()
 
 # Experimental retrieval relevance gate (off by default; enforce is prohibited).
 # These thresholds only reproduce the first Shadow experiment and are not

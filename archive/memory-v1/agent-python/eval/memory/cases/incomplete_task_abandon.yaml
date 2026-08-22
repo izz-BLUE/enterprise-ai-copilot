@@ -1,0 +1,46 @@
+case_id: incomplete_task_abandon
+description: |
+  User explicitly cancels an in-progress LEAVE_REQUEST task. The previously
+  ACTIVE memory should be transitioned to ABANDONED.
+initial_context:
+  taskType: LEAVE_REQUEST
+  status: ACTIVE
+  taskState:
+    waiting_for: leave_date
+turns:
+  - turn_index: 1
+    role: user
+    user: 我想申请 9 月初的年假，但日期还没想好
+    memory_observation:
+      triggered: true
+      proposal:
+        action: UPSERT
+        task_type: LEAVE_REQUEST
+        status: ACTIVE
+      use_memory: false
+      recovered: false
+      tool_behavior:
+        called:
+          - leave_proposal_tool
+        blocked: []
+  - turn_index: 2
+    role: user
+    user: 算了，不请了，年假这次不申请了
+    memory_context:
+      taskType: LEAVE_REQUEST
+      status: ACTIVE
+    memory_observation:
+      triggered: true
+      proposal:
+        action: ABANDON
+        task_type: LEAVE_REQUEST
+        status: ABANDONED
+      use_memory: true
+      recovered: true
+      tool_behavior: []
+expected_trigger: true
+expected_action: ABANDON
+expected_task_type: LEAVE_REQUEST
+expected_status: ABANDONED
+expected_use_memory: true
+expected_tool_behavior: []

@@ -1,0 +1,59 @@
+case_id: memory_conflict_update
+description: |
+  An existing LEAVE_REQUEST memory is present. The user supplies new
+  information (different date range) and the assistant should UPSERT the
+  memory with the updated task state, not emit NONE.
+initial_context:
+  taskType: LEAVE_REQUEST
+  status: ACTIVE
+  taskState:
+    waiting_for: leave_date
+    requested_days: 2
+    candidate_start_date: '2026-09-01'
+turns:
+  - turn_index: 1
+    role: user
+    user: 我想请 9 月 1 号、2 号两天年假
+    memory_observation:
+      triggered: true
+      proposal:
+        action: UPSERT
+        task_type: LEAVE_REQUEST
+        status: ACTIVE
+      use_memory: false
+      recovered: false
+      tool_behavior:
+        called:
+          - leave_proposal_tool
+        blocked: []
+  - turn_index: 2
+    role: user
+    user: 改一下，请 10 月 5 号到 10 月 9 号共 5 天
+    memory_context:
+      taskType: LEAVE_REQUEST
+      status: ACTIVE
+      taskState:
+        waiting_for: leave_date
+        requested_days: 2
+        candidate_start_date: '2026-09-01'
+    memory_observation:
+      triggered: true
+      proposal:
+        action: UPSERT
+        task_type: LEAVE_REQUEST
+        status: ACTIVE
+      use_memory: true
+      recovered: true
+      tool_behavior:
+        called:
+          - leave_proposal_tool
+        blocked: []
+expected_trigger: true
+expected_action: UPSERT
+expected_task_type: LEAVE_REQUEST
+expected_status: ACTIVE
+expected_use_memory: true
+expected_tool_behavior:
+  called:
+    - leave_proposal_tool
+  blocked: []

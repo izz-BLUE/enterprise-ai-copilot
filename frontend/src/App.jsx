@@ -35,6 +35,34 @@ const RETRYABLE_ACTION_ERRORS = new Set([
 
 const newMessageId = () => crypto.randomUUID()
 
+// Scoped Conversation Memory / Task Continuity P0 —— conversationId 客户端会话命名空间。
+// 1) 不是可信身份，仅作为分组 hint 透传给 Java；Java 会基于 trusted user_id + 本字段做权威解析；
+// 2) 仅保存在 sessionStorage：跨刷新保留但关 tab 自动清除；
+// 3) logout / 401 时由 clearConversationId() 主动清空。
+const CONVERSATION_ID_STORAGE_KEY = 'enterprise-ai-copilot.conversation-id'
+const readStoredConversationId = () => {
+  try {
+    const raw = sessionStorage.getItem(CONVERSATION_ID_STORAGE_KEY)
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > 64) {
+      return null
+    }
+    return raw
+  } catch {
+    return null
+  }
+}
+const writeStoredConversationId = (id) => {
+  try {
+    if (id) {
+      sessionStorage.setItem(CONVERSATION_ID_STORAGE_KEY, id)
+    } else {
+      sessionStorage.removeItem(CONVERSATION_ID_STORAGE_KEY)
+    }
+  } catch {
+    // sessionStorage 在隐私模式或被禁用时可能抛错；忽略并继续。
+  }
+}
+
 function isSupportedPendingAction(action) {
   return action?.type === 'ANNUAL_LEAVE_REQUEST'
     && action?.confirmationRequired === true
@@ -60,6 +88,22 @@ function App({ authState, onLogout }) {
   const actionSecretsRef = useRef(new Map())
   const idempotencyKeysRef = useRef(new Map())
   const actionLocksRef = useRef(new Set())
+  // Phase 2 conversationId：从 sessionStorage 恢复，确保刷新后会话命名空间连续。
+  // 不是可信身份，仅作为分组 hint 传给 Java。
+  const conversationIdRef = useRef(readStoredConversationId())
+
+  const clearConversationId = () => {
+    conversationIdRef.current = null
+    writeStoredConversationId(null)
+  }
+
+  const rememberConversationId = (id) => {
+    if (typeof id !== 'string' || id.length === 0 || id.length > 64) {
+      return
+    }
+    conversationIdRef.current = id
+    writeStoredConversationId(id)
+  }
 
   const actionBusy = messages.some(message =>
     message.actionUi?.phase === 'confirming' || message.actionUi?.phase === 'cancelling')
@@ -72,6 +116,7 @@ function App({ authState, onLogout }) {
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
+    clearConversationId()
   }
 
   // 自动滚动到底部
@@ -232,12 +277,18 @@ function App({ authState, onLogout }) {
     if (requestMode === 'agent' && adminToken.trim()) {
       headers['X-Admin-Token'] = adminToken.trim()
     }
+    // Phase 2: Agent 路由始终携带当前会话的 conversationId（可能没有，
+    // 则 Java 服务端生成新的随机 UUID 并通过 X-Conversation-Id 响应头返回）。
+    // 普通 RAG (/api/chat) 不参与 conversationId 链路，保持原行为。
+    const requestBody = (requestMode === 'agent')
+      ? { message: question, conversationId: conversationIdRef.current || undefined }
+      : { message: question }
     try {
       const response = await authenticatedFetch(`${JAVA_BASE_URL}${endpoint}`,
         authState.accessToken, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ message: question }),
+        body: JSON.stringify(requestBody),
       })
 
       let data = null
@@ -296,6 +347,16 @@ function App({ authState, onLogout }) {
         const headerTraceId = response.headers.get('X-Trace-Id')
         if (headerTraceId) {
           data.traceId = headerTraceId
+        }
+      }
+
+      // Phase 2: Java 响应头 X-Conversation-Id 是本会话权威 conversationId。
+      // 服务端会回传"本次实际使用"的 ID（包括它自动生成的新 UUID），
+      // 客户端只需在本地缓存，下一次请求在 body 中带回。
+      if (requestMode === 'agent') {
+        const headerConversationId = response.headers.get('X-Conversation-Id')
+        if (headerConversationId) {
+          rememberConversationId(headerConversationId)
         }
       }
 
