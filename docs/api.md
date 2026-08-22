@@ -160,8 +160,10 @@ Java 代理 Python 健康检查。
 
 **请求**
 ```json
-{"message": "病假需要提供哪些材料？"}
+{"message": "病假需要提供哪些材料？", "conversationId": "leave-demo-01"}
 ```
+
+`conversationId` 是同一登录用户下的会话命名空间，不是身份字段。前端在 Agent 会话生命周期内复用它；缺失、空值或非法值时 Java 生成新的 UUID，并通过响应头 `X-Conversation-Id` 返回本次实际值。Java 始终以 `(trusted user_id, conversation_id)` 复合 key 读取和写入 Memory，客户端不能通过 conversationId 访问其他用户的数据。
 
 **响应**（RAG 问答）
 ```json
@@ -303,6 +305,14 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 
 Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当前 Capability Gate 未暴露的 Tool，系统拒绝该非法规划；其稳定公共响应为 `route=error`、`category=error`、`success=false`。这不等同于普通权限拒绝，也不意味着所有无权限 Evaluation 请求都会返回 error；正常权限拒绝仍可表现为 `route=refuse`、`category=access_control`。反之，也不能把隐藏 Tool 的 contract violation 归类为 access control。
 
+**Scoped Conversation Memory P0：**
+
+- Java Read Path 只把当前 `(trusted user_id, conversationId)` 命中的 `ACTIVE` 记录转换为内部 `memoryContext`，注入 Python Planner；`COMPLETED` / `ABANDONED` 不注入。
+- Python Memory Extractor 消费不可信的历史任务数据，经过 `MemoryWritePolicy` 的 trusted-key 递归过滤、16 KiB task state 和 500 字符 summary 限制后才形成 command。
+- `MEMORY_WRITE_MODE=DISABLED`（默认）不调用 Extractor；`AUDIT_ONLY` 运行 Trigger/Extractor/Policy 但只记录元数据；`ENABLED` 通过 Java 签发的短时 scope 调用 `POST /api/internal/memory/conversations/{conversationId}/write`。
+- Memory write endpoint 只接受 `X-Internal-Token` 与 Java 签发的 `X-Memory-Write-Scope`，user_id 不来自前端、Python body、LLM 或 Memory。Memory 与 PendingAction 是两条独立生命周期。
+- Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发。
+
 **应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
 ```json
 {
@@ -433,7 +443,7 @@ Python AI 服务健康检查。
 
 LangGraph Agent 问答接口。
 
-请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions` 和 `X-Business-Date`，不读取 Admin Token。`X-Business-Date` 是 Java 权威业务日期，供 `leave_proposal_tool` 在 Planner-first 路径下使用。
+请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions`、`X-Business-Date`、`X-Conversation-Id` 和服务端填充的 `memoryContext` body；不读取 Admin Token。`X-Business-Date` 是 Java 权威业务日期，供 `leave_proposal_tool` 在 Planner-first 路径下使用。`X-Memory-Write-Scope` 只在 Java → Python → Java 内部链路透传，不能由公共客户端提交。
 
 Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 

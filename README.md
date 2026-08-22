@@ -20,8 +20,8 @@ flowchart LR
     J -->|/api/agent/langgraph/chat| P
     P --> SG[Safety Guard]
     SG --> LG{AGENT_LOOP_ENABLED}
-    LG -->|false 默认| RT[Router]
-    LG -->|true 显式开启| PL[Planner]
+    LG -->|false 显式回退| RT[Router]
+    LG -->|true 仓库部署默认| PL[Planner]
     RT -->|RAG| HR[Hybrid Retrieval]
     RT -->|Eval| EV[Eval Reports]
     RT -->|Action / 字段完整| APP[action_proposal]
@@ -49,6 +49,8 @@ flowchart LR
 
 企业请假只读 Tool（`leave_balance_tool` / `leave_request_tool`）的链路是：Java 侧完成身份解析后，将可信 `employee_id` 注入 Python AgentState；Python Tool Executor 再通过最小 HTTP client 调用 Java `/api/internal/leave/*`，Java 使用 `JAVA_INTERNAL_TOKEN` 鉴权并严格按员工身份查询 PostgreSQL。`employee_id` 和 `trace_id` 不属于 LLM 可控 arguments。`leave_proposal_tool` 只生成 `action_proposal` / `missing_fields`（Clarification），**不执行写操作**，且不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限与最终数据库写入全部由 Java 完成。
 
+Scoped Conversation Memory P0 已接入 Planner-first Agent：Java 以可信 `(user_id, conversation_id)` 读取 ACTIVE memory，通过内部 `memoryContext` 注入 Python；Agent 出口的 Memory Extractor 只保存结构化任务状态。写入模式由 `MEMORY_WRITE_MODE` 控制：`DISABLED`（默认）/ `AUDIT_ONLY` / `ENABLED`。Memory 是不可信历史上下文，不参与 Tool 能力扩大；写入 owner 由 Java 签发并验签的短时 scope 决定，且与 PendingAction 完全分离。
+
 ## What this project demonstrates
 
 | Area | Implementation and evidence |
@@ -62,6 +64,7 @@ flowchart LR
 | Verification | Java/Python 单测、检索评估、前端 lint/build、Playwright、分层 k6 场景 |
 | Controlled actions | 三个白名单 Demo 身份、PostgreSQL 数据隔离、HITL 确认与 `LeaveExecutionGateway` |
 | Enterprise read tools | `leave_balance_tool` / `leave_request_tool`、Planner 参数白名单、Java 内部接口鉴权与员工身份隔离 |
+| Scoped conversation memory | ACTIVE read path、结构化 Extractor/WritePolicy、Java trusted scope 写入、DISABLED/AUDIT_ONLY/ENABLED |
 
 ## Design decisions and trade-offs
 
@@ -605,14 +608,15 @@ AI_QUEUE_TIMEOUT_MS=500                        # 获取槽位最长等待时间�
 MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
 REWRITE_MODE=none                              # 查询重写：none / rule（本地默认 none，公网部署使用 rule）
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
-JAVA_BASE_URL=http://localhost:8080            # Java 内部只读接口地址
+JAVA_BASE_URL=http://localhost:8080            # Java 内部接口地址（只读 Tool / Memory writer）
 JAVA_INTERNAL_TOKEN=replace_with_local_token   # 与 Java 的 JAVA_INTERNAL_TOKEN 保持一致
 JAVA_TIMEOUT_SECONDS=5                         # Python → Java 内部查询超时（秒）
+MEMORY_WRITE_MODE=DISABLED                     # Memory 写入：DISABLED / AUDIT_ONLY / ENABLED
 ```
 
 **Do not commit `.env` or any API keys to GitHub.**
 
-`JAVA_INTERNAL_TOKEN` 为空时，Java 内部请假只读接口返回 `LEAVE_READ_DISABLED`；Python 客户端不做重试或 fallback。公网部署时应通过运行环境注入该变量，不要写入 README、前端代码或仓库文件。
+`JAVA_INTERNAL_TOKEN` 为空时，Java 内部只读 Tool 关闭，且 Java 不会签发 Memory trusted write scope；Python 客户端不做重试或 fallback。`MEMORY_WRITE_MODE=ENABLED` 还要求请求来自 Java LangGraph 链路并携带其签发的 scope。公网部署时应通过运行环境注入变量，不要写入 README、前端代码或仓库文件。
 
 Recommended `.gitignore` entries:
 
@@ -840,9 +844,14 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 - Docker Compose isolated deployment
 - Tencent Cloud small instance verification
 
+**Scoped Conversation Memory P0（当前分支）：**
+
+- 同一 `(trusted user_id, conversation_id)` 的 ACTIVE task memory 可注入下一轮 Planner
+- Memory Write Path 支持 `DISABLED` / `AUDIT_ONLY` / `ENABLED`；ENABLED 使用 Java 签发的短时 trusted scope
+- 普通 RAG、评估、余额和历史查询 Tool 不触发 Memory Extractor；仅业务 Proposal 链路或已有 ACTIVE memory 触发
+
 **Planned features:**
 
-- Multi-turn conversation memory
 - LLM-based Tool Calling
 - Qdrant / Milvus vector database
 - Document upload and knowledge base management
