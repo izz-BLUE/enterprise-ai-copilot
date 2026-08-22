@@ -167,3 +167,13 @@ Memory Runtime、Java endpoint contract 或 frontend；不执行 commit、push�
    {provider_error, invalid_decision, step_budget_exhausted}` 时不进入
    Extractor（reason=`agent_failure_terminal`）。测试：
    `TestAgentFailureShortCircuit` 6 例。
+5. **同会话活动 Action 唯一性（P1）**：`ai_task_memory` 以
+   `(user_id, conversation_id)` 为唯一键，但 `createPending` 此前允许同会话
+   多个活动 PendingAction——任一动作进入终态都会收口整条会话 Memory，
+   误伤其他待确认动作的续接。修复：`PendingActionRepository` 新增
+   `hasActiveByOwnerAndConversation`，`createPending` 在控制锁内拒绝同会话
+   第二个活动动作（409 `ACTION_CONVERSATION_IN_PROGRESS`），
+   `LangGraphAgentController` 对该错误码返回可操作提示；
+   `conversationId` 为 null（无 Memory 关联）不限制。测试：
+   `BusinessActionPersistenceIntegrationTest` 新增 5 例（拒绝 / 取消后可再建 /
+   过期后可再建 / 会话隔离 / 并发至多一个）+ 单测 2 例 + Controller 1 例。

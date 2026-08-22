@@ -77,6 +77,18 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
     }
 
     @Override
+    public boolean hasActiveByOwnerAndConversation(String ownerUserId, String conversationId) {
+        if (ownerUserId == null || conversationId == null) {
+            return false;
+        }
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM business_action "
+                        + "WHERE owner_user_id = :owner AND conversation_id = :conversation "
+                        + "AND status IN ('PENDING_CONFIRMATION', 'PROCESSING')",
+                Map.of("owner", ownerUserId, "conversation", conversationId), Integer.class);
+        return count != null && count > 0;
+    }
+
+    @Override
     public void markProcessing(String actionId, UUID key) {
         jdbc.update("UPDATE business_action SET status = 'PROCESSING', idempotency_key = :key "
                 + "WHERE action_id = :id", Map.of("id", actionId, "key", key));

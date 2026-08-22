@@ -117,6 +117,49 @@ class LangGraphAgentActionMappingTest {
     }
 
     @Test
+    void conversationInProgressReturnsActionableMessageWithoutLeakingDetails() {
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        DemoIdentityService identities = mock(DemoIdentityService.class);
+        DemoIdentity identity = new DemoIdentity(
+                "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+        when(identities.isEnabled()).thenReturn(true);
+        when(identities.requireIdentity("DEMO-001")).thenReturn(identity);
+        when(admin.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
+        AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
+                LocalDate.of(2026, 7, 20), "私事", HalfDay.NONE);
+        PythonAgentResponse python = new PythonAgentResponse("draft", "action", true,
+                "business_action", "", List.of(), true, "python-trace-999", proposal, List.of());
+        when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
+                .thenReturn(ResponseEntity.ok(python));
+        when(actionService.createPending(eq(proposal), anyString(), eq("admin"),
+                eq(identity), anyString()))
+                .thenThrow(new ActionException(HttpStatus.CONFLICT,
+                        "ACTION_CONVERSATION_IN_PROGRESS", "当前会话已有待确认的申请。", null, null));
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                restTemplate, bulkhead, admin, actionService, identities);
+        ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("java-trace-123");
+        when(request.getHeader("X-Admin-Token")).thenReturn("admin");
+        when(request.getHeader("X-Demo-User-Id")).thenReturn("DEMO-001");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("request"), request);
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().success());
+        assertNull(response.getBody().pendingAction());
+        assertEquals("当前会话已有待确认的申请，请先确认或取消后再发起新申请。",
+                response.getBody().answer());
+    }
+
+    @Test
     void jwtIdentityWinsOverForgedEmployeeDemoAndQueryValues() {
         RestTemplate restTemplate = mock(RestTemplate.class);
         PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);

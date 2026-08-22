@@ -110,6 +110,12 @@ flowchart TD
      （与 `ai_task_memory` 复合 key 对齐，V4 migration）；
    - 确认成功 → Memory COMPLETED；取消 / 过期 / 处理失败 / 创建失败 →
      Memory ABANDONED；全部与 PendingAction 状态变更在同一事务内完成；
+   - **同会话至多一个活动 PendingAction**：`ai_task_memory` 以
+     `(user_id, conversation_id)` 为唯一键、每条会话只有一条任务记忆，
+     `createPending` 在控制锁内拒绝同会话第二个活动动作
+     （409 `ACTION_CONVERSATION_IN_PROGRESS`），否则任一动作进入终态都会
+     误伤同会话其他待确认动作的续接记忆；`conversationId` 为 null 的历史
+     路径（无 Memory 关联）不受限制；
 6. `MemoryWriteMode` 控制 ENABLED / DISABLED：
    - DISABLED 时 Dispatcher 被跳过、仍记录 audit event（写路径不丢信号）；
 7. Java 写入只信任 scope 内的 `userId`：

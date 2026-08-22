@@ -13,6 +13,8 @@ public interface PendingActionRepository {
     Optional<PendingAction> find(String actionId);
     Optional<PendingAction> findForUpdate(String actionId);
     int countActive();
+    /** 同一 (ownerUserId, conversationId) 是否已有活动动作（PENDING_CONFIRMATION / PROCESSING）。 */
+    boolean hasActiveByOwnerAndConversation(String ownerUserId, String conversationId);
     void markProcessing(String actionId, UUID idempotencyKey);
     void markSucceeded(String actionId, String requestId, String message, Instant completedAt);
     void markCancelled(String actionId, String message, Instant completedAt);

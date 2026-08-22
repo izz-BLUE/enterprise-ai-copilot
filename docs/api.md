@@ -313,6 +313,7 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 - Memory write endpoint 只接受 `X-Internal-Token` 与 Java 签发的 `X-Memory-Write-Scope`，user_id 不来自前端、Python body、LLM 或 Memory。
 - Memory 写入受状态机白名单约束（无记录仅允许 ACTIVE；终态不可重新激活），非法转换返回 `409 MEMORY_STATE_CONFLICT` 且不落库。
 - Memory 终态由 Java 收口：PendingAction 状态变更（确认成功 → COMPLETED；取消 / 过期 / 创建失败 / 处理失败 → ABANDONED）在同一事务内终结对应 ACTIVE memory，不依赖 LLM 猜测。
+- 同一 `(user_id, conversationId)` 至多一个活动 PendingAction：`ai_task_memory` 以该复合 key 为唯一键、每条会话只有一条任务记忆，因此 Java 在 `createPending` 内（控制锁内）拒绝同会话第二个活动动作，返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；动作进入终态（确认 / 取消 / 过期 / 失败）后同会话才可再发起新申请。
 - Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发；Agent 失败终态（`route=error` 或 `provider_error` / `invalid_decision` / `step_budget_exhausted`）直接短路，不进入 Extractor。
 
 **应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
@@ -395,6 +396,7 @@ ACTION_INTERNAL_ERROR
 BUSINESS_RULE_VIOLATION
 BUSINESS_ACTIONS_DISABLED
 ACTION_CAPACITY_EXCEEDED
+ACTION_CONVERSATION_IN_PROGRESS
 DEMO_IDENTITY_REQUIRED
 DEMO_IDENTITY_INVALID
 DEMO_IDENTITY_DISABLED

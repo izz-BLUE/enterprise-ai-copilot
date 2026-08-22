@@ -269,6 +269,10 @@ public class LangGraphAgentController {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
                 memoryService.abandon(identity.userId(), conversationId);
+                if ("ACTION_CONVERSATION_IN_PROGRESS".equals(exception.errorCode())) {
+                    return safeActionFailure(traceId,
+                            "当前会话已有待确认的申请，请先确认或取消后再发起新申请。");
+                }
                 return safeActionFailure(traceId, "暂时无法生成申请草稿，请检查信息后重试。");
             } catch (RuntimeException exception) {
                 log.error("[{}] PendingAction持久化失败", traceId);

@@ -108,6 +108,14 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
         }
+        // 同一会话至多一个活动动作：ai_task_memory 以 (user_id, conversation_id) 为唯一键，
+        // 多活动动作会互相终结对方的任务记忆（任一终态都会收口整条会话 Memory）。
+        // conversationId 为 null（无 Memory 关联的历史路径）时不做限制。
+        if (conversationId != null && identity.userId() != null
+                && actions.hasActiveByOwnerAndConversation(identity.userId(), conversationId)) {
+            throw new ActionException(HttpStatus.CONFLICT, "ACTION_CONVERSATION_IN_PROGRESS",
+                    "当前会话已有待确认的申请，请先确认或取消后再发起新申请。", null, null);
+        }
 
         BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
                 .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));

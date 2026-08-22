@@ -81,6 +81,24 @@ class BusinessActionServiceTest {
                 standardProposal(), "o", ADMIN, USER_A, null));
     }
 
+    @Test
+    void sameConversationRejectsSecondActiveAction() {
+        Fixture f = fixture();
+        when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1")).thenReturn(true);
+        assertCode("ACTION_CONVERSATION_IN_PROGRESS", () -> f.service.createPending(
+                standardProposal(), "o", ADMIN, USER_A, "conv-1"));
+        verify(f.actions, never()).saveNew(any());
+    }
+
+    @Test
+    void nullConversationSkipsSameConversationGuard() {
+        Fixture f = fixture();
+        PendingActionView view = f.service.createPending(
+                standardProposal(), "o", ADMIN, USER_A, null);
+        assertNotNull(view.confirmationNonce());
+        verify(f.actions, never()).hasActiveByOwnerAndConversation(anyString(), anyString());
+    }
+
     @ParameterizedTest
     @MethodSource("invalidProposals")
     void javaRevalidatesUntrustedProposal(AnnualLeaveActionProposal proposal) {

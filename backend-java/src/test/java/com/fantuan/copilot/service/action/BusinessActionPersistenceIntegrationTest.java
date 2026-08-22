@@ -249,6 +249,69 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(1, actions.countActive());
     }
 
+    // ---- 同会话活动 Action 唯一性：ai_task_memory 单条记录与多活动 Action 互斥 ----
+
+    @Test
+    void sameConversationRejectsSecondActiveAction() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        ActionException exception = assertThrows(ActionException.class,
+                () -> service.createPending(proposal(nextWeekday(3)), "second", null, CONV_LIFECYCLE));
+        assertEquals("ACTION_CONVERSATION_IN_PROGRESS", exception.errorCode());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(first.actionId()).orElseThrow().status());
+        assertEquals(1, actions.countActive());
+    }
+
+    @Test
+    void cancelledActionFreesSameConversationSlot() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        service.cancel(first.actionId(), first.confirmationNonce(), null, "cancel");
+        PendingActionView second = service.createPending(proposal(nextWeekday(3)), "second", null,
+                CONV_LIFECYCLE);
+        assertNotNull(second.confirmationNonce());
+    }
+
+    @Test
+    void expiredActionFreesSameConversationSlot() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "task in progress");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        jdbc.update("UPDATE business_action SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' "
+                + "WHERE action_id = ?", first.actionId());
+        // createPending 内先批量过期，随后同会话检查应通过
+        PendingActionView second = service.createPending(proposal(nextWeekday(3)), "second", null,
+                CONV_LIFECYCLE);
+        assertNotNull(second.confirmationNonce());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void sameConversationGuardIsScopedPerConversation() {
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        // 不同 conversation 不受影响
+        PendingActionView other = service.createPending(proposal(nextWeekday(3)), "other", null,
+                "conv-lifecycle-other");
+        assertNotNull(other.confirmationNonce());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(first.actionId()).orElseThrow().status());
+    }
+
+    @Test
+    void concurrentCreationSameConversationAllowsAtMostOne() throws Exception {
+        List<Object> results = runTogether(
+                () -> createResultWithConversation(nextWeekday(2), CONV_LIFECYCLE),
+                () -> createResultWithConversation(nextWeekday(3), CONV_LIFECYCLE));
+        assertEquals(1, results.stream().filter(PendingActionView.class::isInstance).count());
+        assertEquals(1, results.stream()
+                .filter(value -> "ACTION_CONVERSATION_IN_PROGRESS".equals(value)).count());
+        assertEquals(1, actions.countActive());
+    }
+
     // ---- Memory 生命周期收口：PendingAction 终态驱动 ACTIVE Memory 终结 ----
 
     @Test
@@ -373,6 +436,15 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     private Object createResult(LocalDate date) {
         try {
             return service.createPending(proposal(date), UUID.randomUUID().toString(), null);
+        } catch (ActionException exception) {
+            return exception.errorCode();
+        }
+    }
+
+    private Object createResultWithConversation(LocalDate date, String conversationId) {
+        try {
+            return service.createPending(proposal(date), UUID.randomUUID().toString(), null,
+                    conversationId);
         } catch (ActionException exception) {
             return exception.errorCode();
         }
