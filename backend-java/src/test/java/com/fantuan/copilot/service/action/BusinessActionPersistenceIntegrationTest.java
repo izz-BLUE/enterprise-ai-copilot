@@ -264,6 +264,28 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     }
 
     @Test
+    void rejectedDuplicateKeepsExistingMemoryActiveAndConfirmable() {
+        // 第一个动作的任务记忆为 ACTIVE
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "first task");
+        PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
+                CONV_LIFECYCLE);
+        // 同会话第二次创建被拒（Controller 侧不得收口既有 Memory）
+        ActionException exception = assertThrows(ActionException.class,
+                () -> service.createPending(proposal(nextWeekday(3)), "second", null, CONV_LIFECYCLE));
+        assertEquals("ACTION_CONVERSATION_IN_PROGRESS", exception.errorCode());
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status(),
+                "重复请求被拒后既有动作的 Memory 必须保持 ACTIVE");
+        // 第一个动作仍可正常确认，确认后 Memory 收口为 COMPLETED
+        service.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "first-confirm");
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+    }
+
+    @Test
     void cancelledActionFreesSameConversationSlot() {
         PendingActionView first = service.createPending(proposal(nextWeekday(2)), "first", null,
                 CONV_LIFECYCLE);

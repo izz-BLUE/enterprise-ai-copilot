@@ -268,11 +268,13 @@ public class LangGraphAgentController {
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
-                memoryService.abandon(identity.userId(), conversationId);
                 if ("ACTION_CONVERSATION_IN_PROGRESS".equals(exception.errorCode())) {
+                    // 同会话已有活动动作：Memory 属于既有动作，不能收口为 ABANDONED，
+                    // 否则既有动作确认时无法从 ACTIVE 转到 COMPLETED。
                     return safeActionFailure(traceId,
                             "当前会话已有待确认的申请，请先确认或取消后再发起新申请。");
                 }
+                memoryService.abandon(identity.userId(), conversationId);
                 return safeActionFailure(traceId, "暂时无法生成申请草稿，请检查信息后重试。");
             } catch (RuntimeException exception) {
                 log.error("[{}] PendingAction持久化失败", traceId);

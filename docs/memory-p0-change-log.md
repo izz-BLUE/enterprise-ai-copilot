@@ -172,8 +172,15 @@ Memory Runtime、Java endpoint contract 或 frontend；不执行 commit、push�
    多个活动 PendingAction——任一动作进入终态都会收口整条会话 Memory，
    误伤其他待确认动作的续接。修复：`PendingActionRepository` 新增
    `hasActiveByOwnerAndConversation`，`createPending` 在控制锁内拒绝同会话
-   第二个活动动作（409 `ACTION_CONVERSATION_IN_PROGRESS`），
-   `LangGraphAgentController` 对该错误码返回可操作提示；
+   第二个活动动作（409 `ACTION_CONVERSATION_IN_PROGRESS`）；
    `conversationId` 为 null（无 Memory 关联）不限制。测试：
    `BusinessActionPersistenceIntegrationTest` 新增 5 例（拒绝 / 取消后可再建 /
    过期后可再建 / 会话隔离 / 并发至多一个）+ 单测 2 例 + Controller 1 例。
+6. **重复请求误伤既有 Memory 回归修复（P1）**：第 5 项落地时 Controller
+   在判断错误码之前先 `memoryService.abandon`，导致同会话重复请求被拒
+   （`ACTION_CONVERSATION_IN_PROGRESS`）时，把既有活动动作的 ACTIVE Memory
+   误收口为 ABANDONED，既有动作确认时无法 ACTIVE → COMPLETED。修复：
+   错误码判断提前，该分支不 abandon（Memory 属于既有动作），其余创建失败
+   仍收口。测试：Controller 2 例（该错误码不调用 abandon / 其他错误码仍
+   abandon，使用 mock `AiTaskMemoryService` 验证）+ 集成 1 例（被拒后
+   Memory 保持 ACTIVE，既有动作仍可确认并转 COMPLETED）。
