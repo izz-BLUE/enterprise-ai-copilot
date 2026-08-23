@@ -7,6 +7,7 @@ import {
   readAuthState,
   saveAuthState,
 } from '../services/authApi.js'
+import { resolveUserIdentity } from '../services/chatHistoryStorage.js'
 
 export default function AuthGate() {
   const [storedAuth] = useState(() => readAuthState())
@@ -47,5 +48,15 @@ export default function AuthGate() {
     return <main className="auth-loading" aria-label="正在验证登录状态">正在验证登录状态…</main>
   }
   if (authState.status === 'anonymous') return <LoginPage onLogin={handleLogin} />
-  return <App authState={authState.value} onLogout={handleLogout} />
+  // <App /> 重挂载 key 与 localStorage key 必须来自同一稳定身份解析函数，
+  // 避免在 userId 缺失 / fallback 到 employeeId 或 username 时出现 key 不一致，
+  // 导致 A / B 账号之间的内存状态被复用。
+  const { reactKey } = resolveUserIdentity(authState.value?.user)
+  return (
+    <App
+      key={reactKey}
+      authState={authState.value}
+      onLogout={handleLogout}
+    />
+  )
 }
