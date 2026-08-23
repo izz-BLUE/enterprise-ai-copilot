@@ -18,7 +18,8 @@ const MODES = [
   },
 ]
 
-export default function Sidebar({ mode, onModeChange, loading }) {
+export default function Sidebar({ mode, onModeChange, loading, userRole, onAdminLogsOpen, showAdminLogs }) {
+  const isAdmin = userRole === 'ADMIN'
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -38,9 +39,9 @@ export default function Sidebar({ mode, onModeChange, loading }) {
             key={m.key}
             type="button"
             aria-label={`切换到${m.label}`}
-            aria-pressed={mode === m.key}
+            aria-pressed={mode === m.key && !showAdminLogs}
             data-mode={m.key}
-            className={`nav-item ${mode === m.key ? 'active' : ''}`}
+            className={`nav-item ${mode === m.key && !showAdminLogs ? 'active' : ''}`}
             onClick={() => onModeChange(m.key)}
             disabled={loading}
           >
@@ -49,9 +50,31 @@ export default function Sidebar({ mode, onModeChange, loading }) {
               <span className="nav-label">{m.label}</span>
               <span className="nav-desc">{m.desc}</span>
             </div>
-            {mode === m.key && <span className="nav-active-dot" />}
+            {mode === m.key && !showAdminLogs && <span className="nav-active-dot" />}
           </button>
         ))}
+
+        {isAdmin && (
+          <>
+            <div className="nav-section-label">管理工具</div>
+            <button
+              type="button"
+              aria-label="日志控制台"
+              aria-pressed={showAdminLogs}
+              data-mode="admin-logs"
+              className={`nav-item ${showAdminLogs ? 'active' : ''}`}
+              onClick={() => onAdminLogsOpen()}
+              disabled={loading}
+            >
+              <span className="nav-icon">📋</span>
+              <div className="nav-content">
+                <span className="nav-label">日志控制台</span>
+                <span className="nav-desc">管理员运行日志查询</span>
+              </div>
+              {showAdminLogs && <span className="nav-active-dot" />}
+            </button>
+          </>
+        )}
       </nav>
 
       <div className="sidebar-footer">

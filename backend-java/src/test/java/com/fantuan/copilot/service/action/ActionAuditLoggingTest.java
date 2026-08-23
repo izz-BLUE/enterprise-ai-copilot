@@ -1,5 +1,6 @@
 package com.fantuan.copilot.service.action;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -54,6 +55,7 @@ class ActionAuditLoggingTest {
                 mock(com.fantuan.copilot.gateway.leave.LeaveExecutionGateway.class),
                 new ActionNonceService(),
                 mock(com.fantuan.copilot.service.memory.AiTaskMemoryService.class),
+                new AdminLogBuffer(),
                 java.time.Clock.systemUTC());
 
         Logger logger = (Logger) LoggerFactory.getLogger(BusinessActionService.class);

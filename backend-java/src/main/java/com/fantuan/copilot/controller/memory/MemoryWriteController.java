@@ -1,5 +1,7 @@
 package com.fantuan.copilot.controller.memory;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
+import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.dto.memory.InternalMemoryWriteRequest;
 import com.fantuan.copilot.dto.memory.MemoryWriteResponse;
 import com.fantuan.copilot.model.memory.AiTaskMemory;
@@ -49,12 +51,15 @@ public class MemoryWriteController {
 
     private final AiTaskMemoryService memoryService;
     private final MemoryWriteScopeService scopeService;
+    private final AdminLogBuffer adminLogBuffer;
 
     @org.springframework.beans.factory.annotation.Autowired
     public MemoryWriteController(AiTaskMemoryService memoryService,
-                                 MemoryWriteScopeService scopeService) {
+                                 MemoryWriteScopeService scopeService,
+                                 AdminLogBuffer adminLogBuffer) {
         this.memoryService = memoryService;
         this.scopeService = scopeService;
+        this.adminLogBuffer = adminLogBuffer;
     }
 
     @PostMapping("/conversations/{conversationId}/write")
@@ -70,6 +75,7 @@ public class MemoryWriteController {
         // 1. Service-to-service token：复用现有 Python → Java 内部只读链路凭证。
         if (!scopeService.matchesInternalToken(internalToken)) {
             log.warn("[{}] Memory write 拒绝: internal token 校验失败", traceId);
+            recordMemoryRejected(traceId, "internal_token");
             throw new MemoryWriteException(HttpStatus.FORBIDDEN,
                     "MEMORY_INTERNAL_TOKEN_REQUIRED", "Memory write 服务间凭证无效或接口未启用。");
         }
@@ -80,6 +86,7 @@ public class MemoryWriteController {
             scope = scopeService.verify(scopeToken);
         } catch (IllegalArgumentException e) {
             log.warn("[{}] Memory write 拒绝: scope 校验失败", traceId);
+            recordMemoryRejected(traceId, "scope_invalid");
             throw new MemoryWriteException(HttpStatus.FORBIDDEN,
                     "MEMORY_SCOPE_INVALID", "Memory write trusted scope 无效或已过期。");
         }
@@ -88,6 +95,7 @@ public class MemoryWriteController {
         String safeConversationId = sanitizeConversationId(conversationId);
         if (!safeConversationId.equals(scope.conversationId())) {
             log.warn("[{}] Memory write 拒绝: conversation scope 不匹配", traceId);
+            recordMemoryRejected(traceId, "scope_mismatch");
             throw new MemoryWriteException(HttpStatus.FORBIDDEN,
                     "MEMORY_SCOPE_MISMATCH", "conversationId 与 trusted scope 不匹配。");
         }
@@ -104,6 +112,7 @@ public class MemoryWriteController {
         if (isTerminalAction(request.action()) || isTerminalStatus(request.status())) {
             log.warn("[{}] Memory write 拒绝: Python 写入口不允许终态命令 action={} status={}",
                     traceId, request.action(), request.status());
+            recordMemoryRejected(traceId, "terminal_not_allowed");
             throw new MemoryWriteException(HttpStatus.CONFLICT,
                     "MEMORY_TERMINAL_NOT_ALLOWED",
                     "Memory 写入口只接受 UPSERT + ACTIVE；终态由 Java 业务生命周期收口。");
@@ -126,10 +135,12 @@ public class MemoryWriteController {
             String msg = e.getMessage() == null ? "" : e.getMessage();
             if (msg.contains("trusted") || msg.contains("trusted key") || msg.contains("trusted 字段")) {
                 log.warn("[{}] Memory write 拒绝: {}", traceId, msg);
+                recordMemoryRejected(traceId, "trusted_key");
                 throw new MemoryWriteException(HttpStatus.BAD_REQUEST,
                         "MEMORY_TRUSTED_KEY_REJECTED", msg);
             }
             log.warn("[{}] Memory write 拒绝: {}", traceId, msg);
+            recordMemoryRejected(traceId, "payload_invalid");
             throw new MemoryWriteException(HttpStatus.BAD_REQUEST,
                     "MEMORY_PAYLOAD_INVALID", msg);
         }
@@ -141,6 +152,7 @@ public class MemoryWriteController {
                 savedStatus == null ? null : savedStatus.name(),
                 saved.updatedAt());
 
+        recordMemoryAccepted(traceId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body);
     }
 
@@ -180,5 +192,41 @@ public class MemoryWriteController {
                     "conversationId 格式非法：仅允许字母数字 / . _ - : 且不超过 64 字符");
         }
         return trimmed;
+    }
+
+    private void recordMemoryRejected(String traceId, String reason) {
+        try {
+            adminLogBuffer.record(
+                    AdminLogEvent.LEVEL_WARN,
+                    AdminLogEvent.CATEGORY_MEMORY,
+                    "MEMORY_WRITE_REJECTED",
+                    traceId,
+                    null,
+                    null,
+                    null,
+                    reason,
+                    null,
+                    "Memory write rejected");
+        } catch (RuntimeException ignored) {
+            // 日志记录失败不能影响主响应
+        }
+    }
+
+    private void recordMemoryAccepted(String traceId) {
+        try {
+            adminLogBuffer.record(
+                    AdminLogEvent.LEVEL_INFO,
+                    AdminLogEvent.CATEGORY_MEMORY,
+                    "MEMORY_WRITE_ACCEPTED",
+                    traceId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Memory write accepted");
+        } catch (RuntimeException ignored) {
+            // 日志记录失败不能影响主响应
+        }
     }
 }

@@ -1,5 +1,7 @@
 package com.fantuan.copilot.service.action;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
+import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.AnnualLeaveSummary;
@@ -51,6 +53,7 @@ public class BusinessActionService {
     private final LeaveExecutionGateway leaveExecutionGateway;
     private final ActionNonceService nonceService;
     private final AiTaskMemoryService memoryService;
+    private final AdminLogBuffer adminLogBuffer;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -61,6 +64,7 @@ public class BusinessActionService {
                                  LeaveExecutionGateway leaveExecutionGateway,
                                  ActionNonceService nonceService,
                                  AiTaskMemoryService memoryService,
+                                 AdminLogBuffer adminLogBuffer,
                                  Clock clock) {
         this.properties = properties;
         this.adminAccessService = adminAccessService;
@@ -69,6 +73,7 @@ public class BusinessActionService {
         this.leaveExecutionGateway = leaveExecutionGateway;
         this.nonceService = nonceService;
         this.memoryService = memoryService;
+        this.adminLogBuffer = adminLogBuffer;
         this.clock = clock;
     }
 
@@ -103,7 +108,11 @@ public class BusinessActionService {
         List<PendingAction> expired = actions.findExpired(now);
         actions.expirePending(now);
         // 批量过期动作先收口 Memory（与 PendingAction 同一事务，避免泄漏 ACTIVE 记忆）
-        expired.forEach(action -> closeMemory(action, TaskStatus.ABANDONED));
+        expired.forEach(action -> {
+            audit(action.originTraceId(), action, ActionStatus.PENDING_CONFIRMATION,
+                    ActionStatus.EXPIRED, "ACTION_EXPIRED", null, now);
+            closeMemory(action, TaskStatus.ABANDONED);
+        });
         if (actions.countActive() >= properties.getMaxPending()) {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
@@ -252,6 +261,8 @@ public class BusinessActionService {
     private void expireIfNeeded(PendingAction action, Instant now) {
         if (action.status() == ActionStatus.PENDING_CONFIRMATION && !now.isBefore(action.expiresAt())) {
             actions.markExpired(action.actionId(), now);
+            audit(action.originTraceId(), action, ActionStatus.PENDING_CONFIRMATION,
+                    ActionStatus.EXPIRED, "ACTION_EXPIRED", null, now);
             closeMemory(action, TaskStatus.ABANDONED);
             throw new ActionExpiredAfterUpdateException(action.actionId());
         }
@@ -394,6 +405,51 @@ public class BusinessActionService {
                         + "statusFrom={} statusTo={} resultCode={} requestRef={} createdAt={} completedAt={}",
                 traceId, action.originTraceId(), auditRef(action.actionId()), action.actionType(), from, to,
                 resultCode, auditRef(requestId), action.createdAt(), completedAt);
+        emitAdminLog(traceId, action, from, to, resultCode);
+    }
+
+    private void emitAdminLog(String traceId, PendingAction action, ActionStatus from,
+                              ActionStatus to, String resultCode) {
+        try {
+            String actionRef = auditRef(action.actionId());
+            String userRef = auditRef(action.employeeId());
+            String fromName = from == null ? null : from.name();
+            String toName = to == null ? null : to.name();
+            String level = switch (to) {
+                case SUCCEEDED -> AdminLogEvent.LEVEL_INFO;
+                case CANCELLED -> AdminLogEvent.LEVEL_INFO;
+                case EXPIRED -> AdminLogEvent.LEVEL_WARN;
+                case FAILED -> AdminLogEvent.LEVEL_ERROR;
+                default -> AdminLogEvent.LEVEL_INFO;
+            };
+            adminLogBuffer.record(
+                    level,
+                    AdminLogEvent.CATEGORY_BUSINESS_ACTION,
+                    resultCode,
+                    traceId,
+                    userRef,
+                    actionRef,
+                    fromName,
+                    toName,
+                    null,
+                    safeBusinessActionMessage(resultCode));
+        } catch (RuntimeException ex) {
+            log.warn("[{}] admin log 写入失败: {}", traceId, ex.getMessage());
+        }
+    }
+
+    private static String safeBusinessActionMessage(String resultCode) {
+        return switch (resultCode) {
+            case "ACTION_CREATED" -> "Business action created";
+            case "ACTION_SUCCEEDED" -> "Business action succeeded";
+            case "ACTION_CANCELLED" -> "Business action cancelled";
+            case "ACTION_EXPIRED" -> "Business action expired";
+            case "ACTION_FAILED" -> "Business action failed";
+            case "ACTION_STALE" -> "Business action stale";
+            case "ACTION_CONVERSATION_IN_PROGRESS" -> "Conversation has active action";
+            case "ACTION_CAPACITY_EXCEEDED" -> "Pending action capacity exceeded";
+            default -> "Business action event";
+        };
     }
 
     static String auditRef(String rawId) {

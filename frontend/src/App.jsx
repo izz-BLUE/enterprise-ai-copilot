@@ -5,6 +5,7 @@ import WelcomeScreen from './components/WelcomeScreen'
 import ChatMessage, { UserMessage, LoadingMessage } from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import AdminPanel from './components/AdminPanel'
+import AdminLogConsole from './components/AdminLogConsole'
 import {
   BusinessActionApiError,
   cancelBusinessAction,
@@ -112,6 +113,7 @@ function App({ authState, onLogout }) {
   })
   const [adminToken, setAdminToken] = useState('')
   const [error, setError] = useState(null)
+  const [showAdminLogs, setShowAdminLogs] = useState(false)
   const chatEndRef = useRef(null)
   const actionSecretsRef = useRef(new Map())
   const idempotencyKeysRef = useRef(new Map())
@@ -566,7 +568,14 @@ function App({ authState, onLogout }) {
 
   return (
     <div className="app-layout">
-      <Sidebar mode={mode} onModeChange={handleModeChange} loading={loading || actionBusy} />
+      <Sidebar
+        mode={mode}
+        onModeChange={handleModeChange}
+        loading={loading || actionBusy}
+        userRole={authState?.user?.role}
+        onAdminLogsOpen={() => setShowAdminLogs(true)}
+        showAdminLogs={showAdminLogs}
+      />
 
       <main className="main-area">
         <div className="main-header">
@@ -610,7 +619,12 @@ function App({ authState, onLogout }) {
         </div>
 
         <div className="chat-area">
-          {messages.length === 0 ? (
+          {showAdminLogs ? (
+            <AdminLogConsole
+              accessToken={authState.accessToken}
+              onBackToChat={() => setShowAdminLogs(false)}
+            />
+          ) : messages.length === 0 ? (
             <WelcomeScreen
               onQuickQuestion={handleQuickQuestion}
               loading={loading}
@@ -643,15 +657,17 @@ function App({ authState, onLogout }) {
           )}
         </div>
 
-        <div className="input-section">
-          <AdminPanel adminToken={adminToken} setAdminToken={setAdminToken} />
-          <ChatInput
-            input={input}
-            setInput={setInput}
-            onSend={sendMessage}
-            loading={loading}
-          />
-        </div>
+        {!showAdminLogs && (
+          <div className="input-section">
+            <AdminPanel adminToken={adminToken} setAdminToken={setAdminToken} />
+            <ChatInput
+              input={input}
+              setInput={setInput}
+              onSend={sendMessage}
+              loading={loading}
+            />
+          </div>
+        )}
       </main>
 
       <InfoPanel
