@@ -448,14 +448,9 @@ const readChatHistoryRecord = async (page, userId) => {
   }, { key: `${STORAGE_KEY_PREFIX}${userId}` })
 }
 
-const clearChatHistory = async (page, userId) => {
-  await page.evaluate(({ key }) => window.localStorage.removeItem(key),
-    { key: `${STORAGE_KEY_PREFIX}${userId}` })
-}
-
 test('Confirm 成功后 reload: 卡片仍显示已提交 + 申请编号 + 无任何按钮 + conversationId 不复用', async ({ page }) => {
   let confirmCallCount = 0
-  let conversationIdAfterConfirm = null
+  let conversationIdAfterConfirm
 
   await page.route('**/api/agent/actions/**/confirm', async route => {
     confirmCallCount += 1
