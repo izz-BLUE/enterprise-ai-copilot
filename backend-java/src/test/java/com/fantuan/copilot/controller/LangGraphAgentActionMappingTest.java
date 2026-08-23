@@ -1,5 +1,6 @@
 package com.fantuan.copilot.controller;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
 import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.auth.AuthenticatedUser;
@@ -19,6 +20,8 @@ import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
+import com.fantuan.copilot.service.memory.NoopAiTaskMemoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -48,7 +51,10 @@ class LangGraphAgentActionMappingTest {
         when(identities.requireIdentity("unknown-sensitive-value")).thenThrow(new ActionException(
                 HttpStatus.FORBIDDEN, "DEMO_IDENTITY_INVALID", "演示身份无效。", null, null));
         LangGraphAgentController controller = new LangGraphAgentController(restTemplate, bulkhead,
-                mock(AdminAccessService.class), mock(BusinessActionService.class), identities);
+                mock(AdminAccessService.class), mock(BusinessActionService.class),
+                new IdentityContext(identities), new NoopAiTaskMemoryService(),
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("identity-trace");
         when(request.getHeader("X-Demo-User-Id")).thenReturn("unknown-sensitive-value");
@@ -95,7 +101,10 @@ class LangGraphAgentActionMappingTest {
                 });
 
         LangGraphAgentController controller = new LangGraphAgentController(
-                restTemplate, bulkhead, admin, actionService, identities);
+                restTemplate, bulkhead, admin, actionService, new IdentityContext(identities),
+                new NoopAiTaskMemoryService(),
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("java-trace-123");
@@ -147,7 +156,9 @@ class LangGraphAgentActionMappingTest {
                         "ACTION_CONVERSATION_IN_PROGRESS", "当前会话已有待确认的申请。", null, null));
 
         LangGraphAgentController controller = new LangGraphAgentController(
-                restTemplate, bulkhead, admin, actionService, identityContext, memoryService);
+                restTemplate, bulkhead, admin, actionService, identityContext, memoryService,
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("java-trace-123");
@@ -192,7 +203,9 @@ class LangGraphAgentActionMappingTest {
                         "BUSINESS_RULE_VIOLATION", "年假申请参数不完整。", null, null));
 
         LangGraphAgentController controller = new LangGraphAgentController(
-                restTemplate, bulkhead, admin, actionService, identityContext, memoryService);
+                restTemplate, bulkhead, admin, actionService, identityContext, memoryService,
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("java-trace-123");
@@ -227,7 +240,10 @@ class LangGraphAgentActionMappingTest {
                         List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))));
         try {
             LangGraphAgentController controller = new LangGraphAgentController(
-                    restTemplate, bulkhead, mock(AdminAccessService.class), actionService, identities);
+                    restTemplate, bulkhead, mock(AdminAccessService.class), actionService,
+                    new IdentityContext(identities), new NoopAiTaskMemoryService(),
+                    new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                    new AdminLogBuffer());
             ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
             HttpServletRequest request = mock(HttpServletRequest.class);
             when(request.getAttribute("traceId")).thenReturn("spoof-trace");

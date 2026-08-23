@@ -142,7 +142,8 @@ class BusinessActionServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
         BusinessActionService service = new BusinessActionService(properties,
                 new AdminAccessService(ADMIN), actions, accounts, gateway,
-                new ActionNonceService(), mock(AiTaskMemoryService.class), clock);
+                new ActionNonceService(), mock(AiTaskMemoryService.class),
+                new com.fantuan.copilot.adminlog.AdminLogBuffer(), clock);
         return new Fixture(properties, actions, accounts, gateway, service);
     }
 

@@ -1,6 +1,8 @@
 package com.fantuan.copilot.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
+import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.dto.auth.AuthErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -14,10 +16,14 @@ import java.io.IOException;
 
 @Component
 public class SecurityErrorHandlers {
-    private final ObjectMapper objectMapper;
+    private static final String ADMIN_PATH = "/api/admin/";
 
-    public SecurityErrorHandlers(ObjectMapper objectMapper) {
+    private final ObjectMapper objectMapper;
+    private final AdminLogBuffer adminLogBuffer;
+
+    public SecurityErrorHandlers(ObjectMapper objectMapper, AdminLogBuffer adminLogBuffer) {
         this.objectMapper = objectMapper;
+        this.adminLogBuffer = adminLogBuffer;
     }
 
     public AuthenticationEntryPoint authenticationEntryPoint() {
@@ -26,8 +32,35 @@ public class SecurityErrorHandlers {
     }
 
     public AccessDeniedHandler accessDeniedHandler() {
-        return (request, response, exception) -> write(response, request,
-                HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "无权访问该资源。");
+        return (request, response, exception) -> {
+            recordAdminAccessDenied(request);
+            write(response, request,
+                    HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "无权访问该资源。");
+        };
+    }
+
+    private void recordAdminAccessDenied(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null || !path.startsWith(ADMIN_PATH)) {
+            return;
+        }
+        Object traceIdAttr = request.getAttribute("traceId");
+        String traceId = traceIdAttr == null ? "unknown" : traceIdAttr.toString();
+        try {
+            adminLogBuffer.record(
+                    AdminLogEvent.LEVEL_WARN,
+                    AdminLogEvent.CATEGORY_SECURITY,
+                    "ADMIN_ACCESS_DENIED",
+                    traceId,
+                    null,
+                    null,
+                    null,
+                    String.valueOf(HttpServletResponse.SC_FORBIDDEN),
+                    null,
+                    "Admin endpoint access denied");
+        } catch (RuntimeException ignored) {
+            // 日志记录失败不能阻断主响应
+        }
     }
 
     private void write(HttpServletResponse response, HttpServletRequest request,

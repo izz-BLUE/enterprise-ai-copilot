@@ -100,6 +100,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/demo/identities").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/agent/**").authenticated()
                         // Memory write authenticates with X-Internal-Token plus a Java-signed,
                         // conversation-bound scope; it must not require an end-user JWT.

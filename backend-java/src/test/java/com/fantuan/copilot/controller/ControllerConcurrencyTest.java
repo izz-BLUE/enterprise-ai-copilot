@@ -1,14 +1,18 @@
 package com.fantuan.copilot.controller;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
 import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.ChatResponse;
+import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoRole;
+import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
+import com.fantuan.copilot.service.memory.NoopAiTaskMemoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -52,7 +56,10 @@ class ControllerConcurrencyTest {
         HttpServletRequest servletRequest = requestWithTraceId("trace-agent");
         LangGraphAgentController controller = new LangGraphAgentController(
                 mock(RestTemplate.class), bulkhead, mock(AdminAccessService.class),
-                mock(BusinessActionService.class), identitiesWithDemoUser());
+                mock(BusinessActionService.class), new IdentityContext(identitiesWithDemoUser()),
+                new NoopAiTaskMemoryService(),
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
                 new ChatRequest("几点上班？"), requestWithDemoIdentity(servletRequest));
 

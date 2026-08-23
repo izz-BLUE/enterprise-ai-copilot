@@ -1,5 +1,6 @@
 package com.fantuan.copilot.controller.memory;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import com.fantuan.copilot.dto.memory.InternalMemoryWriteRequest;
 import com.fantuan.copilot.dto.memory.MemoryWriteResponse;
 import com.fantuan.copilot.model.memory.AiTaskMemory;
@@ -50,7 +51,7 @@ class MemoryWriteControllerTest {
         scopeService = new MemoryWriteScopeService(
                 INTERNAL_TOKEN,
                 Clock.fixed(Instant.parse("2026-08-20T00:00:00Z"), ZoneOffset.UTC));
-        controller = new MemoryWriteController(memoryService, scopeService);
+        controller = new MemoryWriteController(memoryService, scopeService, new AdminLogBuffer());
         ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
         validator = factory.getValidator();
     }

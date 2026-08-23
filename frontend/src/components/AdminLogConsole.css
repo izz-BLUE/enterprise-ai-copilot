@@ -1,0 +1,146 @@
+.admin-log-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-lg);
+  gap: var(--space-md);
+  overflow: auto;
+}
+
+.admin-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.admin-log-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.admin-log-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.admin-log-refresh,
+.admin-log-back {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.admin-log-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-log-filters {
+  display: flex;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.admin-log-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.admin-log-filter select,
+.admin-log-filter input {
+  min-width: 140px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.admin-log-error {
+  color: var(--color-danger, #c0392b);
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  margin: 0;
+}
+
+.admin-log-empty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.admin-log-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+
+.admin-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-log-table th,
+.admin-log-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-light);
+  white-space: nowrap;
+}
+
+.admin-log-table thead th {
+  background: var(--color-surface-alt, rgba(0, 0, 0, 0.03));
+  font-weight: 600;
+}
+
+.admin-log-cell-time {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary);
+}
+
+.admin-log-cell-trace {
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-log-level {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.admin-log-level-INFO {
+  background: rgba(46, 160, 67, 0.15);
+  color: #2ea043;
+}
+
+.admin-log-level-WARN {
+  background: rgba(212, 145, 0, 0.18);
+  color: #b38600;
+}
+
+.admin-log-level-ERROR {
+  background: rgba(192, 57, 43, 0.18);
+  color: #c0392b;
+}

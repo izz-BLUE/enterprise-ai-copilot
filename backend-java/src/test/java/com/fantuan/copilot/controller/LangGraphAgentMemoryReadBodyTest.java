@@ -2,6 +2,7 @@ package com.fantuan.copilot.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.auth.AuthenticatedUser;
 import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
@@ -14,6 +15,7 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
 import com.fantuan.copilot.identity.IdentityContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -79,7 +81,9 @@ class LangGraphAgentMemoryReadBodyTest {
         memoryService = mock(AiTaskMemoryService.class);
         identities = mock(DemoIdentityService.class);
         controller = new LangGraphAgentController(restTemplate, bulkhead, admin, actionService,
-                new IdentityContext(identities), memoryService);
+                new IdentityContext(identities), memoryService,
+                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new AdminLogBuffer());
         ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
 
         when(admin.isAdmin(any())).thenReturn(false);

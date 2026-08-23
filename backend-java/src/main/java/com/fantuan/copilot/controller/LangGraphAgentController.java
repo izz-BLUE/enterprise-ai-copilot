@@ -1,5 +1,7 @@
 package com.fantuan.copilot.controller;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
+import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
 import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
@@ -10,10 +12,8 @@ import com.fantuan.copilot.model.memory.AiTaskMemory;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
-import com.fantuan.copilot.service.memory.NoopAiTaskMemoryService;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 
@@ -109,6 +109,7 @@ public class LangGraphAgentController {
     private final IdentityContext identityContext;
     private final AiTaskMemoryService memoryService;
     private final MemoryWriteScopeService memoryWriteScopeService;
+    private final AdminLogBuffer adminLogBuffer;
 
     @Value("${python.agent.base-url}")
     private String agentBaseUrl;
@@ -120,7 +121,8 @@ public class LangGraphAgentController {
                                     BusinessActionService businessActionService,
                                     IdentityContext identityContext,
                                     AiTaskMemoryService memoryService,
-                                    MemoryWriteScopeService memoryWriteScopeService) {
+                                    MemoryWriteScopeService memoryWriteScopeService,
+                                    AdminLogBuffer adminLogBuffer) {
         this.restTemplate = restTemplate;
         this.pythonAgentBulkhead = pythonAgentBulkhead;
         this.adminAccessService = adminAccessService;
@@ -128,30 +130,7 @@ public class LangGraphAgentController {
         this.identityContext = identityContext;
         this.memoryService = memoryService;
         this.memoryWriteScopeService = memoryWriteScopeService;
-    }
-
-    /** Compatibility constructor retained for memory read-path unit tests. */
-    public LangGraphAgentController(RestTemplate restTemplate,
-                                    PythonAgentBulkhead pythonAgentBulkhead,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    IdentityContext identityContext,
-                                    AiTaskMemoryService memoryService) {
-        this(restTemplate, pythonAgentBulkhead, adminAccessService, businessActionService,
-                identityContext, memoryService,
-                new MemoryWriteScopeService("", java.time.Clock.systemUTC()));
-    }
-
-    /** Compatibility constructor retained for standalone DemoIdentity tests. */
-    public LangGraphAgentController(RestTemplate restTemplate,
-                                    PythonAgentBulkhead pythonAgentBulkhead,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    DemoIdentityService demoIdentityService) {
-        this(restTemplate, pythonAgentBulkhead, adminAccessService, businessActionService,
-                new IdentityContext(demoIdentityService),
-                new NoopAiTaskMemoryService(),
-                new MemoryWriteScopeService("", java.time.Clock.systemUTC()));
+        this.adminLogBuffer = adminLogBuffer;
     }
 
     /**
@@ -167,12 +146,14 @@ public class LangGraphAgentController {
                                                            HttpServletRequest httpRequest) {
         String traceId = (String) httpRequest.getAttribute("traceId");
         String presentedToken = httpRequest.getHeader("X-Admin-Token");
+        long started = System.nanoTime();
         VerifiedIdentity identity;
         try {
             identity = identityContext.require(httpRequest);
         } catch (ActionException exception) {
             return safeIdentityFailure(traceId, exception);
         }
+        recordAgentEvent(traceId, identity, "AGENT_REQUEST_RECEIVED", null, started);
         boolean allowEval = adminAccessService.isAdmin(presentedToken);
         boolean allowBusinessActions = businessActionService != null
                 && identity != null
@@ -238,19 +219,29 @@ public class LangGraphAgentController {
 
             log.info("[{}] Python 响应成功", traceId);
             pythonResponse = response.getBody();
+            recordAgentEvent(traceId, identity, "AGENT_REQUEST_COMPLETED",
+                    AdminLogEvent.LEVEL_INFO, started);
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode().value() == HttpStatus.TOO_MANY_REQUESTS.value()) {
                 log.warn("[{}] Python 并发已满", traceId);
+                recordAgentEvent(traceId, identity, "AGENT_REQUEST_FAILED",
+                        AdminLogEvent.LEVEL_WARN, started);
                 return busy(traceId);
             }
             log.error("[{}] Python 返回 HTTP 4xx: status={}", traceId, e.getStatusCode());
+            recordAgentEvent(traceId, identity, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_ERROR, started);
             return ResponseEntity.ok(fallback(traceId));
         } catch (Exception e) {
             log.error("[{}] 调用 Python 发生未知异常", traceId, e);
+            recordAgentEvent(traceId, identity, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_ERROR, started);
             return ResponseEntity.ok(fallback(traceId));
         }
 
         if (pythonResponse == null) {
+            recordAgentEvent(traceId, identity, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_ERROR, started);
             return ResponseEntity.ok(fallback(traceId));
         }
         PendingActionView pendingAction = null;
@@ -336,5 +327,37 @@ public class LangGraphAgentController {
         return ResponseEntity.status(exception.httpStatus())
                 .cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(response);
+    }
+
+    private void recordAgentEvent(String traceId, VerifiedIdentity identity, String eventName,
+                                  String level, long started) {
+        try {
+            // 第一版不记录 userRef：避免 hashCode 低熵碰撞与可枚举；
+            // 排查依赖 traceId / category / event / durationMs 已足够。
+            String safeLevel = level == null ? AdminLogEvent.LEVEL_INFO : level;
+            long elapsed = (System.nanoTime() - started) / 1_000_000L;
+            adminLogBuffer.record(
+                    safeLevel,
+                    AdminLogEvent.CATEGORY_AGENT,
+                    eventName,
+                    traceId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    elapsed,
+                    safeAgentMessage(eventName));
+        } catch (RuntimeException ignored) {
+            // 日志记录失败不能影响主响应
+        }
+    }
+
+    private static String safeAgentMessage(String eventName) {
+        return switch (eventName) {
+            case "AGENT_REQUEST_RECEIVED" -> "LangGraph Agent request received";
+            case "AGENT_REQUEST_COMPLETED" -> "LangGraph Agent request completed";
+            case "AGENT_REQUEST_FAILED" -> "LangGraph Agent request failed";
+            default -> "LangGraph Agent event";
+        };
     }
 }
