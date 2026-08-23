@@ -445,7 +445,7 @@ const readChatHistoryRecord = async (page, userId) => {
   return page.evaluate(({ key }) => {
     const raw = window.localStorage.getItem(key)
     return raw ? JSON.parse(raw) : null
-  }, { key: `${STORAGE_KEY_PREFIX}${userId}` })
+  }, { key: `${STORAGE_KEY_PREFIX}${userId}.agent` })
 }
 
 test('Confirm 成功后 reload: 卡片仍显示已提交 + 申请编号 + 无任何按钮 + conversationId 不复用', async ({ page }) => {
@@ -575,7 +575,7 @@ test('已成功卡片在 reload 后即便持久化中残留 retryDecision 也无
     const assistant = record.messages.find(m => m.type === 'assistant')
     assistant.actionUi.retryDecision = 'confirm'
     window.localStorage.setItem(key, JSON.stringify(record))
-  }, { key: `${STORAGE_KEY_PREFIX}U10001` })
+  }, { key: `${STORAGE_KEY_PREFIX}U10001.agent` })
 
   await page.reload()
   await expect(page.getByText('模拟申请已提交')).toBeVisible()

@@ -842,3 +842,88 @@ test('real-shape-restore-error-retry-buttons: phase=error + retryDecision=confir
   assert.equal(out[0].actionUi.retryDecision, null,
     '恢复时必须强制清空 retryDecision，避免渲染重试按钮')
 })
+// =============================================================================
+// 按 (用户, 模式) 隔离：agent / rag 各自独立 key、互不覆盖、互不删除
+// =============================================================================
+
+test('mode-key: historyKeyForMode 生成 <storageKey>.<mode> 并拒绝非法模式', async () => {
+  const { mod } = await buildHarness()
+  assert.equal(mod.historyKeyForMode('enterprise-ai-copilot.chat-history.u1', 'agent'),
+    'enterprise-ai-copilot.chat-history.u1.agent')
+  assert.equal(mod.historyKeyForMode('enterprise-ai-copilot.chat-history.u1', 'rag'),
+    'enterprise-ai-copilot.chat-history.u1.rag')
+  assert.equal(mod.historyKeyForMode('enterprise-ai-copilot.chat-history.u1', 'admin-logs'), null,
+    '非问答模式必须被白名单拒绝')
+  assert.equal(mod.historyKeyForMode('', 'agent'), null)
+  assert.equal(mod.historyKeyForMode(null, 'agent'), null)
+})
+
+test('mode-isolation: agent 与 rag 各自写入读取,互不覆盖、互不删除', async () => {
+  const { mod, ls } = await buildHarness()
+  const base = 'enterprise-ai-copilot.chat-history.u1'
+  const agentMsgs = [
+    { id: 'a1', type: 'user', question: 'agent-q' },
+    { id: 'a2', type: 'assistant', question: 'agent-q', result: { answer: 'agent-a' } },
+  ]
+  const ragMsgs = [
+    { id: 'r1', type: 'user', question: 'rag-q' },
+    { id: 'r2', type: 'assistant', question: 'rag-q', result: { answer: 'rag-a' } },
+  ]
+  mod.writeChatHistory(mod.historyKeyForMode(base, 'agent'), {
+    conversationId: 'conv-agent', messages: agentMsgs,
+  })
+  mod.writeChatHistory(mod.historyKeyForMode(base, 'rag'), {
+    conversationId: null, messages: ragMsgs,
+  })
+  const agent = mod.readHistoryByMode(base, 'agent')
+  const rag = mod.readHistoryByMode(base, 'rag')
+  assert.equal(agent.messages.length, 2)
+  assert.equal(agent.conversationId, 'conv-agent')
+  assert.equal(rag.messages.length, 2)
+  assert.equal(rag.conversationId, null)
+  assert.equal(agent.messages[0].question, 'agent-q')
+  assert.equal(rag.messages[0].question, 'rag-q')
+
+  // 清空 rag 不影响 agent(通过 clearChatHistory 删除单个模式 key)
+  mod.clearChatHistory(mod.historyKeyForMode(base, 'rag'))
+  assert.equal(mod.readHistoryByMode(base, 'rag'), null)
+  assert.equal(mod.readHistoryByMode(base, 'agent').messages.length, 2,
+    '清空 rag 绝不能影响 agent 历史')
+})
+
+test('mode-migrate: 旧格式(无后缀)首次按默认 agent 迁移,写盘成功才移除旧 key', async () => {
+  const { mod, ls } = await buildHarness()
+  const base = 'enterprise-ai-copilot.chat-history.u1'
+  const legacyMsgs = [
+    { id: 'l1', type: 'user', question: 'legacy-q' },
+    { id: 'l2', type: 'assistant', question: 'legacy-q', result: { answer: 'legacy-a' } },
+  ]
+  mod.writeChatHistory(base, { conversationId: 'conv-legacy', messages: legacyMsgs })
+
+  const migrated = mod.readHistoryByMode(base, 'agent')
+  assert.equal(migrated.messages.length, 2)
+  assert.equal(migrated.conversationId, 'conv-legacy')
+  // 新 .agent key 已生成,旧 key 被移除(数据已迁移,不丢失)
+  assert.ok(mod.readChatHistory(mod.historyKeyForMode(base, 'agent')), '.agent key 必须存在')
+  assert.equal(ls.getItem(base), null, '迁移成功后旧格式 key 移除,避免清空后历史"复活"')
+
+  // rag 模式不触发旧格式迁移(旧格式视为 agent 默认模式)
+  mod.writeChatHistory(base, { conversationId: 'conv-legacy-2', messages: legacyMsgs })
+  assert.equal(mod.readHistoryByMode(base, 'rag'), null)
+  assert.ok(ls.getItem(base), 'rag 读取不能把旧 key 挪走')
+})
+
+test('last-mode: 按用户独立读写,非法值回退 null', async () => {
+  const { mod } = await buildHarness()
+  const base = 'enterprise-ai-copilot.chat-history.u1'
+  assert.equal(mod.readLastMode(base), null, '无记录时返回 null')
+  mod.writeLastMode(base, 'rag')
+  assert.equal(mod.readLastMode(base), 'rag')
+  mod.writeLastMode(base, 'agent')
+  assert.equal(mod.readLastMode(base), 'agent')
+  // 非法值 / 损坏数据回退 null
+  globalThis.localStorage.setItem(base + mod.__TESTING__.LAST_MODE_SUFFIX, 'admin-logs')
+  assert.equal(mod.readLastMode(base), null)
+  mod.writeLastMode(base, 'admin-logs')
+  assert.equal(mod.readLastMode(base), null, '非法模式不得写入')
+})
