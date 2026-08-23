@@ -1,9 +1,11 @@
 package com.fantuan.copilot.controller;
 
+import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -19,6 +21,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "BUILD_TIME=2026-07-15T06:30:00Z"
 })
 class VersionControllerTest {
+
+    // WebMvcTest 切片会实例化 Filter 实现（TraceIdFilter），其构造依赖
+    // AdminLogBuffer（@Component 不在切片内），此处用 mock 补齐依赖。
+    @MockBean
+    private AdminLogBuffer adminLogBuffer;
 
     @Autowired
     private MockMvc mockMvc;

@@ -86,6 +86,9 @@ export default function AdminLogConsole({ accessToken, onBackToChat }) {
   }, [accessToken, level, category, traceId])
 
   useEffect(() => {
+    // load 为异步请求封装，setState 均发生在 await 之后，不构成同步
+    // setState 级联渲染；"手动刷新"按钮复用同一函数。规则为静态误报。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
   }, [load])
 

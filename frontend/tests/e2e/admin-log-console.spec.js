@@ -284,7 +284,9 @@ test('EMPLOYEE 端到端：日志控制台往返 + 待确认卡片 + nonce + con
     try {
       window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid)
       window.sessionStorage.removeItem('enterprise-ai-copilot.conversation-id')
-    } catch {}
+    } catch {
+      // 隐私模式或存储被禁用时忽略，测试继续
+    }
   }, USER_ID)
 
   await page.route('**/api/auth/me', route =>
@@ -515,7 +517,9 @@ test('ADMIN 端到端：待确认卡片 → 日志控制台往返 → 卡片保�
     try {
       window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid)
       window.sessionStorage.removeItem('enterprise-ai-copilot.conversation-id')
-    } catch {}
+    } catch {
+      // 隐私模式或存储被禁用时忽略，测试继续
+    }
   }, ADMIN_E2E_USER_ID)
 
   await page.route('**/api/auth/me', route =>
