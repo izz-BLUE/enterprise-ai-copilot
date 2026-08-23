@@ -11,19 +11,27 @@ import {
   confirmBusinessAction,
 } from './services/businessActionApi'
 import { authenticatedFetch, AuthExpiredError } from './services/authApi'
+import {
+  clearChatHistory,
+  isHistoryTerminal,
+  isTerminalActionStatus,
+  readChatHistory,
+  resolveUserIdentity,
+  writeChatHistory,
+} from './services/chatHistoryStorage'
 import './App.css'
 
 const JAVA_BASE_URL = ''  // Vite proxy 转发到 localhost:8080
 
-const TERMINAL_ACTION_ERRORS = new Set([
-  'ACTION_EXPIRED',
-  'ACTION_NOT_FOUND',
-  'INVALID_CONFIRMATION_NONCE',
-  'ACTION_STATE_CONFLICT',
-  'ACTION_STALE',
-  'DEMO_IDENTITY_REQUIRED',
-  'DEMO_IDENTITY_INVALID',
-  'DEMO_IDENTITY_DISABLED',
+// 仅当 Java 显式返回 `status` 字段且属于以下白名单时，才视为权威业务终态。
+// 其他 errorCode（如 INVALID_CONFIRMATION_NONCE / ACTION_NOT_FOUND / DEMO_IDENTITY_*
+// 等）只代表前端 UI 决策，不代表 PendingAction 已进入业务终态，必须由 Java 在
+// response.body.status 中显式给出才能同步。
+const AUTHORITATIVE_TERMINAL_STATUSES = new Set([
+  'SUCCEEDED',
+  'CANCELLED',
+  'EXPIRED',
+  'FAILED',
 ])
 
 const RETRYABLE_ACTION_ERRORS = new Set([
@@ -81,16 +89,45 @@ function App({ authState, onLogout }) {
   const [mode, setMode] = useState('agent')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [messages, setMessages] = useState([])
+  // 本地聊天历史恢复：同一浏览器、同一账号下，刷新 / 关闭重开 / 退出再登录后
+  // 从 localStorage 读取上一次的 conversationId + 聊天记录。
+  // - 仅恢复公开字段，confirmationNonce / token 等敏感凭据永不落盘；
+  // - 历史 PendingAction 的 UI 状态由 chatHistoryStorage.restoreMessages 恢复：
+  //     * 仍处 PENDING_CONFIRMATION 的草稿：nonce 不可恢复，确认 / 取消按钮
+  //       禁用并展示"确认凭证已失效，请重新生成申请"；
+  //     * SUCCEEDED / CANCELLED / EXPIRED / FAILED：保留用户实际看到的终态 UI，
+  //       不得被改成"草稿已过期"。
+  // - 若历史最后一条已经是业务终态，conversationId 不再同步到 sessionStorage，
+  //   下次发起新业务任务时让服务端分配新会话命名空间。
+  // <App /> 在 AuthGate 处按 resolveUserIdentity(user).reactKey 重新挂载，
+  // 因此这里的 lazy init 只在挂载时跑一次；后续 user 变化走的是组件 remount。
+  // 当前账号的稳定身份与 localStorage key 同步来自同一解析函数，避免不同
+  // 账号之间复用 React state。
+  const { storageKey: chatHistoryKey } = resolveUserIdentity(authState?.user)
+  const [messages, setMessages] = useState(() => {
+    if (!chatHistoryKey) return []
+    const restored = readChatHistory(chatHistoryKey)
+    if (!restored) return []
+    return restored.messages
+  })
   const [adminToken, setAdminToken] = useState('')
   const [error, setError] = useState(null)
   const chatEndRef = useRef(null)
   const actionSecretsRef = useRef(new Map())
   const idempotencyKeysRef = useRef(new Map())
   const actionLocksRef = useRef(new Set())
-  // Phase 2 conversationId：从 sessionStorage 恢复，确保刷新后会话命名空间连续。
-  // 不是可信身份，仅作为分组 hint 传给 Java。
-  const conversationIdRef = useRef(readStoredConversationId())
+  // Phase 2 conversationId：挂载时同步恢复（sessionStorage 缓存 + localStorage 历史）
+  // - 业务终态历史丢弃 conversationId，让服务端分配新会话；
+  // - 不是可信身份，仅作为分组 hint 传给 Java。
+  const initialConversationId = (() => {
+    if (!chatHistoryKey) return readStoredConversationId()
+    const restored = readChatHistory(chatHistoryKey)
+    if (restored?.conversationId && !isHistoryTerminal(restored.messages)) {
+      return restored.conversationId
+    }
+    return readStoredConversationId()
+  })()
+  const conversationIdRef = useRef(initialConversationId)
 
   const clearConversationId = () => {
     conversationIdRef.current = null
@@ -109,6 +146,8 @@ function App({ authState, onLogout }) {
     message.actionUi?.phase === 'confirming' || message.actionUi?.phase === 'cancelling')
 
   const clearSession = () => {
+    // 退出登录 / 401：仅清空页面内存中的消息、登录态和敏感凭据。
+    // 不删除当前账号的 localStorage 聊天历史——重新登录后再恢复。
     setMessages([])
     setInput('')
     setAdminToken('')
@@ -124,6 +163,28 @@ function App({ authState, onLogout }) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  // 挂载时把从 localStorage 恢复的 conversationId 同步回 sessionStorage，
+  // 让"同一 tab 刷新后还在用同一会话命名空间"的行为对齐 Phase 2 设计。
+  // 终态历史已被 conversationIdRef init 过滤掉，不会写入 sessionStorage。
+  useEffect(() => {
+    if (conversationIdRef.current && !sessionStorage.getItem('enterprise-ai-copilot.conversation-id')) {
+      writeStoredConversationId(conversationIdRef.current)
+    }
+    // 仅在挂载时执行一次：conversationIdRef 是 ref，不加入依赖。
+  }, [])
+
+  // 新消息 / conversationId 变化后，同步写入当前账号的 localStorage。
+  // 仅持久化 conversationId + messages；nonce / token / Idempotency-Key
+  // 通过 stripSensitive 在写入前剥离。
+  useEffect(() => {
+    if (!chatHistoryKey) return
+    if (messages.length === 0 && !conversationIdRef.current) return
+    writeChatHistory(chatHistoryKey, {
+      conversationId: conversationIdRef.current,
+      messages,
+    })
+  }, [chatHistoryKey, messages])
+
   const handleQuickQuestion = (q) => {
     setInput(q)
     setError(null)
@@ -137,6 +198,8 @@ function App({ authState, onLogout }) {
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
+    clearConversationId()
+    if (chatHistoryKey) clearChatHistory(chatHistoryKey)
   }
 
   const handleClearMessages = () => {
@@ -146,6 +209,8 @@ function App({ authState, onLogout }) {
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
+    clearConversationId()
+    if (chatHistoryKey) clearChatHistory(chatHistoryKey)
   }
 
   const updateActionUi = (messageId, nextUi) => {
@@ -156,6 +221,72 @@ function App({ authState, onLogout }) {
         actionUi: typeof nextUi === 'function' ? nextUi(message.actionUi) : nextUi,
       }
     }))
+  }
+
+  // 同步 PendingAction.status：仅在 Java 真实响应带来的权威业务终态时调用。
+  // - confirm 成功 → 'SUCCEEDED'
+  // - cancel 成功 → 'CANCELLED'
+  // 不根据本地计时器、LLM 文本或前端推断更新；不在错误路径上调，避免
+  // 与 Java `errorCode` 携带的"诊断态"混淆。
+  const syncPendingActionStatus = (messageId, status) => {
+    if (typeof status !== 'string' || status.length === 0) return
+    setMessages(prev => prev.map(message => {
+      if (message.id !== messageId) return message
+      if (!message.result || typeof message.result !== 'object') return message
+      if (!message.result.pendingAction || typeof message.result.pendingAction !== 'object') {
+        return message
+      }
+      return {
+        ...message,
+        result: {
+          ...message.result,
+          pendingAction: { ...message.result.pendingAction, status },
+        },
+      }
+    }))
+  }
+
+  // 原子 helper：把同一条消息的 actionUi + pendingAction.status 一次性更新，
+  // 避免分散调用导致中间态被持久化。
+  // 仅接收 Java 权威白名单内的终态字符串；调用方必须先经过 TERMINAL_STATUS_WHITELIST 校验。
+  const phaseForTerminalStatus = (status) => {
+    switch (status) {
+      case 'SUCCEEDED': return 'succeeded'
+      case 'CANCELLED': return 'cancelled'
+      case 'EXPIRED': return 'expired'
+      case 'FAILED': return 'error'
+      default: return null
+    }
+  }
+
+  const applyActionTerminal = (messageId, terminalStatus, opts = {}) => {
+    const phase = phaseForTerminalStatus(terminalStatus)
+    if (!phase) return
+    setMessages(prev => prev.map(message => {
+      if (message.id !== messageId) return message
+      const safeResult = message.result && typeof message.result === 'object'
+        ? { ...message.result }
+        : null
+      const nextActionUi = {
+        phase,
+        execution: null,
+        error: typeof opts.error === 'string' ? opts.error : null,
+        retryDecision: null,
+      }
+      if (!safeResult || !safeResult.pendingAction || typeof safeResult.pendingAction !== 'object') {
+        return { ...message, actionUi: nextActionUi }
+      }
+      return {
+        ...message,
+        result: {
+          ...safeResult,
+          pendingAction: { ...safeResult.pendingAction, status: terminalStatus },
+        },
+        actionUi: nextActionUi,
+      }
+    }))
+    // 终态生效：丢弃旧 conversationId，让服务端分配新会话命名空间。
+    clearConversationId()
   }
 
   const handleActionDecision = async (messageId, decision) => {
@@ -207,8 +338,23 @@ function App({ authState, onLogout }) {
         error: null,
         retryDecision: null,
       })
+      // 同步 pendingAction.status：Java 真实响应的权威业务终态。
+      // 只有 execution.status 与决策一致时才同步，避免被服务端 error 路径
+      // 携带的 PENDING_CONFIRMATION / 诊断态污染。
+      const executedStatus = typeof execution?.status === 'string' ? execution.status : null
+      if (decision === 'confirm' && executedStatus === 'SUCCEEDED') {
+        syncPendingActionStatus(messageId, 'SUCCEEDED')
+      } else if (decision === 'cancel' && executedStatus === 'CANCELLED') {
+        syncPendingActionStatus(messageId, 'CANCELLED')
+      }
       actionSecretsRef.current.delete(messageId)
       idempotencyKeysRef.current.delete(messageId)
+      // 业务动作已收口（SUCCEEDED / CANCELLED）：Java 侧已把 conversationId
+      // 对应的 memory 转入终态，客户端下一次发起新业务任务前必须丢弃旧
+      // conversationId，让服务端生成新的会话命名空间。
+      if (decision === 'confirm' || decision === 'cancel') {
+        clearConversationId()
+      }
     } catch (requestError) {
       if (requestError instanceof AuthExpiredError || requestError?.httpStatus === 401) {
         clearSession()
@@ -218,22 +364,42 @@ function App({ authState, onLogout }) {
       const safeError = requestError instanceof BusinessActionApiError
         ? requestError
         : new BusinessActionApiError({ message: '业务操作未完成，请稍后重试。' })
-      const expired = safeError.errorCode === 'ACTION_EXPIRED'
-      const terminal = TERMINAL_ACTION_ERRORS.has(safeError.errorCode)
       const retryable = RETRYABLE_ACTION_ERRORS.has(safeError.errorCode)
         || safeError.httpStatus === 502
         || safeError.httpStatus === 503
+      // 错误响应里的 status 字段：是 Java 在 ActionErrorResponse.body.status 中
+      // 回传的 PendingAction 真实业务状态（可能为 null / PENDING_CONFIRMATION /
+      // 任意终态）。仅当落在 AUTHORITATIVE_TERMINAL_STATUSES 白名单内时才视为
+      // 权威业务终态；其他值一律忽略。
+      // 此外 errorCode === 'ACTION_EXPIRED' 时 Java 隐含 EXPIRED 终态
+      // （参见 BusinessActionService.error → ActionException.actionStatus），
+      // 即便 status 字段缺失/为 null 也按 EXPIRED 处理（任务允许的例外）。
+      const errorCodeStatus = safeError.errorCode === 'ACTION_EXPIRED' ? 'EXPIRED' : null
+      const responseStatus = typeof safeError.status === 'string'
+        && AUTHORITATIVE_TERMINAL_STATUSES.has(safeError.status)
+        ? safeError.status
+        : null
+      const terminalStatus = responseStatus || errorCodeStatus
 
-      updateActionUi(messageId, {
-        phase: expired ? 'expired' : 'error',
-        execution: null,
-        error: safeError.message,
-        retryDecision: !terminal && retryable ? decision : null,
-      })
-
-      if (terminal || !retryable) {
+      if (terminalStatus) {
+        // 权威业务终态：原子更新 pendingAction.status + actionUi，并丢弃 conversationId
+        applyActionTerminal(messageId, terminalStatus, { error: safeError.message })
         actionSecretsRef.current.delete(messageId)
         idempotencyKeysRef.current.delete(messageId)
+      } else {
+        // 非终态错误（如 INVALID_CONFIRMATION_NONCE / DEMO_IDENTITY_* /
+        // ACTION_NOT_FOUND / 网络抖动等）：只更新 UI 显示，不写权威 status，
+        // 不清除 conversationId；nonce 仍交给现有 retry 决策控制。
+        updateActionUi(messageId, {
+          phase: 'error',
+          execution: null,
+          error: safeError.message,
+          retryDecision: retryable ? decision : null,
+        })
+        if (!retryable) {
+          actionSecretsRef.current.delete(messageId)
+          idempotencyKeysRef.current.delete(messageId)
+        }
       }
     } finally {
       actionLocksRef.current.delete(messageId)
@@ -326,6 +492,14 @@ function App({ authState, onLogout }) {
           resultMode: requestMode,
           actionUi,
         }])
+
+        // Java 显式返回终态：服务端已把当前 conversationId 对应的 memory
+        // 收口（SUCCEEDED / CANCELLED / EXPIRED / FAILED）。下一次发起新
+        // 业务任务时不应继续携带旧 conversationId，让服务端分配新会话。
+        const returnedStatus = safeData?.pendingAction?.status
+        if (typeof returnedStatus === 'string' && isTerminalActionStatus(returnedStatus)) {
+          clearConversationId()
+        }
       }
 
       if (!response.ok) {

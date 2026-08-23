@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import assert from 'node:assert/strict'
 
 const TEST_NONCE = 'test-nonce-not-a-secret'
 const TEST_ACTION_ID = 'act_business_action_test_1234567890'
@@ -64,6 +65,7 @@ async function mockChat(page, response) {
   await page.route('**/api/agent/langgraph/chat', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
+    headers: { 'X-Conversation-Id': 'conv-from-chat' },
     body: JSON.stringify(response),
   }))
 }
@@ -335,12 +337,14 @@ test('标准RAG携带Bearer身份且不发送Demo身份Header', async ({ page })
 })
 
 test('服务端 ACTION_EXPIRED 进入过期终态', async ({ page }) => {
+  // 真实 Java：BusinessActionService.error() 把 PendingAction.status 作为
+  // ActionErrorResponse.body.status 返回；expire 路径 action.status() === EXPIRED。
   await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
     status: 409,
     contentType: 'application/json',
     body: JSON.stringify({
       actionId: TEST_ACTION_ID,
-      status: 'FAILED',
+      status: 'EXPIRED',
       errorCode: 'ACTION_EXPIRED',
       message: '草稿已过期。',
     }),
@@ -428,4 +432,322 @@ test('未知 Action 类型显示安全提示且无操作按钮', async ({ page }
   await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '取消草稿' })).toHaveCount(0)
   await expect(page.locator('body')).not.toContainText(TEST_NONCE)
+})
+
+// ----------------------------------------------------------------------------
+// 本地历史恢复：真实业务终态（SUCCEEDED / CANCELLED）必须保留终态 UI
+// 且旧 conversationId 不再被复用。
+// ----------------------------------------------------------------------------
+
+const STORAGE_KEY_PREFIX = 'enterprise-ai-copilot.chat-history.'
+
+const readChatHistoryRecord = async (page, userId) => {
+  return page.evaluate(({ key }) => {
+    const raw = window.localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  }, { key: `${STORAGE_KEY_PREFIX}${userId}` })
+}
+
+test('Confirm 成功后 reload: 卡片仍显示已提交 + 申请编号 + 无任何按钮 + conversationId 不复用', async ({ page }) => {
+  let confirmCallCount = 0
+  let conversationIdAfterConfirm
+
+  await page.route('**/api/agent/actions/**/confirm', async route => {
+    confirmCallCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'X-Conversation-Id': 'conv-after-success' },
+      body: JSON.stringify(executionResponse({ requestId: 'LR-202607-0001' })),
+    })
+  })
+
+  await openDraft(page)
+  const beforeConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  await page.getByRole('button', { name: '确认提交' }).click()
+  await expect(page.getByText('模拟申请已提交')).toBeVisible()
+  await expect(page.getByText('申请编号：LR-202607-0001')).toBeVisible()
+
+  // 1) 真实落盘：pendingAction.status 已被 App 同步为 SUCCEEDED
+  const record = await readChatHistoryRecord(page, 'U10001')
+  assert.ok(record, 'localStorage 必须存在落盘记录')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'SUCCEEDED',
+    'Java SUCCEEDED 后 pendingAction.status 必须同步为 SUCCEEDED')
+  assert.equal(persisted.actionUi.phase, 'succeeded')
+  assert.equal(persisted.actionUi.execution.requestId, 'LR-202607-0001',
+    '公开申请编号 requestId 应保留')
+  assert.ok(!('confirmationNonce' in persisted.result.pendingAction),
+    'confirmationNonce 永不入盘')
+
+  // 2) Java 已通过 X-Conversation-Id 切换会话命名空间
+  conversationIdAfterConfirm = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.notEqual(conversationIdAfterConfirm, beforeConvId,
+    '成功后服务端应下发新的 conversationId（客户端立即丢弃旧 ID）')
+
+  // 3) Reload 后卡片仍显示已提交 + 申请编号 + 无任何按钮
+  await page.reload()
+  await expect(page.getByText('模拟申请已提交')).toBeVisible()
+  await expect(page.getByText('申请编号：LR-202607-0001')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消草稿' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重试确认' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重试取消' })).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText(TEST_NONCE)
+  await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
+
+  // 4) Reload 后 conversationId 不被恢复（终态历史 → 新业务任务用全新会话）
+  //    localStorage 中 conversationId 已被 clearConversationId 主动置空
+  //    （持久化层与内存保持一致），App 不会再把它同步到 sessionStorage。
+  const convIdAfterReload = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.equal(convIdAfterReload, null,
+    '终态历史 reload 后 sessionStorage 必须为空，让下一次任务走全新会话')
+
+  // localStorage 中 conversationId 也保持 null（与内存一致）
+  const recordAfterReload = await readChatHistoryRecord(page, 'U10001')
+  assert.equal(recordAfterReload.conversationId, null,
+    '成功后 conversationId 已被 clearConversationId 主动置空，与内存一致')
+  assert.equal(recordAfterReload.messages.find(m => m.type === 'assistant')
+    .result.pendingAction.status, 'SUCCEEDED',
+    '消息本身仍完整保留，pendingAction.status 同步为 SUCCEEDED')
+
+  // 5) 仅触发 1 次真实 confirm（reload 不应再发起任何业务请求）
+  assert.equal(confirmCallCount, 1)
+})
+
+test('Cancel 成功后 reload: 卡片仍显示已取消 + 无按钮 + conversationId 不复用', async ({ page }) => {
+  let cancelCallCount = 0
+
+  await page.route('**/api/agent/actions/**/cancel', async route => {
+    cancelCallCount += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'X-Conversation-Id': 'conv-after-cancel' },
+      body: JSON.stringify(executionResponse({ status: 'CANCELLED', requestId: null })),
+    })
+  })
+
+  await openDraft(page)
+  await page.getByRole('button', { name: '取消草稿' }).click()
+  await expect(page.getByText('申请草稿已取消')).toBeVisible()
+
+  // 1) 真实落盘
+  const record = await readChatHistoryRecord(page, 'U10001')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'CANCELLED',
+    'Java CANCELLED 后 pendingAction.status 必须同步为 CANCELLED')
+  assert.equal(persisted.actionUi.phase, 'cancelled',
+    '已取消的草稿必须保留 cancelled UI，禁止被改为 expired')
+
+  // 2) Reload 后状态保持
+  await page.reload()
+  await expect(page.getByText('申请草稿已取消')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消草稿' })).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText(TEST_NONCE)
+
+  // 3) 终态后 conversationId 不被恢复
+  const convIdAfterReload = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.equal(convIdAfterReload, null,
+    '终态历史 reload 后 sessionStorage 必须为空，让下一次任务走全新会话')
+
+  assert.equal(cancelCallCount, 1)
+})
+
+test('已成功卡片在 reload 后即便持久化中残留 retryDecision 也无重试按钮', async ({ page }) => {
+  // 先走完整链路到 succeeded
+  await page.route('**/api/agent/actions/**/confirm', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(executionResponse({ requestId: 'LR-202607-0002', replayed: true })),
+    })
+  })
+  await openDraft(page)
+  await page.getByRole('button', { name: '确认提交' }).click()
+  await expect(page.getByText('模拟申请已提交')).toBeVisible()
+
+  // 注入恶意 / 错误持久化：把 retryDecision 强行写回 'confirm'
+  await page.evaluate(({ key }) => {
+    const raw = window.localStorage.getItem(key)
+    const record = JSON.parse(raw)
+    const assistant = record.messages.find(m => m.type === 'assistant')
+    assistant.actionUi.retryDecision = 'confirm'
+    window.localStorage.setItem(key, JSON.stringify(record))
+  }, { key: `${STORAGE_KEY_PREFIX}U10001` })
+
+  await page.reload()
+  await expect(page.getByText('模拟申请已提交')).toBeVisible()
+  await expect(page.getByText('申请编号：LR-202607-0002')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重试确认' })).toHaveCount(0,
+    '即便持久化中残留 retryDecision，恢复时必须强制清空，绝不能渲染重试按钮')
+})
+
+// ----------------------------------------------------------------------------
+// 错误响应中的权威终态：仅白名单 status 同步 + 持久化终态时丢弃 conversationId
+// ----------------------------------------------------------------------------
+
+test('Java ACTION_EXPIRED + status=EXPIRED → 持久化为 EXPIRED + reload 后 conversationId 不恢复', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 409,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      actionId: TEST_ACTION_ID,
+      status: 'EXPIRED',
+      errorCode: 'ACTION_EXPIRED',
+      message: '草稿已过期。',
+    }),
+  }))
+
+  await openDraft(page)
+  const beforeConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  // 1) UI 进入已过期终态
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('已过期')
+  await expect(page.getByText(/请重新发送年假申请生成新草稿/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消草稿' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重试确认' })).toHaveCount(0)
+
+  // 2) localStorage 落盘：pendingAction.status = EXPIRED, actionUi.phase = expired
+  const record = await readChatHistoryRecord(page, 'U10001')
+  assert.ok(record, 'localStorage 必须存在落盘记录')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'EXPIRED',
+    'Java status=EXPIRED 必须同步到 pendingAction.status')
+  assert.equal(persisted.actionUi.phase, 'expired',
+    'actionUi.phase 必须为 expired')
+  assert.equal(persisted.actionUi.retryDecision, null,
+    '权威终态必须清空 retryDecision')
+  assert.equal(record.conversationId, null,
+    'conversationId 必须被清除（持久化层与内存一致）')
+
+  // 3) sessionStorage 也已被清除
+  const afterConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.notEqual(afterConvId, beforeConvId,
+    '终态响应后服务端会下发新 conversationId（前端丢弃旧 ID）')
+
+  // 4) reload 后：卡片保持过期态 + 不恢复旧 conversationId
+  await page.reload()
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('已过期')
+  const convIdAfterReload = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.equal(convIdAfterReload, null,
+    '终态历史 reload 后 sessionStorage 必须为空')
+})
+
+test('Java ACTION_STATE_CONFLICT + status=FAILED → 持久化为 FAILED + reload 后 conversationId 不恢复', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 409,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      actionId: TEST_ACTION_ID,
+      status: 'FAILED',
+      errorCode: 'ACTION_STATE_CONFLICT',
+      message: '申请状态已变化。',
+    }),
+  }))
+
+  await openDraft(page)
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  // 1) UI 进入 error 终态（FAILED → phase=error → 文案"处理失败"）
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('处理失败')
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重试确认' })).toHaveCount(0)
+
+  // 2) localStorage：pendingAction.status = FAILED
+  const record = await readChatHistoryRecord(page, 'U10001')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'FAILED',
+    'Java status=FAILED 必须同步到 pendingAction.status')
+  assert.equal(record.conversationId, null,
+    'FAILED 终态后 conversationId 必须被清除')
+
+  // 3) reload 后不恢复 conversationId
+  await page.reload()
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('处理失败')
+  const convIdAfterReload = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.equal(convIdAfterReload, null,
+    'FAILED 终态历史 reload 后 sessionStorage 必须为空')
+})
+
+test('Java INVALID_CONFIRMATION_NONCE + status=PENDING_CONFIRMATION → 不当终态处理，不清除 conversationId', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 409,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      actionId: TEST_ACTION_ID,
+      status: 'PENDING_CONFIRMATION',
+      errorCode: 'INVALID_CONFIRMATION_NONCE',
+      message: 'nonce 已失效。',
+    }),
+  }))
+
+  await openDraft(page)
+  const beforeConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  // 1) UI 进入 error 状态，但 pendingAction.status 必须保持 PENDING_CONFIRMATION
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('处理失败')
+
+  const record = await readChatHistoryRecord(page, 'U10001')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'PENDING_CONFIRMATION',
+    'INVALID_CONFIRMATION_NONCE + status=PENDING_CONFIRMATION 不能推断为 FAILED')
+  assert.equal(record.conversationId, beforeConvId,
+    '非权威终态不能清除 conversationId')
+
+  // 2) 不允许使用已失效的 nonce 继续重试：retryDecision 必须为 null（因为此错误非 retryable）
+  await expect(page.getByRole('button', { name: '重试确认' })).toHaveCount(0)
+})
+
+test('Java ACTION_NOT_FOUND 且 status 缺失 → 不猜测终态，不清除 conversationId', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 404,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      actionId: TEST_ACTION_ID,
+      errorCode: 'ACTION_NOT_FOUND',
+      message: '申请草稿不存在。',
+    }),
+  }))
+
+  await openDraft(page)
+  const beforeConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('处理失败')
+
+  const record = await readChatHistoryRecord(page, 'U10001')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'PENDING_CONFIRMATION',
+    '没有 status 字段或 status 不在白名单时，绝不能推断为 FAILED')
+  assert.equal(record.conversationId, beforeConvId,
+    '非权威终态不能清除 conversationId')
+})
+
+test('前端 expiresAt 本地计时器触发 → 只改变 actionUi，不写 EXPIRED 到 pendingAction.status，不清除 conversationId', async ({ page }) => {
+  await openDraft(page, pendingResponse({ expiresAt: '2020-01-01T00:00:00Z' }))
+  const beforeConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+
+  // 1) 本地计时器触发：UI 显示已过期，按钮全部消失
+  await expect(page.getByRole('region', { name: '年假申请确认卡' }).locator('.action-status')).toHaveText('已过期')
+  await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消草稿' })).toHaveCount(0)
+
+  // 2) localStorage：actionUi.phase=expired，但 pendingAction.status 仍为 PENDING_CONFIRMATION
+  const record = await readChatHistoryRecord(page, 'U10001')
+  const persisted = record.messages.find(m => m.type === 'assistant')
+  assert.equal(persisted.result.pendingAction.status, 'PENDING_CONFIRMATION',
+    '本地计时器不得把 EXPIRED 写入 pendingAction.status（必须是 Java 权威响应）')
+  assert.equal(persisted.actionUi.phase, 'expired',
+    '本地计时器可改变 UI 显示（actionUi.phase=expired）')
+
+  // 3) conversationId 不被本地计时器清除
+  const afterConvId = await page.evaluate(() => window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id'))
+  assert.equal(afterConvId, beforeConvId,
+    '本地计时器不得清除 conversationId（必须由 Java 权威终态驱动）')
 })
