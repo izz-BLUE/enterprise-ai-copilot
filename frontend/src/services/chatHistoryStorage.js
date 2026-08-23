@@ -107,6 +107,69 @@ export const resolveUserIdentity = (user) => {
   return { storageKey: null, reactKey: 'anonymous', kind: null }
 }
 
+// =============================================================================
+// 按 (用户, 模式) 隔离的聊天历史：
+//   - 每个模式独立 key：`<storageKey>.<mode>`（如 ...U90001.agent / ...U90001.rag），
+//     agent / rag 各自保存、各自恢复，切换时互不覆盖、互不删除；
+//   - 旧格式（无模式后缀的 ...U90001）是升级前的单一历史快照，视为默认模式 agent；
+//     首次作为 agent 读取时复制到 .agent key（旧 key 保留不删除，不丢数据）；
+//   - 上次模式持久化（<storageKey>.last-mode），刷新 / 重开后恢复用户所在模式。
+// =============================================================================
+export const CHAT_HISTORY_MODES = ['agent', 'rag']
+const LAST_MODE_SUFFIX = '.last-mode'
+
+export const isValidChatMode = (mode) => CHAT_HISTORY_MODES.includes(mode)
+
+// 模式白名单校验：拒绝任意后缀，避免注入非法 localStorage key。
+export const historyKeyForMode = (baseStorageKey, mode) => {
+  if (typeof baseStorageKey !== 'string' || baseStorageKey.length === 0) return null
+  if (!isValidChatMode(mode)) return null
+  return `${baseStorageKey}.${mode}`
+}
+
+// 模式化读取：先读 <storageKey>.<mode>；无数据且为默认模式 agent 时，
+// 兼容迁移旧格式（<storageKey> 本身）到 .agent key，并返回迁移结果。
+// 迁移为一对一移动：确认写盘成功后才移除旧 key，防止用户"清空会话"后
+// 旧格式 key 再次触发迁移造成历史"复活"；写入失败时保留旧 key 不丢数据。
+export const readHistoryByMode = (baseStorageKey, mode) => {
+  const key = historyKeyForMode(baseStorageKey, mode)
+  if (!key) return null
+  const scoped = readChatHistory(key)
+  if (scoped !== null) return scoped
+  if (mode === 'agent') {
+    const legacy = readChatHistory(baseStorageKey)
+    if (legacy) {
+      writeChatHistory(key, legacy)
+      if (readChatHistory(key) !== null) {
+        clearChatHistory(baseStorageKey)
+      }
+      return legacy
+    }
+  }
+  return null
+}
+
+// 刷新 / 重开后恢复上次所在模式；无记录或值非法时回退 null（调用方使用默认 agent）。
+export const readLastMode = (baseStorageKey) => {
+  if (typeof baseStorageKey !== 'string' || baseStorageKey.length === 0) return null
+  try {
+    const raw = localStorage.getItem(baseStorageKey + LAST_MODE_SUFFIX)
+    return isValidChatMode(raw) ? raw : null
+  } catch {
+    return null
+  }
+}
+
+export const writeLastMode = (baseStorageKey, mode) => {
+  if (typeof baseStorageKey !== 'string' || baseStorageKey.length === 0) return
+  if (!isValidChatMode(mode)) return
+  try {
+    localStorage.setItem(baseStorageKey + LAST_MODE_SUFFIX, mode)
+  } catch {
+    // localStorage 不可用：忽略，缺省回到默认 agent 模式。
+  }
+}
+
 const safeParse = (raw) => {
   if (typeof raw !== 'string' || raw.length === 0) return null
   try {
@@ -290,4 +353,11 @@ export const __TESTING__ = {
   getPendingActionStatus,
   phaseForPendingStatus,
   safeRestoredExecution,
+  CHAT_HISTORY_MODES,
+  LAST_MODE_SUFFIX,
+  isValidChatMode,
+  historyKeyForMode,
+  readHistoryByMode,
+  readLastMode,
+  writeLastMode,
 }

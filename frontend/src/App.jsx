@@ -14,11 +14,14 @@ import {
 import { authenticatedFetch, AuthExpiredError } from './services/authApi'
 import {
   clearChatHistory,
+  historyKeyForMode,
   isHistoryTerminal,
   isTerminalActionStatus,
-  readChatHistory,
+  readHistoryByMode,
+  readLastMode,
   resolveUserIdentity,
   writeChatHistory,
+  writeLastMode,
 } from './services/chatHistoryStorage'
 import './App.css'
 
@@ -87,11 +90,15 @@ function initialActionUi(phase = 'pending', error = null) {
 }
 
 function App({ authState, onLogout }) {
-  const [mode, setMode] = useState('agent')
+  const { storageKey: baseChatHistoryKey } = resolveUserIdentity(authState?.user)
+  const [mode, setMode] = useState(() => readLastMode(baseChatHistoryKey) ?? 'agent')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   // 本地聊天历史恢复：同一浏览器、同一账号下，刷新 / 关闭重开 / 退出再登录后
   // 从 localStorage 读取上一次的 conversationId + 聊天记录。
+  // - 历史按 (用户, 模式) 隔离：agent / rag 各自独立 key（见 historyKeyForMode），
+  //   切换模式时各自保留、各自恢复，互不覆盖；旧格式（无模式后缀）视为默认 agent
+  //   并兼容迁移（readHistoryByMode）；
   // - 仅恢复公开字段，confirmationNonce / token 等敏感凭据永不落盘；
   // - 历史 PendingAction 的 UI 状态由 chatHistoryStorage.restoreMessages 恢复：
   //     * 仍处 PENDING_CONFIRMATION 的草稿：nonce 不可恢复，确认 / 取消按钮
@@ -103,13 +110,13 @@ function App({ authState, onLogout }) {
   // <App /> 在 AuthGate 处按 resolveUserIdentity(user).reactKey 重新挂载，
   // 因此这里的 lazy init 只在挂载时跑一次；后续 user 变化走的是组件 remount。
   // 当前账号的稳定身份与 localStorage key 同步来自同一解析函数，避免不同
-  // 账号之间复用 React state。
-  const { storageKey: chatHistoryKey } = resolveUserIdentity(authState?.user)
+  // 账号之间复用 React state。初次渲染时 mode 先于 messages 初始化，
+  // 两者使用同一模式读取对应历史快照。
+  const chatHistoryKey = historyKeyForMode(baseChatHistoryKey, mode)
   const [messages, setMessages] = useState(() => {
-    if (!chatHistoryKey) return []
-    const restored = readChatHistory(chatHistoryKey)
-    if (!restored) return []
-    return restored.messages
+    if (!baseChatHistoryKey) return []
+    const restored = readHistoryByMode(baseChatHistoryKey, mode)
+    return restored?.messages ?? []
   })
   const [adminToken, setAdminToken] = useState('')
   const [error, setError] = useState(null)
@@ -118,16 +125,17 @@ function App({ authState, onLogout }) {
   const actionSecretsRef = useRef(new Map())
   const idempotencyKeysRef = useRef(new Map())
   const actionLocksRef = useRef(new Set())
-  // Phase 2 conversationId：挂载时同步恢复（sessionStorage 缓存 + localStorage 历史）
+  // Phase 2 conversationId：挂载时按模式恢复（sessionStorage 缓存 + 对应模式历史）
+  // - 仅 agent 参与 conversationId 链路；rag（普通 RAG 路由）不携带、不恢复；
   // - 业务终态历史丢弃 conversationId，让服务端分配新会话；
   // - 不是可信身份，仅作为分组 hint 传给 Java。
   const initialConversationId = (() => {
-    if (!chatHistoryKey) return readStoredConversationId()
-    const restored = readChatHistory(chatHistoryKey)
-    if (restored?.conversationId && !isHistoryTerminal(restored.messages)) {
+    if (!baseChatHistoryKey) return mode === 'agent' ? readStoredConversationId() : null
+    const restored = readHistoryByMode(baseChatHistoryKey, mode)
+    if (mode === 'agent' && restored?.conversationId && !isHistoryTerminal(restored.messages)) {
       return restored.conversationId
     }
-    return readStoredConversationId()
+    return mode === 'agent' ? readStoredConversationId() : null
   })()
   const conversationIdRef = useRef(initialConversationId)
 
@@ -194,14 +202,48 @@ function App({ authState, onLogout }) {
 
   const handleModeChange = (newMode) => {
     if (actionBusy || actionLocksRef.current.size > 0) return
-    setMode(newMode)
-    setMessages([])
-    setError(null)
+    // 日志控制台是视图分支而非第三种 mode：在控制台内点击左侧模式按钮时，
+    // 必须先退出控制台，再执行模式切换（同模式直接返回，保留聊天状态）。
+    if (showAdminLogs) {
+      setShowAdminLogs(false)
+    }
+    if (newMode === mode) {
+      return
+    }
+    // 切换前先把当前模式的最新状态落盘（含 message 数组与 conversationId），
+    // 防止最后一次会话变更写丢；随后加载目标模式的独立历史快照。
+    // 与保存 effect 同一守卫：无内容（无消息且无 conversationId）不落盘，
+    // 避免给从未聊天的用户产生空历史 key。
+    if (chatHistoryKey && (messages.length > 0 || conversationIdRef.current)) {
+      writeChatHistory(chatHistoryKey, {
+        conversationId: conversationIdRef.current,
+        messages,
+      })
+    }
+    // 内存凭据边界：confirmationNonce / 幂等键 / 锁按 messageId 与内存消息绑定。
+    // 切换模式后目标模式恢复的消息即使 id 相同也绝不能复用旧 nonce 变为可执行
+    // （恢复逻辑会强制凭证失效，此处清除是双保险），业务动作仍由 Java 权威校验。
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
-    clearConversationId()
-    if (chatHistoryKey) clearChatHistory(chatHistoryKey)
+    const restored = baseChatHistoryKey
+      ? readHistoryByMode(baseChatHistoryKey, newMode)
+      : null
+    setMode(newMode)
+    // 目标模式的历史恢复：无历史则展示空聊天（WelcomeScreen），不阻塞主流程。
+    setMessages(restored?.messages ?? [])
+    setError(null)
+    // conversationId 按模式隔离：仅 agent 从自己的历史快照恢复；
+    // rag 不参与 conversationId 链路，切到 rag 即清除运行时会话命名空间
+    // （agent 的历史快照仍保留在 localStorage，切回时按既有规则恢复）。
+    const nextConversationId = newMode === 'agent'
+      ? (restored?.conversationId ?? null)
+      : null
+    conversationIdRef.current = nextConversationId
+    writeStoredConversationId(nextConversationId)
+    if (baseChatHistoryKey) {
+      writeLastMode(baseChatHistoryKey, newMode)
+    }
   }
 
   const handleClearMessages = () => {

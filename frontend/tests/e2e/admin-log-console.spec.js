@@ -275,14 +275,16 @@ test('EMPLOYEE 端到端：日志控制台往返 + 待确认卡片 + nonce + con
   const USER_ID = 'test-user-pending-001'
   const employeeUser = { ...EMPLOYEE_USER, userId: USER_ID, username: USER_ID }
 
-  // 1) 隔离：登录前清理该用户的历史与 conversationId；不动 accessToken
+  // 1) 隔离：登录前清理该用户的历史（兼容旧格式 + agent/rag/last-mode）与 conversationId；不动 accessToken
   await page.addInitScript((uid) => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
       JSON.stringify({ accessToken: 'test-token' })
     )
     try {
-      window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid)
+      for (const suffix of ['', '.agent', '.rag', '.last-mode']) {
+        window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid + suffix)
+      }
       window.sessionStorage.removeItem('enterprise-ai-copilot.conversation-id')
     } catch {
       // 隐私模式或存储被禁用时忽略，测试继续
@@ -508,14 +510,16 @@ test('ADMIN 端到端：待确认卡片 → 日志控制台往返 → 卡片保�
   const ADMIN_ACTION_ID = 'act-admin-keep-20260823'
   const adminUser = { ...ADMIN_USER, userId: ADMIN_E2E_USER_ID, username: ADMIN_E2E_USER_ID }
 
-  // 隔离：登录前清理该用户的历史与 conversationId；不动 accessToken
+  // 隔离：登录前清理该用户的历史（兼容旧格式 + agent/rag/last-mode）与 conversationId；不动 accessToken
   await page.addInitScript((uid) => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
       JSON.stringify({ accessToken: 'test-token' })
     )
     try {
-      window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid)
+      for (const suffix of ['', '.agent', '.rag', '.last-mode']) {
+        window.localStorage.removeItem('enterprise-ai-copilot.chat-history.' + uid + suffix)
+      }
       window.sessionStorage.removeItem('enterprise-ai-copilot.conversation-id')
     } catch {
       // 隐私模式或存储被禁用时忽略，测试继续
@@ -640,4 +644,255 @@ test('ADMIN 端到端：待确认卡片 → 日志控制台往返 → 卡片保�
     window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id')
   )
   expect(convIdAfterConfirm).toBeNull()
+})
+
+/**
+ * 场景 A：agent 模式 → 日志控制台 → 点击左侧当前模式"智能体问答"。
+ * 必须退出日志控制台回到聊天页，且消息 / 待确认卡片 / conversationId /
+ * actionSecretsRef（nonce）全部保留——同会话直接确认仍携带原 nonce。
+ */
+test('ADMIN 日志控制台点击当前"智能体问答"：退出控制台且消息/卡片/conversationId/nonce 保留', async ({ page }) => {
+  await loginAs(page, ADMIN_USER)
+  await page.route('**/api/admin/logs**', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], count: 0 }),
+    })
+  )
+  await page.route('**/api/agent/langgraph/chat', async route => {
+    const requestBody = JSON.parse(route.request().postData() || '{}')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: {
+        'X-Trace-Id': 'agent-trace-mode-same',
+        'X-Conversation-Id': requestBody.conversationId || TEST_CONVERSATION_ID,
+      },
+      body: JSON.stringify({
+        answer: '已生成草稿，请在下方确认。',
+        category: 'rag',
+        memoryAttached: false,
+        traceId: 'agent-trace-mode-same',
+        pendingAction: {
+          actionId: 'act_mode_same_20260823',
+          actionType: 'ANNUAL_LEAVE_REQUEST',
+          type: 'ANNUAL_LEAVE_REQUEST',
+          status: 'PENDING_CONFIRMATION',
+          confirmationRequired: true,
+          startDate: '2026-08-25',
+          endDate: '2026-08-25',
+          days: 1,
+          balanceBefore: 10,
+          balanceAfter: 9,
+          ttlSeconds: 600,
+          employeeId: 'E10001',
+          displayName: '张三',
+          expiresAt: '2026-08-23T20:00:00Z',
+          confirmationNonce: TEST_NONCE,
+        },
+      }),
+    })
+  })
+  let confirmRequestBody = null
+  await page.route('**/api/agent/actions/**/confirm', async route => {
+    confirmRequestBody = JSON.parse(route.request().postData() || '{}')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'Cache-Control': 'no-store' },
+      body: JSON.stringify({
+        actionId: 'act_mode_same_20260823',
+        actionType: 'ANNUAL_LEAVE_REQUEST',
+        status: 'SUCCEEDED',
+        requestId: 'REQ-mode-same-20260823',
+        message: '模拟年假申请已提交。',
+        alreadyApplied: false,
+        traceId: 'confirm-mode-trace',
+      }),
+    })
+  })
+
+  await page.goto('/')
+
+  // 1) agent 模式：发起请求，渲染待确认卡片
+  await page.locator('.chat-textarea').fill('请帮我申请年假')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('已生成草稿，请在下方确认。')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByRole('button', { name: '确认提交' })).toBeVisible()
+
+  // 2) 进入日志控制台
+  await page.getByRole('button', { name: '日志控制台' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).toBeVisible()
+  await expect(page.getByText('暂无日志')).toBeVisible()
+
+  // 3) 点击左侧当前模式"智能体问答"：退出日志控制台
+  await page.getByRole('button', { name: '切换到智能体问答' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).not.toBeVisible()
+  await expect(page.getByRole('heading', { name: '智能体问答' })).toBeVisible()
+
+  // 4) 消息 / 卡片 / conversationId 全部保留
+  await expect(page.getByText('请帮我申请年假')).toBeVisible()
+  await expect(page.getByText('已生成草稿，请在下方确认。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认提交' })).toBeVisible()
+  const convIdAfter = await page.evaluate(() =>
+    window.sessionStorage.getItem('enterprise-ai-copilot.conversation-id')
+  )
+  expect(convIdAfter).toBe(TEST_CONVERSATION_ID)
+
+  // 5) 同会话直接确认：nonce 仍从 actionSecretsRef 取出放入 confirm 请求
+  await page.getByRole('button', { name: '确认提交' }).click()
+  await expect.poll(() => confirmRequestBody, { timeout: 5000 }).not.toBeNull()
+  expect(confirmRequestBody.confirmationNonce).toBe(TEST_NONCE)
+})
+
+/**
+ * 场景 B：agent 模式 → 日志控制台 → 点击左侧"标准问答"。
+ * 退出日志控制台并进入 rag 模式；cross-mode 行为：agent 历史保留在
+ * localStorage（.agent key），rag 无历史时展示空聊天。
+ */
+test('ADMIN 日志控制台点击"标准问答"：退出控制台并进入 rag 模式（保留原 agent 历史）', async ({ page }) => {
+  await loginAs(page, ADMIN_USER)
+  await page.route('**/api/admin/logs**', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], count: 0 }),
+    })
+  )
+  await page.route('**/api/agent/langgraph/chat', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        answer: 'agent 模式回答',
+        category: 'rag',
+        memoryAttached: false,
+        traceId: 'agent-trace-mode-b',
+      }),
+    })
+  )
+
+  await page.goto('/')
+
+  // agent 模式先建立会话内容
+  await page.locator('.chat-textarea').fill('agent 问题')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('agent 模式回答')).toBeVisible({ timeout: 5000 })
+
+  await page.getByRole('button', { name: '日志控制台' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).toBeVisible()
+
+  // 点左侧"标准问答"：退出控制台；agent 历史保留在 localStorage，rag 无历史展示空聊天
+  await page.getByRole('button', { name: '切换到标准问答' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).not.toBeVisible()
+  await expect(page.getByRole('heading', { name: '标准问答' })).toBeVisible({ timeout: 5000 })
+  await expect(page.getByText('agent 模式回答')).not.toBeVisible()
+  await expect(page.getByText('agent 问题')).not.toBeVisible()
+  // agent 历史必须仍保存在用户自己的 .agent key 中
+  const agentRecord = await page.evaluate(() => {
+    const raw = localStorage.getItem('enterprise-ai-copilot.chat-history.U90001.agent')
+    return raw ? JSON.parse(raw) : null
+  })
+  expect(agentRecord).not.toBeNull()
+  expect(agentRecord.messages).toHaveLength(2)
+})
+
+/**
+ * 场景 C：rag 模式 → 日志控制台 → 点击左侧当前模式"标准问答"。
+ * 退出日志控制台回到 rag 聊天页，rag 消息原样保留。
+ */
+test('ADMIN rag 模式日志控制台点击当前"标准问答"：退出控制台且 rag 消息保留', async ({ page }) => {
+  await loginAs(page, ADMIN_USER)
+  await page.route('**/api/admin/logs**', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], count: 0 }),
+    })
+  )
+  await page.route('**/api/chat', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        answer: 'rag 模式回答',
+        category: 'rag',
+        memoryAttached: false,
+        traceId: 'rag-trace-mode-c',
+      }),
+    })
+  )
+
+  await page.goto('/')
+  // 先跨模式切到 rag 并建立 rag 会话
+  await page.getByRole('button', { name: '切换到标准问答' }).click()
+  await expect(page.getByRole('heading', { name: '标准问答' })).toBeVisible({ timeout: 5000 })
+
+  await page.locator('.chat-textarea').fill('rag 问题')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('rag 模式回答')).toBeVisible({ timeout: 5000 })
+
+  await page.getByRole('button', { name: '日志控制台' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).toBeVisible()
+
+  // 同模式早退：退出控制台，rag 会话原样保留
+  await page.getByRole('button', { name: '切换到标准问答' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).not.toBeVisible()
+  await expect(page.getByText('rag 模式回答')).toBeVisible()
+  await expect(page.getByText('rag 问题')).toBeVisible()
+})
+
+/**
+ * 场景 D：rag 模式 → 日志控制台 → 点击左侧"智能体问答"。
+ * 退出日志控制台并进入 agent 模式；cross-mode 行为：rag 历史保留在
+ * localStorage（.rag key），agent 无历史时展示空聊天。
+ */
+test('ADMIN rag 模式日志控制台点击"智能体问答"：退出控制台并进入 agent 模式（保留 rag 历史）', async ({ page }) => {
+  await loginAs(page, ADMIN_USER)
+  await page.route('**/api/admin/logs**', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], count: 0 }),
+    })
+  )
+  await page.route('**/api/chat', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        answer: 'rag 模式回答',
+        category: 'rag',
+        memoryAttached: false,
+        traceId: 'rag-trace-mode-d',
+      }),
+    })
+  )
+
+  await page.goto('/')
+  // 先跨模式切到 rag 并建立 rag 会话
+  await page.getByRole('button', { name: '切换到标准问答' }).click()
+  await expect(page.getByRole('heading', { name: '标准问答' })).toBeVisible({ timeout: 5000 })
+
+  await page.locator('.chat-textarea').fill('rag 问题')
+  await page.getByRole('button', { name: '发送' }).click()
+  await expect(page.getByText('rag 模式回答')).toBeVisible({ timeout: 5000 })
+
+  await page.getByRole('button', { name: '日志控制台' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).toBeVisible()
+
+  // 跨模式切换：退出控制台；rag 历史保留在 localStorage，agent 无历史展示空聊天
+  await page.getByRole('button', { name: '切换到智能体问答' }).click()
+  await expect(page.getByRole('heading', { name: '管理员运行日志' })).not.toBeVisible()
+  await expect(page.getByRole('heading', { name: '智能体问答' })).toBeVisible({ timeout: 5000 })
+  await expect(page.getByText('rag 模式回答')).not.toBeVisible()
+  await expect(page.getByText('rag 问题')).not.toBeVisible()
+  // rag 历史必须仍保存在用户自己的 .rag key 中
+  const ragRecord = await page.evaluate(() => {
+    const raw = localStorage.getItem('enterprise-ai-copilot.chat-history.U90001.rag')
+    return raw ? JSON.parse(raw) : null
+  })
+  expect(ragRecord).not.toBeNull()
+  expect(ragRecord.messages).toHaveLength(2)
 })
