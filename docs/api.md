@@ -6,6 +6,7 @@
 |------|------|------|
 | 公网演示 | `https://copilot.jintianchi.cn` | React 前端 + Java API |
 | 健康检查 | `https://copilot.jintianchi.cn/api/health` | Java 健康 |
+| 就绪检查 | `https://copilot.jintianchi.cn/api/ready` | Java、数据库与 Python 依赖就绪状态 |
 | Python 健康 | `https://copilot.jintianchi.cn/api/agent/health` | Python 健康（通过 Java 代理） |
 
 **公网说明：**
@@ -27,44 +28,47 @@
 
 ### POST /api/auth/login
 
-使用 `app_user` 中的用户名和密码登录，返回短期 Bearer JWT。前端默认填充用户名 `zhangsan`，密码由部署环境提供，不写入前端 bundle。
+使用 `app_user` 中的用户名和密码登录，返回短期 Bearer JWT，并为浏览器设置 `HttpOnly`、`SameSite=Strict` 的认证 Cookie。前端生产构建不预填用户名或密码。
 
 ```json
 {"username":"zhangsan","password":"<password>"}
 ```
 
-登录成功响应包含 `accessToken`、`tokenType`、`expiresIn` 和用户信息。JWT 只携带已验证的身份字段，不携带 `enabled`；账号是否启用仅在登录时查询数据库。
+登录成功响应为 API/压测客户端保留 `accessToken`、`tokenType`、`expiresIn` 和用户信息。浏览器前端不把 Token 写入 Web Storage，后续使用 HttpOnly Cookie。JWT 只携带已验证的身份字段，不携带 `enabled`；账号是否启用仅在登录时查询数据库。
+
+### POST /api/auth/logout
+
+需要有效身份。清除浏览器认证 Cookie，返回 `204 No Content`。Cookie 驱动的非只读请求必须携带 `X-Requested-With: XMLHttpRequest`；Bearer API 客户端不受此约束。
 
 ### GET /api/auth/me
 
-需要请求头 `Authorization: Bearer <access-token>`，返回当前 JWT 身份。Agent 和 Business Action 路由的 Spring Security 规则均为 `authenticated()`：有效 Bearer JWT 优先；Bearer 存在但无效或过期直接返回 401，不回退 Demo 身份；完全没有 Bearer 时，受控 Demo 模式才可使用 `X-Demo-User-Id` fallback。
+返回当前 JWT 身份。浏览器使用 HttpOnly Cookie；API 客户端使用 `Authorization: Bearer <access-token>`。Agent 和 Business Action 路由的 Spring Security 规则均为 `authenticated()`：有效 Bearer JWT 优先；凭据存在但无效或过期直接返回 401，不回退 Demo 身份；完全没有凭据时，受控 Demo 模式才可使用 `X-Demo-User-Id` fallback。
 
 `/api/internal/leave/**` 不要求用户 JWT，仅由 `X-Internal-Token` 服务间认证，并消费可信上游注入的 `X-Employee-Id`。
 
 ### GET /api/health
 
-Java 服务健康检查。
+Java 进程存活检查，不访问下游依赖。
 
 **响应**
 ```json
 {
   "service": "backend-java",
-  "status": "UP",
-  "concurrency": {
-    "maxConcurrent": 3,
-    "active": 0,
-    "available": 3,
-    "rejected": 0,
-    "queueTimeoutMs": 500
-  }
+  "status": "UP"
 }
 ```
 
 ---
 
+### GET /api/ready
+
+Java 就绪检查：验证数据库连接和 Python `/agent/ready`。任一依赖未就绪时返回 HTTP 503 与 `status=NOT_READY`，容器编排使用此接口摘除实例。
+
+---
+
 ### GET /api/agent/health
 
-Java 代理 Python 健康检查。
+Java 代理 Python 存活检查。Python 依赖就绪状态使用 `/api/agent/ready`。
 
 **响应**（转发 Python 原始响应）
 ```json
@@ -100,7 +104,8 @@ Java 代理 Python 健康检查。
   "answer": "根据企业知识库，病假需要提供：\n1. 病历本复印件\n2. 缴费清单\n3. 病假证明",
   "model": "deepseek-v4-flash",
   "traceId": "551245e6-a04b-442d-adef-99387f93cd23",
-  "success": true
+  "success": true,
+  "sources": ["hr/leave-policy.md#chunk-3"]
 }
 ```
 
@@ -110,8 +115,9 @@ Java 代理 Python 健康检查。
 | model | string | 大模型名称 |
 | traceId | string | 请求追踪 ID（全链路一致） |
 | success | bool | 是否成功 |
+| sources | list[string] | 可读来源定位（领域/文件名 + chunk 序号） |
 
-> 注：当前版本 `/api/chat` 响应中不包含 `sources` 字段。RAG 引用来源仅在 Agent 链路（`/api/agent/langgraph/chat`）的 `sources` 字段返回。
+标准问答与 Agent RAG Tool 共用同一 RAG 服务与来源映射。
 
 **异常响应**（Python 不可用时）
 ```json
@@ -173,7 +179,7 @@ Java 代理 Python 健康检查。
   "safe": true,
   "category": "normal",
   "reason": "",
-  "sources": ["hr_leave_policy_real_sample_010", "hr_leave_policy_real_sample_026"],
+  "sources": ["hr/leave-policy.md#chunk-3", "hr/leave-faq.md#chunk-1"],
   "success": true,
   "traceId": "387af8a3-5357-4a0c-8e48-77505524a8f3"
 }
@@ -275,7 +281,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 | safe | bool | 安全守卫是否通过 |
 | category | string | 公共分类：`normal` / `access_control` / `business_action` / `overloaded` / `error` / `input_error`；Safety Guard 命中时由 Safety 写入细分类别（`illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access`），公网消费方按需处理 |
 | reason | string | 拒答原因（安全 / 权限场景）。正常完成 / 业务动作场景为空字符串；异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
-| sources | list | RAG 引用来源 chunk ID 列表 |
+| sources | list | 可读来源定位列表（领域/文件名 + chunk 序号） |
 | success | bool | 是否成功；语义：`route != 'error'` ⇒ `success=true`，合法拒绝 / 权限拒绝均视为成功（系统已正确处理），仅技术 / 规划失败返回 `false` |
 | traceId | string | 请求追踪 ID |
 | pendingAction | object/null | Java 权威校验后创建的待确认动作；仅完整 Action 返回 |
@@ -309,10 +315,10 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 
 - Java Read Path 只把当前 `(trusted user_id, conversationId)` 命中的 `ACTIVE` 记录转换为内部 `memoryContext`，注入 Python Planner；`COMPLETED` / `ABANDONED` 不注入。
 - Python Memory Extractor 消费不可信的历史任务数据，经过 `MemoryWritePolicy` 的 trusted-key 递归过滤、16 KiB task state 和 500 字符 summary 限制后才形成 command。
-- `MEMORY_WRITE_MODE=DISABLED`（默认）不调用 Extractor；`AUDIT_ONLY` 运行 Trigger/Extractor/Policy 但只记录元数据；`ENABLED` 通过 Java 签发的短时 scope 调用 `POST /api/internal/memory/conversations/{conversationId}/write`。
-- Memory write endpoint 只接受 `X-Internal-Token` 与 Java 签发的 `X-Memory-Write-Scope`，user_id 不来自前端、Python body、LLM 或 Memory。
+- `MEMORY_WRITE_MODE=DISABLED`（默认）不调用 Extractor；`AUDIT_ONLY` 运行 Trigger/Extractor/Policy 但只记录元数据；`ENABLED` 在 Python Agent 响应内返回 `memory_proposal`。
+- `memory_proposal` 不包含 owner、conversationId、action 或 status。Java 使用当前 `VerifiedIdentity.userId()` 与服务端解析的 conversationId，固定按 `UPSERT + ACTIVE` 持久化。
 - Memory 写入受状态机白名单约束（无记录仅允许 ACTIVE；终态不可重新激活），非法转换返回 `409 MEMORY_STATE_CONFLICT` 且不落库。
-- Memory 终态由 Java 收口：PendingAction 状态变更（确认成功 → COMPLETED；取消 / 过期 / 创建失败 / 处理失败 → ABANDONED）在同一事务内终结对应 ACTIVE memory，不依赖 LLM 猜测。
+- Memory 终态由 Java 收口：PendingAction 状态变更（确认成功 → COMPLETED；取消 / 过期 / 处理失败 → ABANDONED）在同一事务内终结对应 ACTIVE memory；动作创建失败时不写入该次 Memory 提案。
 - 同一 `(user_id, conversationId)` 至多一个活动 PendingAction：`ai_task_memory` 以该复合 key 为唯一键、每条会话只有一条任务记忆，因此 Java 在 `createPending` 内（控制锁内）拒绝同会话第二个活动动作，返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；动作进入终态（确认 / 取消 / 过期 / 失败）后同会话才可再发起新申请。
 - Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发；Agent 失败终态（`route=error` 或 `provider_error` / `invalid_decision` / `step_budget_exhausted`）直接短路，不进入 Extractor。
 
@@ -435,9 +441,15 @@ Python AI 服务健康检查。
 
 ---
 
+### GET /agent/ready
+
+Python 就绪检查，验证 Provider 必要配置、Chunks 与 FAISS 索引。全部就绪返回 HTTP 200 / `READY`；否则返回 HTTP 503 / `NOT_READY` 以及结构化 `checks`。容器健康检查使用该接口。
+
+---
+
 ### POST /agent/chat
 
-手写 RAG 问答接口（稳定主链路）。
+统一 RAG 问答接口（稳定主链路）。
 
 请求和响应格式同 Java `POST /api/chat`。
 
@@ -447,7 +459,7 @@ Python AI 服务健康检查。
 
 LangGraph Agent 问答接口。
 
-请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions`、`X-Business-Date`、`X-Conversation-Id` 和服务端填充的 `memoryContext` body；不读取 Admin Token。`X-Business-Date` 是 Java 权威业务日期，供 `leave_proposal_tool` 在 Planner-first 路径下使用。`X-Memory-Write-Scope` 只在 Java → Python → Java 内部链路透传，不能由公共客户端提交。
+请求格式同 Java `POST /api/agent/langgraph/chat`。该内部接口额外使用 Java 设置的 `X-Allow-Business-Actions`、`X-Business-Date`、`X-Conversation-Id` 和服务端填充的 `memoryContext` body；不读取 Admin Token。`X-Business-Date` 是 Java 权威业务日期，供 `leave_proposal_tool` 在 Planner-first 路径下使用。Python 可在响应中附带不含 owner/lifecycle 的 `memory_proposal`，由 Java 当前认证请求处理。
 
 Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 

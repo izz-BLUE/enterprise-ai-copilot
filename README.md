@@ -49,7 +49,7 @@ flowchart LR
 
 企业请假只读 Tool（`leave_balance_tool` / `leave_request_tool`）的链路是：Java 侧完成身份解析后，将可信 `employee_id` 注入 Python AgentState；Python Tool Executor 再通过最小 HTTP client 调用 Java `/api/internal/leave/*`，Java 使用 `JAVA_INTERNAL_TOKEN` 鉴权并严格按员工身份查询 PostgreSQL。`employee_id` 和 `trace_id` 不属于 LLM 可控 arguments。`leave_proposal_tool` 只生成 `action_proposal` / `missing_fields`（Clarification），**不执行写操作**，且不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限与最终数据库写入全部由 Java 完成。
 
-Scoped Conversation Memory P0 已接入 Planner-first Agent：Java 以可信 `(user_id, conversation_id)` 读取 ACTIVE memory，通过内部 `memoryContext` 注入 Python；Agent 出口的 Memory Extractor 只保存结构化任务状态。写入模式由 `MEMORY_WRITE_MODE` 控制：`DISABLED`（默认）/ `AUDIT_ONLY` / `ENABLED`。Memory 是不可信历史上下文，不参与 Tool 能力扩大；写入 owner 由 Java 签发并验签的短时 scope 决定，且与 PendingAction 完全分离。
+Scoped Conversation Memory P0 已接入 Planner-first Agent：Java 以可信 `(user_id, conversation_id)` 读取 ACTIVE memory，通过内部 `memoryContext` 注入 Python；Agent 出口的 Memory Extractor 只返回结构化 `UPSERT + ACTIVE` 提案。写入模式由 `MEMORY_WRITE_MODE` 控制：`DISABLED`（默认）/ `AUDIT_ONLY` / `ENABLED`。Java 在同一个已认证请求中决定 owner 与 conversation scope；动作提案必须先成功创建 PendingAction，之后才写入 Memory。
 
 ## What this project demonstrates
 
@@ -64,7 +64,8 @@ Scoped Conversation Memory P0 已接入 Planner-first Agent：Java 以可信 `(u
 | Verification | Java/Python 单测、检索评估、前端 lint/build、Playwright、分层 k6 场景 |
 | Controlled actions | 三个白名单 Demo 身份、PostgreSQL 数据隔离、HITL 确认与 `LeaveExecutionGateway` |
 | Enterprise read tools | `leave_balance_tool` / `leave_request_tool`、Planner 参数白名单、Java 内部接口鉴权与员工身份隔离 |
-| Scoped conversation memory | ACTIVE read path、结构化 Extractor/WritePolicy、Java trusted scope 写入、DISABLED/AUDIT_ONLY/ENABLED |
+| Scoped conversation memory | ACTIVE read path、结构化 Extractor/WritePolicy、Java 当前认证上下文写入、DISABLED/AUDIT_ONLY/ENABLED |
+| AI observability | 可选 Phoenix/OpenTelemetry Trace；批量异步导出、采样、默认正文脱敏、Collector 故障不阻断业务 |
 
 ## Design decisions and trade-offs
 
@@ -297,9 +298,13 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - 支持文本归一化，减少格式误判
 - 支持 baseline 对比，为后续 CI 质量门禁做准备
 
-### 8. LangChain RAG Chain
+### 8. 统一 RAG 入口
 
-**实验模块：**
+**生产实现：** `app/services/rag_answer_service.py`
+
+标准问答与 Agent 的 `rag_answer_tool` 共用同一套查询重写、检索、Gate、Prompt、LLM 和来源映射，避免两条实现漂移。
+
+**兼容模块：**
 
 ```
 app/chains/langchain_rag_chain.py
@@ -311,12 +316,7 @@ app/chains/langchain_rag_chain.py
 answer_with_langchain_rag()
 ```
 
-**用途：**
-
-- 使用 LangChain ChatPromptTemplate
-- 使用 OpenAI-compatible Chat Model
-- 复用现有 hybrid_retriever
-- 对比手写 RAG 与框架式 RAG 的差异
+该函数只委托统一 RAG Service，保留旧实验脚本入口，不再创建第二套 Prompt、模型客户端或重试策略。
 
 **运行示例：**
 
@@ -325,7 +325,7 @@ cd agent-python
 uv run python scripts/experiments/langchain_rag_demo.py "病假需要提供哪些材料？"
 ```
 
-**说明：** 当前 `/agent/chat` 主流程仍使用手写 RAG 实现，LangChain 模块仅作为实验性封装。
+**说明：** `langchain-openai` 已从生产依赖移除。
 
 ### 9. LangGraph Agent
 
@@ -577,7 +577,7 @@ python.agent.base-url=http://localhost:8000
 cors.allowed-origins=http://localhost:5173,http://127.0.0.1:5173
 # Java → Python 超时（毫秒）
 python.agent.connect-timeout=3000
-python.agent.read-timeout=40000
+python.agent.read-timeout=50000
 # Java → Python 有界并发
 python.agent.max-concurrent-requests=3
 python.agent.acquire-timeout-ms=500
@@ -611,15 +611,22 @@ AI_QUEUE_TIMEOUT_MS=500                        # 获取槽位最长等待时间�
 MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
 REWRITE_MODE=none                              # 查询重写：none / rule（本地默认 none，公网部署使用 rule）
 HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络必须）
-JAVA_BASE_URL=http://localhost:8080            # Java 内部接口地址（只读 Tool / Memory writer）
+JAVA_BASE_URL=http://localhost:8080            # Java 内部接口地址（只读 Tool）
 JAVA_INTERNAL_TOKEN=replace_with_local_token   # 与 Java 的 JAVA_INTERNAL_TOKEN 保持一致
 JAVA_TIMEOUT_SECONDS=5                         # Python → Java 内部查询超时（秒）
 MEMORY_WRITE_MODE=DISABLED                     # Memory 写入：DISABLED / AUDIT_ONLY / ENABLED
+PHOENIX_TRACING=false                          # Phoenix Trace 默认关闭
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+PHOENIX_PROJECT_NAME=enterprise-ai-copilot
+PHOENIX_SAMPLE_RATE=1.0                        # [0,1]
+PHOENIX_CAPTURE_CONTENT=false                  # 默认不采集 Prompt/输入/输出正文
 ```
 
 **Do not commit `.env` or any API keys to GitHub.**
 
-`JAVA_INTERNAL_TOKEN` 为空时，Java 内部只读 Tool 关闭，且 Java 不会签发 Memory trusted write scope；Python 客户端不做重试或 fallback。`MEMORY_WRITE_MODE=ENABLED` 还要求请求来自 Java LangGraph 链路并携带其签发的 scope。公网部署时应通过运行环境注入变量，不要写入 README、前端代码或仓库文件。
+`JAVA_INTERNAL_TOKEN` 为空时，Java 内部只读 Tool 关闭；Python 只读客户端不做重试或 fallback。`MEMORY_WRITE_MODE=ENABLED` 时，Python 只在 Agent 响应中返回 Memory 提案，不需要 Java URL 或内部 Token；Java 使用当前请求的认证身份与 conversationId 落库。公网部署时应通过运行环境注入变量，不要写入 README、前端代码或仓库文件。
+
+Phoenix 自托管控制台通过 `docker compose --profile observability up -d` 按需启动，默认只绑定 `http://127.0.0.1:6006`。它用于运行时调试，不替代仓库内离线评估或 Java 权威业务审计。
 
 Recommended `.gitignore` entries:
 
@@ -850,7 +857,7 @@ See [`docs/demo-script.md`](docs/demo-script.md) for detailed talking points, ex
 **Scoped Conversation Memory P0（当前分支）：**
 
 - 同一 `(trusted user_id, conversation_id)` 的 ACTIVE task memory 可注入下一轮 Planner
-- Memory Write Path 支持 `DISABLED` / `AUDIT_ONLY` / `ENABLED`；ENABLED 使用 Java 签发的短时 trusted scope
+- Memory Write Path 支持 `DISABLED` / `AUDIT_ONLY` / `ENABLED`；ENABLED 在当前响应中返回提案，由 Java 认证上下文落库
 - 普通 RAG、评估、余额和历史查询 Tool 不触发 Memory Extractor；仅业务 Proposal 链路或已有 ACTIVE memory 触发
 
 **Planned features:**

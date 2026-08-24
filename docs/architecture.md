@@ -49,6 +49,11 @@ flowchart TD
         EVR[Evaluation Reports]
     end
 
+    subgraph Observability ["Optional Observability"]
+        OI[OpenInference / OpenTelemetry<br/>BatchSpanProcessor]
+        PHX[Phoenix Collector + UI<br/>:4317 / :6006]
+    end
+
     subgraph Agent ["LangGraph Agent（两套互斥）"]
         SN[safety_node]
         LG{AGENT_LOOP_ENABLED}
@@ -97,6 +102,7 @@ flowchart TD
 
     CC -->|HTTP + X-Trace-Id| EP1
     LAC -->|HTTP + X-Trace-Id| EP2
+    MW -.->|PHOENIX_TRACING=true| OI --> PHX
 
     EP1 --> HR
     HR --> FR
@@ -143,11 +149,12 @@ flowchart TD
 
 - **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **SecurityConfig / AuthController**：`app_user` + BCrypt 登录并签发短期 JWT；Agent/Business Action 使用 `authenticated()`，有效 JWT 优先，Bearer 无效不回退 Demo；`/api/internal/leave/**` 保持 X-Internal-Token 服务间认证
+- **SecurityConfig / AuthController**：`app_user` + BCrypt 登录并签发短期 JWT；浏览器使用 HttpOnly + SameSite=Strict Cookie（Web Storage 不保存 Token），API 客户端继续支持 Bearer；Cookie 写请求要求 `X-Requested-With`；Agent/Business Action 使用 `authenticated()`，无效凭据不回退 Demo；`/api/internal/leave/**` 保持 X-Internal-Token 服务间认证
 - **LangGraphAgentController**：在 Python 调用前解析 JWT 或显式 Demo fallback 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id` 和 Java 权威 `business_date`；Admin Token 不下传 Python。Python 返回的 `action_proposal` 用于生成 PendingAction：`BusinessActionService.createPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
 - **BusinessActionController**：`POST /api/agent/actions/{actionId}/confirm` 与 `/cancel`；强制要求 owner 校验、nonce 校验、状态机、TTL、幂等
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
+- **PythonAgentGateway**：统一 Java → Python 基础 URL、trace header、HTTP 调用与 Bulkhead 许可生命周期
 - **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
 - **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
@@ -176,18 +183,37 @@ flowchart TD
 - **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
 - **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
 - **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
+- **observability**：可选 Phoenix/OpenTelemetry 旁路。FastAPI 生命周期负责初始化/关闭，`trace_id_middleware` 为两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；固定使用 BatchSpanProcessor，默认隐藏输入、输出、Prompt 和 embedding vector，Collector 故障不改变业务响应
 - **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表（legacy Router-first 与 Planner-first 的 `leave_proposal_tool` 复用此服务）
 - **tool_calling_service**：`plan_annual_leave_action` 的实现入口，由 `leave_proposal_tool` 复用；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
 - **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
 - **java_client**：Python → Java 内部只读 HTTP 客户端；仅供 `leave_balance_tool` / `leave_request_tool` 使用；不做 retry / fallback
-- **memory runtime hook**：Agent 响应出口旁路；按 `MEMORY_WRITE_MODE` 组装现有 LLM service、Trigger/Extractor/WritePolicy、Dispatcher 与 `JavaMemoryClient`，失败不阻断主响应
-- **Memory Write endpoint**：Java 只接受 `X-Internal-Token` 与 Java 签发的短时 conversation-bound scope，以 scope 的 trusted userId 进入 `AiTaskMemoryService`
+- **memory runtime hook**：Agent 响应出口旁路；按 `MEMORY_WRITE_MODE` 组装现有 LLM service、Trigger/Extractor/WritePolicy 与响应提案 writer，失败不阻断主响应
+- **Memory 持久化**：Python 响应只携带内容提案；Java 使用当前 `VerifiedIdentity` 与服务端解析的 conversationId 固定执行 `UPSERT + ACTIVE`
 
 受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
 
+### Phoenix / OpenTelemetry Observability
+
+Phoenix 仅负责运行时调试与 Trace 展示，不替代 `scripts/eval/`、
+`agent_real_eval` 或发布质量门禁。`PHOENIX_TRACING=false` 时不加载 Phoenix
+插桩组件；启用后普通 RAG 与 LangGraph 请求共享同一根 Span，并以
+`business.trace_id` 属性关联 Java 生成的业务 traceId。OTel Trace ID 仍由
+OpenTelemetry 自身生成，业务 traceId 不覆盖它。
+
+生产配置固定使用批量异步导出。初始化、后台导出和关闭失败只记录日志，
+不得触发聊天、Tool 或受控业务动作失败。`PHOENIX_CAPTURE_CONTENT=false`
+为默认值，不上传 Prompt、用户输入、检索正文和模型输出；Trace 不包含
+`employee_id`，也不参与 Capability Gate、owner 派生或 Java 权威业务判断。
+
+自托管 Phoenix 在 Compose 中属于 `observability` profile，默认不随主服务启动。
+控制台只绑定宿主机 `127.0.0.1:6006`；Collector 通过 Docker 内网 `4317`
+接收 Python Trace。SQLite Volume 适合当前低流量演示，生产规模、保留周期和
+资源上限仍需通过单独压测确认。
+
 ### 实验性 Retrieval Shadow Gate
 
-Hybrid Retrieval 可在内部保留同一候选的 FAISS cosine 与 BM25 原始分数，并通过实验性 Gate 记录相关性判断。该能力默认 `off`，只有显式设置 `RAG_GATE_MODE=shadow` 才进行非阻断分析；`enforce` 被配置层禁止。
+Hybrid Retrieval 可在内部保留同一候选的 FAISS cosine 与 BM25 原始分数，并通过实验性 Gate 记录相关性判断。该能力默认 `off`；`shadow` 只记录不阻断；`enforce` 会阻断低相关结果且评估异常时安全拒答，只应在目标数据集完成阈值验收后启用。
 
 独立 Holdout 结果为 answerable `7/8`、no-answer block `1/8`，证明 Vector/BM25 主题相关性不足以判断答案证据是否充分。因此 Gate 不属于正式启用的生产能力，不改变 Prompt、公开响应或实际 LLM 调用。完整实验见 [RAG 生成前检索相关性 Gate 实验报告](rag-retrieval-gate-experiment.md)。
 
@@ -200,11 +226,11 @@ POST /api/chat
   → Java ChatController（读取 traceId，透传 X-Trace-Id）
     → @Size(max=2000) 输入长度校验
     → PythonAgentBulkhead（默认 3 个并发槽，排队 500ms）
-    → RestTemplate 调 Python（connect-timeout 3s, read-timeout 40s）
+    → PythonAgentGateway 调 Python（连接池、统一 Bulkhead、trace header、3s 连接 / 50s 读取超时）
     → Python POST /agent/chat
       → RequestConcurrencyLimiter（默认 3 个并发槽，排队 500ms）
       → MAX_MESSAGE_LENGTH 兜底校验（默认 2000）
-      → rag_service.process_chat()
+      → rag_service.process_chat() → rag_answer_service.answer_rag()
         → safety_guard.check_user_query_safety()  # 规则版 Safety Guard 前置检查
         → query_rewriter.rewrite_query()           # 实验模式，none 时跳过
         → hybrid_retriever.retrieve()
@@ -212,12 +238,12 @@ POST /api/chat
           └── bm25_retriever（字符级 n-gram BM25 检索）
         → RRF 融合排序（默认 hybrid 模式）→ TopK=3
         → build_rag_prompt()
-        → llm_service.call_llm()                   # LLM_TIMEOUT 超时控制（默认 30s）
+        → llm_service.call_llm()                   # 30s 单次超时、1024 输出 Token、默认不重试
           → DeepSeek API
         → ChatResponse（含 traceId）
 ```
 
-**特点**：手写全链路，不依赖 LangChain/LangGraph。Safety Guard 在检索前检查输入，高风险问题直接拒答，不进入检索。
+**特点**：标准问答和 Agent RAG Tool 复用同一 `rag_answer_service`；兼容 Chain 仅委托该服务。Safety Guard 在检索前检查输入，高风险问题直接拒答，不进入检索。
 
 > **注意：** Safety Guard Lite 是启发式纵深防御过滤器（heuristic defense-in-depth filter），不是 authorization / trust / tool permission / business validation 边界。真正安全边界由认证、授权、工具能力、业务校验、租户/数据隔离、事务/状态机、人工确认承担。Lite 只做输入规范化 + 五族高置信确定性规则，明确攻击拦截、咨询放行，不承诺完整 prompt injection 检测 / 完整 Unicode confusable 保护 / 完整自然语言意图理解。
 
@@ -339,17 +365,16 @@ React sessionStorage conversationId
   → MemoryTriggerPolicy
     → leave_proposal_tool 成功或已有 ACTIVE memory 才进入 Extractor
   → MemoryExtractor(MemoryLLMAdapter → 现有 llm_service.call_llm)
-  → MemoryWritePolicy（trusted key / 16 KiB / 500 字符 / 状态映射）
+  → MemoryWritePolicy（trusted key / 脱敏 / 16 KiB / 500 字符 / 仅 UPSERT+ACTIVE）
   → MEMORY_WRITE_MODE
     ├─ DISABLED：入口短路，不调用 Extractor
     ├─ AUDIT_ONLY：生成 command，仅记录元数据
-    └─ ENABLED：MemoryWriteDispatcher → JavaMemoryClient
-          → X-Internal-Token + Java 签发的短时 X-Memory-Write-Scope
-          → /api/internal/memory/conversations/{conversationId}/write
-          → Java 验签 scope 后以 scope.userId() 写入
+    └─ ENABLED：MemoryWriteDispatcher → response memory_proposal
+          → Java 先创建 PendingAction（若有 action_proposal）
+          → Java 以当前 VerifiedIdentity.userId() + conversationId 写 ACTIVE Memory
 ```
 
-身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Python 只透传 Java scope。`conversationId` 只作 namespace，Java 写入前同时校验 path 与 scope 绑定。Read Path 只注入 `ACTIVE`；`COMPLETE → COMPLETED`、`ABANDON → ABANDONED`，无 TTL、归档、向量或 Profile Memory。
+身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Java 直接使用当前认证上下文。`conversationId` 只作 namespace，并由 Java 在当前请求内解析。Read Path 只注入 `ACTIVE`；终态只由 Java PendingAction 生命周期收口，无 TTL、归档、向量或 Profile Memory。
 
 ## 离线知识库构建流程
 
@@ -471,10 +496,10 @@ Frontend: 展示 traceId 标签
 agent-python/app/
 ├── core/          # config.py — 环境变量、路径、常量
 ├── retrieval/     # faiss_retriever, keyword_retriever, bm25_retriever, hybrid_retriever, query_rewriter, cross_encoder_reranker
-├── services/      # rag_service.py, llm_service.py
+├── services/      # rag_answer_service.py（统一 RAG）, rag_service.py（安全入口）, llm_service.py
 ├── prompts/       # system_prompt.py, build_rag_prompt()
 ├── schemas/       # ChatRequest, ChatResponse, AgentResponse
-├── chains/        # langchain_rag_chain.py — LangChain RAG 封装
+├── chains/        # langchain_rag_chain.py — 旧入口兼容委托层
 ├── tools/         # rag_tools（rag_answer_tool / eval_report_tool，LangChain @tool）+ enterprise_tools（leave_balance_tool / leave_request_tool / leave_proposal_tool）
 ├── agents/        # langgraph_agent.py + planner_node.py + tool_executor_node.py — LangGraph 两套互斥图
 ├── clients/       # java_client.py — Python → Java 内部只读 HTTP 客户端（仅供只读企业 Tool 使用）
@@ -495,7 +520,7 @@ logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %m
 python.agent.max-concurrent-requests=3
 python.agent.acquire-timeout-ms=500
 python.agent.connect-timeout=3000
-python.agent.read-timeout=40000
+python.agent.read-timeout=50000
 ```
 
 ## 网络拓扑（部署环境）
@@ -583,7 +608,7 @@ LangGraph 用于流程编排，main 同时保留两套互斥状态图：
 - 文档上传与知识库管理
 - 多租户隔离
 - 审计日志
-- 监控告警
+- 完整 metrics、告警和审计栈（Phoenix 当前只提供可选 AI Trace/评估控制台）
 - 多模型配置
 - 高可用、水平扩容和大规模高并发（当前仅实现单机有界并发保护）
 

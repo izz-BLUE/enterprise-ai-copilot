@@ -23,6 +23,7 @@
 - **Safety Guard Lite 定位**（Python safety_node）：启发式纵深防御过滤器，不是 authorization / trust / tool permission / business validation 边界；原始用户输入始终原样传给下游。
 - **RAG / 数据权限边界**：数据分目录隔离（data/hr|bank|it 原始知识库 / data/processed 构建产物 / data/eval 评估用例）；Python 只做检索与生成，业务数据写操作只能走受控业务动作链路。
 - **请求链路**：前端 → Java (8080) → Python (8000)；普通 RAG 走 `/agent/chat`，Agent 走 `/agent/langgraph/chat`，业务动作确认走 `/api/agent/actions/{id}/confirm`。
+- **Phoenix 可观测性边界**：`PHOENIX_TRACING` 默认关闭；启用时以 OpenTelemetry/OpenInference + BatchSpanProcessor 旁路追踪 Python AI 请求，初始化/导出失败不得阻断业务。默认不采集 Prompt、用户输入、检索正文或模型输出；`business_trace_id` 只用于关联定位，不是身份、权限或业务事实来源。现有离线评估仍是回归门禁。
 - **公网状态约束**：仓库对公网实际运行版本无证据，文档统一表述"仓库部署默认 Planner-first（false 回退 legacy）"；公网是否启用 Planner-first / 受控业务动作以运维 `.env` 为准，本文件不据此做能力宣称。
 
 ## 高频命令
