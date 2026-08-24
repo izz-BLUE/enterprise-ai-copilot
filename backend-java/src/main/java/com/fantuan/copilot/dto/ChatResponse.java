@@ -1,4 +1,7 @@
 package com.fantuan.copilot.dto;
 
-public record ChatResponse(String answer, String model, String traceId, boolean success) {
+import java.util.List;
+
+public record ChatResponse(String answer, String model, String traceId, boolean success,
+                           List<String> sources) {
 }

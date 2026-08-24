@@ -1,27 +1,44 @@
 package com.fantuan.copilot.controller;
 
-import org.springframework.beans.factory.annotation.Value;
+import com.fantuan.copilot.gateway.python.PythonAgentGateway;
+import com.fantuan.copilot.gateway.python.PythonAgentTransportException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.client.RestTemplate;
 
 import java.util.Map;
 
 @RestController
 public class AgentHealthController {
 
-    private final RestTemplate restTemplate;
+    private final PythonAgentGateway pythonAgentGateway;
 
-    @Value("${python.agent.base-url:http://localhost:8000}")
-    private String pythonAgentBaseUrl;
-
-    public AgentHealthController(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    public AgentHealthController(PythonAgentGateway pythonAgentGateway) {
+        this.pythonAgentGateway = pythonAgentGateway;
     }
 
     @GetMapping("/api/agent/health")
-    public Map<String, Object> agentHealth() {
-        String url = pythonAgentBaseUrl + "/agent/health";
-        return restTemplate.getForObject(url, Map.class);
+    public ResponseEntity<Map<String, Object>> agentHealth() {
+        try {
+            return ResponseEntity.ok(pythonAgentGateway.health());
+        } catch (PythonAgentTransportException exception) {
+            return notReady();
+        }
+    }
+
+    @GetMapping("/api/agent/ready")
+    public ResponseEntity<Map<String, Object>> agentReadiness() {
+        try {
+            return ResponseEntity.ok(pythonAgentGateway.readiness());
+        } catch (PythonAgentTransportException exception) {
+            return notReady();
+        }
+    }
+
+    private ResponseEntity<Map<String, Object>> notReady() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "service", "agent-python",
+                "status", "NOT_READY"));
     }
 }
