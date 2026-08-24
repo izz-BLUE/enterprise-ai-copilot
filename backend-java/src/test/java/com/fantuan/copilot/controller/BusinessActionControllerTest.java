@@ -1,6 +1,7 @@
 package com.fantuan.copilot.controller;
 
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
+import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.service.action.ActionException;
@@ -39,7 +40,8 @@ class BusinessActionControllerTest {
                 HttpStatus.BAD_REQUEST, "DEMO_IDENTITY_REQUIRED", "请选择演示身份。", null, null));
         when(identities.requireIdentity("unknown")).thenThrow(new ActionException(
                 HttpStatus.FORBIDDEN, "DEMO_IDENTITY_INVALID", "演示身份无效。", null, null));
-        mockMvc = MockMvcBuilders.standaloneSetup(new BusinessActionController(service, identities))
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                        new BusinessActionController(service, new IdentityContext(identities)))
                 .setControllerAdvice(new BusinessActionExceptionHandler())
                 .build();
     }

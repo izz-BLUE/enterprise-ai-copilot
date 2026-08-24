@@ -4,7 +4,6 @@ import com.fantuan.copilot.dto.action.ActionDecisionRequest;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.service.action.BusinessActionService;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,12 +29,6 @@ public class BusinessActionController {
         this.identityContext = identityContext;
     }
 
-    /** Compatibility constructor retained for standalone DemoIdentity tests. */
-    public BusinessActionController(BusinessActionService service,
-                                    DemoIdentityService identities) {
-        this(service, new IdentityContext(identities));
-    }
-
     @PostMapping("/{actionId}/confirm")
     public ResponseEntity<ActionExecutionResponse> confirm(
             @PathVariable String actionId,
@@ -44,7 +37,6 @@ public class BusinessActionController {
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
-        service.requireAccess(adminToken);
         var identity = identityContext.require(servletRequest).asDemoIdentity();
         return noStore(service.confirm(actionId, request.confirmationNonce(), idempotencyKey,
                 adminToken, traceId, identity));
@@ -57,7 +49,6 @@ public class BusinessActionController {
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
-        service.requireAccess(adminToken);
         var identity = identityContext.require(servletRequest).asDemoIdentity();
         return noStore(service.cancel(actionId, request.confirmationNonce(), adminToken, traceId,
                 identity));
