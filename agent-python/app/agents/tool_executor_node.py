@@ -10,6 +10,7 @@ tool_executor_node.py —— Tool 执行节点
 
 import json
 from datetime import date
+from time import monotonic
 
 from pydantic import ValidationError
 
@@ -123,6 +124,14 @@ def _blocked(state: dict, stop_reason: str, message: str,
         'tool_name': tool_name,
     }, ensure_ascii=False)
     tool_history = list(state.get('tool_history', []))
+
+    deadline = state.get('deadline_monotonic')
+    if isinstance(deadline, (int, float)) and monotonic() >= deadline:
+        return _blocked(
+            state,
+            'request_timeout',
+            '当前任务处理超时，未继续执行工具。',
+        )
     tool_history.append({
         'tool_name': tool_name,
         'arguments': arguments,

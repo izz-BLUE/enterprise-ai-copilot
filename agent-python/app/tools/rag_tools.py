@@ -37,7 +37,7 @@ def rag_answer_tool(question: str, original_question: str = '', trace_id: str = 
     output = {
         "answer": result["answer"],
         "success": result["success"],
-        "sources": [s["id"] for s in result["sources"]],
+        "sources": result["sources"],
     }
     return json.dumps(output, ensure_ascii=False)
 

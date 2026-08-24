@@ -9,7 +9,6 @@ from app.schemas.action_schema import (
     ProposalPlanningResult,
 )
 
-
 BUSINESS_DATE = date(2026, 7, 16)
 
 

@@ -24,7 +24,6 @@ from unittest.mock import Mock, patch
 
 from app.agents.langgraph_agent import run_langgraph_agent
 
-
 BUSINESS_DATE = date(2026, 8, 18)
 
 
@@ -334,7 +333,8 @@ class TestLegacyGraphUnchanged:
 
     def test_legacy_action_route_preserved(self):
         from app.schemas.action_schema import (
-            AnnualLeaveActionProposal, ProposalPlanningResult,
+            AnnualLeaveActionProposal,
+            ProposalPlanningResult,
         )
         proposal = ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
             action_type='ANNUAL_LEAVE_REQUEST',

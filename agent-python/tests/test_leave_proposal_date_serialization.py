@@ -18,11 +18,8 @@ import re
 from datetime import date
 from unittest.mock import patch
 
-import pytest
-
-from app.schemas.chat_schema import AgentResponse
 from app.schemas.action_schema import AnnualLeaveActionProposal
-
+from app.schemas.chat_schema import AgentResponse
 
 # ---------------------------------------------------------------------------
 # Tool 出口:date 在 Tool 内部 dict 中保持 Python date
@@ -288,7 +285,11 @@ class TestAgentResponseRoundtrip:
         body = resp.model_dump()
         # 真实 HTTP 出口仍由 FastAPI (Pydantic v2 默认 JSON encoder) 序列化 date,
         # 与 Java 端 Jackson 的 LocalDate(ISO 反序列化)对齐。
-        json_str = body.model_dump_json() if hasattr(body, 'model_dump_json') else json.dumps(body, ensure_ascii=False, default=str)
+        json_str = (
+            body.model_dump_json()
+            if hasattr(body, 'model_dump_json')
+            else json.dumps(body, ensure_ascii=False, default=str)
+        )
 
         # JSON 序列化的 start_date 是 ISO string (这是 Java Jackson 接受的格式)
         parsed = json.loads(json_str)

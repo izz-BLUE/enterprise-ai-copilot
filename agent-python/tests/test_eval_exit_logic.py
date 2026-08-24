@@ -12,13 +12,10 @@ test_eval_exit_logic.py — 验证 eval_retrieval.py 的阈值判定与退出码
 7. JSON 报告包含阈值与门禁结果
 """
 
-import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
 
 # 路径设置
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

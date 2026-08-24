@@ -429,42 +429,36 @@ class TestPromptInputs:
 
 
 class TestEmptyResponseRetry:
-    """空响应恢复：None / '' / 纯空白 → 内部重试 1 次；非空非法 JSON 不重试。"""
+    """空响应不做应用层重试，避免突破端到端 deadline。"""
 
-    def test_empty_string_then_valid_json_retries_once(self):
-        with patch('app.agents.planner_node.call_llm',
-                   side_effect=['', RAG_RAW]) as llm:
+    def test_empty_string_ends_invalid_decision_without_retry(self):
+        with patch('app.agents.planner_node.call_llm', return_value='') as llm:
             result = planner_node(state())
-        assert llm.call_count == 2
-        assert result['planner_decision']['action'] == 'tool'
-        assert result['planner_decision']['tool_name'] == RAG_TOOL_NAME
-        assert result['stop_reason'] == 'continue'
-        # 重试属于同一次 Planner 决策内部恢复，不额外消耗 step
+        assert llm.call_count == 1
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['stop_reason'] == 'invalid_decision'
         assert result['step_count'] == 1
 
-    def test_whitespace_then_valid_json_retries_once(self):
-        with patch('app.agents.planner_node.call_llm',
-                   side_effect=['   ', FINISH_RAW]) as llm:
+    def test_whitespace_ends_invalid_decision_without_retry(self):
+        with patch('app.agents.planner_node.call_llm', return_value='   ') as llm:
             result = planner_node(state())
-        assert llm.call_count == 2
-        assert result['planner_decision']['action'] == 'finish'
-        assert result['stop_reason'] == 'task_complete'
+        assert llm.call_count == 1
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['stop_reason'] == 'invalid_decision'
         assert result['step_count'] == 1
 
-    def test_empty_string_twice_ends_invalid_decision(self):
-        with patch('app.agents.planner_node.call_llm',
-                   side_effect=['', '']) as llm:
+    def test_empty_string_has_stable_failure_contract(self):
+        with patch('app.agents.planner_node.call_llm', return_value='') as llm:
             result = planner_node(state())
-        assert llm.call_count == 2
+        assert llm.call_count == 1
         assert result['planner_decision']['action'] == 'refuse'
         assert result['planner_decision']['reason_code'] == 'cannot_complete'
         assert result['stop_reason'] == 'invalid_decision'
 
-    def test_none_then_empty_ends_invalid_decision(self):
-        with patch('app.agents.planner_node.call_llm',
-                   side_effect=[None, None]) as llm:
+    def test_none_ends_invalid_decision_without_retry(self):
+        with patch('app.agents.planner_node.call_llm', return_value=None) as llm:
             result = planner_node(state())
-        assert llm.call_count == 2
+        assert llm.call_count == 1
         assert result['stop_reason'] == 'invalid_decision'
 
     def test_invalid_non_empty_json_does_not_retry(self):

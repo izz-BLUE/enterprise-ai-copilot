@@ -21,5 +21,4 @@
 from app.capabilities.memory_capability import MemoryCapability
 from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 
-
 __all__ = ['MemoryCapability', 'MemoryCapabilityRegistry']

@@ -189,7 +189,7 @@ class TestHistoryRendering:
             captured['user_prompt'] = user_prompt
             return next(responses)
 
-        with patch('app.agents.planner_node.call_llm', side_effect=fake_llm) as llm, \
+        with patch('app.agents.planner_node.call_llm', side_effect=fake_llm), \
                 patch('app.agents.tool_executor_node.rag_answer_tool') as rag, \
                 patch('app.agents.tool_executor_node.eval_report_tool') as evl:
             rag.invoke.return_value = RAG_RESULT
@@ -221,7 +221,7 @@ class TestSuccessDedup:
             _tool('rag_answer_tool', {'question': '公司的年假制度是什么'}, 'need_knowledge'),
             _finish('完成。'),
         ]
-        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
                 patch('app.agents.tool_executor_node.rag_answer_tool') as rag, \
                 patch('app.agents.tool_executor_node.eval_report_tool') as evl:
             rag.invoke.return_value = RAG_RESULT

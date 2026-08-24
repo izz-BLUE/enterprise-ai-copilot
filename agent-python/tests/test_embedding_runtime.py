@@ -39,6 +39,7 @@ class TestEmbeddingConfig(unittest.TestCase):
             os.environ.pop('EMBEDDING_BACKEND', None)
             # 重新导入以获取默认值
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             self.assertEqual(mod.EMBEDDING_BACKEND, 'torch')
@@ -47,6 +48,7 @@ class TestEmbeddingConfig(unittest.TestCase):
         """backend=onnx_st 可正确解析。"""
         with patch.dict(os.environ, {'EMBEDDING_BACKEND': 'onnx_st'}, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             self.assertEqual(mod.EMBEDDING_BACKEND, 'onnx_st')
@@ -55,6 +57,7 @@ class TestEmbeddingConfig(unittest.TestCase):
         """backend=onnx_direct 可正确解析。"""
         with patch.dict(os.environ, {'EMBEDDING_BACKEND': 'onnx_direct'}, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             self.assertEqual(mod.EMBEDDING_BACKEND, 'onnx_direct')
@@ -63,6 +66,7 @@ class TestEmbeddingConfig(unittest.TestCase):
         """非法 backend 应立即报错。"""
         with patch.dict(os.environ, {'EMBEDDING_BACKEND': 'invalid'}, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             with self.assertRaises(ValueError) as ctx:
@@ -76,6 +80,7 @@ class TestEmbeddingConfig(unittest.TestCase):
             'EMBEDDING_PROVIDER': 'CUDAExecutionProvider',
         }, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             with self.assertRaises(ValueError) as ctx:
@@ -89,6 +94,7 @@ class TestEmbeddingConfig(unittest.TestCase):
             'EMBEDDING_MODEL_PATH': '/nonexistent/path',
         }, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             with self.assertRaises(FileNotFoundError) as ctx:
@@ -105,6 +111,7 @@ class TestEmbeddingConfig(unittest.TestCase):
                 'EMBEDDING_MODEL_PATH': tmpdir,
             }, clear=False):
                 import importlib
+
                 import app.retrieval.embedding_runtime as mod
                 importlib.reload(mod)
                 with self.assertRaises(FileNotFoundError) as ctx:
@@ -118,6 +125,7 @@ class TestEmbeddingConfig(unittest.TestCase):
             'EMBEDDING_MODEL_PATH': '/nonexistent/path',
         }, clear=False):
             import importlib
+
             import app.retrieval.embedding_runtime as mod
             importlib.reload(mod)
             # 必须抛出异常，不能静默成功
@@ -143,6 +151,7 @@ class TestEmbeddingEncode(unittest.TestCase):
     def test_encode_returns_numpy(self):
         """encode 应返回 numpy 数组。"""
         import importlib
+
         import app.retrieval.embedding_runtime as mod
         importlib.reload(mod)
 
@@ -156,6 +165,7 @@ class TestEmbeddingEncode(unittest.TestCase):
     def test_single_encode_dim_512(self):
         """单条输出维度应为 512。"""
         import importlib
+
         import app.retrieval.embedding_runtime as mod
         importlib.reload(mod)
 
@@ -169,6 +179,7 @@ class TestEmbeddingEncode(unittest.TestCase):
     def test_batch_encode_dim_correct(self):
         """批量输出维度应正确。"""
         import importlib
+
         import app.retrieval.embedding_runtime as mod
         importlib.reload(mod)
 
@@ -182,6 +193,7 @@ class TestEmbeddingEncode(unittest.TestCase):
     def test_normalized_vector_norm_near_1(self):
         """normalize 后向量范数应接近 1。"""
         import importlib
+
         import app.retrieval.embedding_runtime as mod
         importlib.reload(mod)
 
@@ -231,6 +243,7 @@ class TestFaissRetrieverStructure(unittest.TestCase):
         mock_index.search = MagicMock(return_value=mock_search_result)
 
         import importlib
+
         import app.retrieval.embedding_runtime as emb_mod
         importlib.reload(emb_mod)
 
