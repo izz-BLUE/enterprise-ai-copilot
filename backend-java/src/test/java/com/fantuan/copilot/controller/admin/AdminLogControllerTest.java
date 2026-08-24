@@ -60,6 +60,8 @@ class AdminLogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.count").value(3))
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.hasMore").value(false))
                 .andExpect(jsonPath("$.items[0].event").value("ADMIN_ACCESS_DENIED"))
                 .andExpect(jsonPath("$.items[1].event").value("MEMORY_WRITE_REJECTED"))
                 .andExpect(jsonPath("$.items[2].event").value("AGENT_REQUEST_RECEIVED"));
@@ -71,6 +73,19 @@ class AdminLogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.count").value(1))
                 .andExpect(jsonPath("$.items[0].event").value("MEMORY_WRITE_REJECTED"));
+    }
+
+    @Test
+    void paginationReturnsSecondPageMetadata() throws Exception {
+        mockMvc.perform(get("/api/admin/logs")
+                        .param("limit", "2")
+                        .param("offset", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.total").value(3))
+                .andExpect(jsonPath("$.offset").value(2))
+                .andExpect(jsonPath("$.hasMore").value(false))
+                .andExpect(jsonPath("$.items[0].event").value("AGENT_REQUEST_RECEIVED"));
     }
 
     @Test

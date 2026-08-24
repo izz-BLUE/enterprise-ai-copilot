@@ -2,10 +2,9 @@ package com.fantuan.copilot.adminlog;
 
 import com.fantuan.copilot.controller.LangGraphAgentController;
 import com.fantuan.copilot.controller.admin.AdminLogController;
-import com.fantuan.copilot.controller.memory.MemoryWriteController;
-import com.fantuan.copilot.dto.InternalAgentChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
-import com.fantuan.copilot.dto.memory.InternalMemoryWriteRequest;
+import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
+import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionGateway;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionResult;
 import com.fantuan.copilot.gateway.leave.LeaveSubmission;
@@ -13,8 +12,6 @@ import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.PendingAction;
-import com.fantuan.copilot.model.memory.AiTaskMemory;
-import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
@@ -25,7 +22,6 @@ import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
-import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
@@ -62,8 +58,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   - SENSITIVE_AGENT_ANSWER_456       → PythonAgentResponse.answer（同上，mock Python 响应）
  *   - SENSITIVE_LEAVE_REASON_GHI       → AnnualLeaveActionProposal.reason → PendingAction.reason → BusinessActionService.audit
  *   - SENSITIVE_CONFIRMATION_NONCE_789 → PendingAction.actionId（业务动作引用字段，经 auditRef 哈希）
- *   - SENSITIVE_MEMORY_SCOPE_ABC       → X-Memory-Write-Scope header 伪造值 → MemoryWriteController.write（真实方法，verify 失败）
- *   - SENSITIVE_TASK_STATE_DEF         → InternalMemoryWriteRequest.taskState / summary → MemoryWriteController.write（真实成功路径）
+ *   - SENSITIVE_TASK_STATE_DEF         → PythonAgentResponse.memoryProposal → Java 持久化旁路
  *
  * 日志模型自身允许存在的预定义 message（如 "Business action succeeded"）允许出现。
  */
@@ -110,7 +105,9 @@ class AdminLogSentinelLeakTest {
         PythonAgentResponse pythonResponse = new PythonAgentResponse(
                 SENTINEL_AGENT_ANSWER,   // answer 含哨兵
                 "rag", true, "rag", "",
-                List.of(), true, "py-trace", null, null);
+                List.of(), true, "py-trace", null, List.of(),
+                new AgentMemoryProposal("GENERIC",
+                        Map.of("note", SENTINEL_TASK_STATE), SENTINEL_AGENT_ANSWER));
         when(restTemplate.postForEntity(anyString(), any(), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(pythonResponse));
 
@@ -130,13 +127,13 @@ class AdminLogSentinelLeakTest {
 
         // 唯一构造器注入测试的 AdminLogBuffer；生产代码已无自行 new buffer 的兼容路径。
         LangGraphAgentController agentController = new LangGraphAgentController(
-                restTemplate,
-                new com.fantuan.copilot.concurrency.PythonAgentBulkhead(3, 500),
+                new PythonAgentGateway(restTemplate,
+                        new com.fantuan.copilot.concurrency.PythonAgentBulkhead(3, 500),
+                        "http://python-agent"),
                 adminAccessService,
                 businessActionService,
                 new com.fantuan.copilot.identity.IdentityContext(demoIdentityService),
                 memoryService,
-                new MemoryWriteScopeService("", FIXED_CLOCK),
                 buffer);
 
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/agent/langgraph/chat");
@@ -201,69 +198,6 @@ class AdminLogSentinelLeakTest {
         for (String s : ALL_SENTINELS) {
             assertFalse(body.contains(s),
                     "audit 路径不应泄漏哨兵 [" + s + "]，输出：" + body);
-        }
-    }
-
-    /**
-     * 输入路径：SENTINEL_SCOPE 进入 X-Memory-Write-Scope header（伪造值）；
-     *           SENTINEL_TASK_STATE / SENTINEL_AGENT_ANSWER 进入
-     *           InternalMemoryWriteRequest.taskState / summary。
-     * 真实调用 MemoryWriteController.write（攻击者路径 verify 失败 + 合法路径写入成功）。
-     */
-    @Test
-    void memoryWritePathNeverLeaksSentinels() throws Exception {
-        MemoryWriteScopeService scopeService =
-                new MemoryWriteScopeService("internal-token", FIXED_CLOCK);
-        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
-        MemoryWriteController writeController =
-                new MemoryWriteController(memoryService, scopeService, buffer);
-
-        // 1) 攻击者伪造 scope（哨兵进入 header）→ verify 失败 → recordMemoryRejected
-        MockHttpServletRequest forged = new MockHttpServletRequest("POST",
-                "/api/internal/memory/conversations/conv-1/write");
-        forged.setAttribute("traceId", "trace-mem-forged");
-        forged.addHeader("X-Internal-Token", "internal-token");
-        forged.addHeader("X-Memory-Write-Scope", SENTINEL_SCOPE);
-        try {
-            writeController.write("conv-1", "internal-token",
-                    new InternalMemoryWriteRequest(
-                            "UPSERT", "LEAVE_REQUEST", "ACTIVE",
-                            Map.of("secret", SENTINEL_TASK_STATE),
-                            SENTINEL_AGENT_ANSWER),
-                    forged);
-        } catch (com.fantuan.copilot.service.memory.MemoryWriteException expected) {
-            // 预期 403
-        }
-
-        // 2) 合法 scope（由真实 issue 签发）+ taskState/summary 含哨兵 → 写入成功
-        String goodScope = scopeService.issue("U10001", "conv-1");
-        when(memoryService.writeFromCommand(eq("U10001"), eq("conv-1"), eq("UPSERT"),
-                eq("LEAVE_REQUEST"), eq("ACTIVE"), any(), any()))
-                .thenReturn(new AiTaskMemory(
-                        "U10001", "conv-1", "LEAVE_REQUEST", TaskStatus.ACTIVE,
-                        "{\"secret\":\"" + SENTINEL_TASK_STATE + "\"}",
-                        SENTINEL_AGENT_ANSWER,
-                        FIXED_CLOCK.instant(), FIXED_CLOCK.instant()));
-
-        MockHttpServletRequest good = new MockHttpServletRequest("POST",
-                "/api/internal/memory/conversations/conv-1/write");
-        good.setAttribute("traceId", "trace-mem-ok");
-        good.addHeader("X-Internal-Token", "internal-token");
-        good.addHeader("X-Memory-Write-Scope", goodScope);
-        writeController.write("conv-1", "internal-token",
-                new InternalMemoryWriteRequest(
-                        "UPSERT", "LEAVE_REQUEST", "ACTIVE",
-                        Map.of("secret", SENTINEL_TASK_STATE),
-                        SENTINEL_AGENT_ANSWER),
-                good);
-
-        String body = snapshotAll();
-        // 应有 ACCEPTED + REJECTED 事件
-        assertTrue(body.contains("MEMORY_WRITE_ACCEPTED"), body);
-        assertTrue(body.contains("MEMORY_WRITE_REJECTED"), body);
-        for (String s : ALL_SENTINELS) {
-            assertFalse(body.contains(s),
-                    "MemoryWriteController 路径不应泄漏哨兵 [" + s + "]，输出：" + body);
         }
     }
 
