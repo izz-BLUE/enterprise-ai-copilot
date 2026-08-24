@@ -52,7 +52,6 @@ from app.memory.memory_write_mode import (
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.schemas.memory_schema import MemoryProposal
 
-
 CONV_ID = '11111111-1111-1111-1111-111111111111'
 
 

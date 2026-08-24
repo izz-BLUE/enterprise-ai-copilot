@@ -118,39 +118,25 @@ public class AiTaskMemoryService {
     }
 
     /**
-     * Phase 4B MemoryWrite API 入口：接受 Map 形式 taskState + action 字符串。
-     *
-     * 行为：
-     *  1. 校验 userId / conversationId；
-     *  2. trusted-key 剥离（递归）：拒绝含 FORBIDDEN_TASK_STATE_KEYS 的 taskState；
-     *  3. action → status 映射（UPSERT 保留 body.status；COMPLETE→COMPLETED；ABANDON→ABANDONED）；
-     *  4. taskState → JSON 序列化 → 大小校验 → 写入（状态机受限）；
-     *  5. 写入后 re-fetch 拿 updated_at 返回。
-     *
-     * 抛 IllegalArgumentException 用于 DTO / 业务校验失败（Controller 层映射为 400）；
-     * 状态机拒绝映射为 409 MEMORY_STATE_CONFLICT。
+     * 持久化 Python 返回的非权威 Memory Proposal。
+     * owner 与 conversationId 必须来自当前 Java 认证请求；生命周期固定为 ACTIVE，
+     * Python 无法通过 action/status 字段终结或重新激活 Memory。
      */
-    public AiTaskMemory writeFromCommand(String userId, String conversationId,
-                                         String action, String taskType, String status,
-                                         Map<String, Object> taskState, String summary) {
+    public void upsertActiveFromAgent(String userId, String conversationId,
+                                      String taskType, Map<String, Object> taskState,
+                                      String summary) {
         requireOwner("userId", userId);
         requireOwner("conversationId", conversationId);
 
-        TaskStatus resolvedStatus = resolveStatus(action, status);
         String safeTaskType = sanitizeTaskType(taskType);
-
         Map<String, Object> sanitizedState = sanitizeTaskStateMap(taskState);
         String safeJson = serializeTaskState(sanitizedState);
         String safeSummary = sanitizeSummary(summary);
 
-        if (!repository.upsert(userId, conversationId, safeTaskType, resolvedStatus,
+        if (!repository.upsert(userId, conversationId, safeTaskType, TaskStatus.ACTIVE,
                 safeJson, safeSummary)) {
-            throw stateConflict(userId, conversationId, resolvedStatus);
+            throw stateConflict(userId, conversationId, TaskStatus.ACTIVE);
         }
-        return repository.find(userId, conversationId)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Memory upsert 后立即 re-fetch 失败: userId=" + userId
-                                + " conversationId=" + conversationId));
     }
 
     /**
@@ -203,36 +189,6 @@ public class AiTaskMemoryService {
         return status;
     }
 
-    private static TaskStatus resolveStatus(String action, String status) {
-        if (action == null) {
-            throw new IllegalArgumentException("action 不能为空");
-        }
-        switch (action) {
-            case "UPSERT":
-                if (status == null || status.isBlank()) {
-                    throw new IllegalArgumentException("action=UPSERT 必须显式提供 status");
-                }
-                return TaskStatus.parse(status)
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "status 非法: " + status + "，必须是 ACTIVE/COMPLETED/ABANDONED"));
-            case "COMPLETE":
-                if (status == null || status.isBlank() || "COMPLETED".equals(status)) {
-                    return TaskStatus.COMPLETED;
-                }
-                throw new IllegalArgumentException(
-                        "action=COMPLETE 与 status=" + status + " 不匹配；期望 COMPLETED");
-            case "ABANDON":
-                if (status == null || status.isBlank() || "ABANDONED".equals(status)) {
-                    return TaskStatus.ABANDONED;
-                }
-                throw new IllegalArgumentException(
-                        "action=ABANDON 与 status=" + status + " 不匹配；期望 ABANDONED");
-            default:
-                throw new IllegalArgumentException(
-                        "action 非法: " + action + "，必须是 UPSERT/COMPLETE/ABANDON");
-        }
-    }
-
     private static String sanitizeTaskType(String taskType) {
         String value = taskType == null ? DEFAULT_TASK_TYPE : taskType.trim();
         if (value.isEmpty()) {
@@ -263,7 +219,7 @@ public class AiTaskMemoryService {
         if (value.length() > MAX_SUMMARY_CHARS) {
             throw new IllegalArgumentException("summary 长度超过 " + MAX_SUMMARY_CHARS);
         }
-        return value;
+        return containsSensitiveMarker(value) ? REDACTED : value;
     }
 
     /**

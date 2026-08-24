@@ -78,8 +78,10 @@ class RetrievalGateTest(unittest.TestCase):
         self.assertEqual('off', _load_rag_gate_settings({})[0])
         with self.assertRaisesRegex(ValueError, 'off\|shadow\|enforce'):
             _load_rag_gate_settings({'RAG_GATE_MODE': 'invalid'})
-        with self.assertRaisesRegex(ValueError, '尚未开放'):
-            _load_rag_gate_settings({'RAG_GATE_MODE': 'enforce'})
+        self.assertEqual(
+            'enforce',
+            _load_rag_gate_settings({'RAG_GATE_MODE': 'enforce'})[0],
+        )
         with self.assertRaisesRegex(ValueError, '大于或等于'):
             _load_rag_gate_settings({
                 'RAG_GATE_MODE': 'shadow',
@@ -127,6 +129,20 @@ class RetrievalGateTest(unittest.TestCase):
         self.assertEqual('shadow_fail_open', decision.mode_reason_code)
         self.assertEqual(1, get_gate_metrics()['gate_evaluation_error'])
         self.assertNotIn('sensitive query', '\n'.join(captured.output))
+
+    def test_enforce_evaluator_error_fails_closed(self):
+        with unittest.mock.patch(
+            'app.retrieval.retrieval_gate.evaluate_gate',
+            side_effect=RuntimeError('gate failed'),
+        ), unittest.mock.patch(
+            'app.retrieval.retrieval_gate.RAG_GATE_MODE', 'enforce',
+        ):
+            decision, _latency = evaluate_gate_timed_fail_open(
+                [CandidateSignals('a', vector_score=0.1)], trace_id='trace-error',
+            )
+
+        self.assertFalse(decision.answerable)
+        self.assertEqual('enforce_error_block', decision.mode_reason_code)
 
 
 if __name__ == '__main__':

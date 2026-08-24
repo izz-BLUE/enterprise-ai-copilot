@@ -4,7 +4,6 @@ import json
 from unittest.mock import patch
 
 from app.agents.planner_node import build_planner_prompt, visible_tools
-from app.clients.java_memory_client import JavaMemoryClient
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
 from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
@@ -126,27 +125,20 @@ def test_main_disabled_short_circuits_before_pipeline_or_extractor() -> None:
     with patch.object(main, '_memory_execution_policy', make_execution_policy('DISABLED')):
         with patch.object(main, 'MemoryPipeline') as pipeline:
             assert main._build_memory_runtime_hook(
-                conversation_id='leave-demo-01',
-                scope_token='scope-token',
                 trace_id='trace-1',
             ) is None
             pipeline.assert_not_called()
 
 
-def test_main_enabled_factory_injects_real_llm_adapter_and_java_writer(monkeypatch) -> None:
+def test_main_enabled_factory_injects_real_llm_adapter_and_response_writer(monkeypatch) -> None:
     from app import main
 
     monkeypatch.setattr(main, '_memory_execution_policy', make_execution_policy('ENABLED'))
-    monkeypatch.setattr(main, 'JAVA_BASE_URL', 'http://java:8080')
-    monkeypatch.setattr(main, 'JAVA_INTERNAL_TOKEN', 'internal-token')
 
-    hook = main._build_memory_runtime_hook(
-        conversation_id='leave-demo-01',
-        scope_token='scope-token',
-        trace_id='trace-1',
-    )
+    runtime = main._build_memory_runtime_hook(trace_id='trace-1')
 
-    assert hook is not None
-    assert isinstance(hook.dispatcher.writer, JavaMemoryClient)
-    assert hook.dispatcher.writer.conversation_id == 'leave-demo-01'
+    assert runtime is not None
+    hook, writer = runtime
+    assert hook.dispatcher.writer is writer
+    assert writer.command is None
     assert hook.pipeline._llm_callable is not None

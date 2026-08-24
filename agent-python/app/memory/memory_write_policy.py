@@ -43,7 +43,6 @@ from pydantic import BaseModel, ConfigDict
 from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.schemas.memory_schema import MemoryProposal
 
-
 # 与 Java 侧 AiTaskMemoryService.MAX_TASK_STATE_JSON_BYTES 对齐 (octet_length <= 16384)。
 MAX_TASK_STATE_JSON_BYTES = 16 * 1024
 
@@ -52,7 +51,7 @@ CommandAction = Literal['UPSERT', 'COMPLETE', 'ABANDON']
 
 
 class MemoryTerminalActionNotAllowed(ValueError):
-    """业务动作链路禁止 Python 侧发出终态命令（COMPLETE / ABANDON）。
+    """禁止 Python 侧发出终态命令（COMPLETE / ABANDON）。
 
     终态（COMPLETED / ABANDONED）只能由 Java PendingAction 生命周期收口
     （BusinessActionService.closeMemory → AiTaskMemoryService.complete/abandon）；
@@ -215,26 +214,14 @@ class MemoryWritePolicy:
     def task_type_policy(self) -> MemoryTaskTypePolicy:
         return self._task_type_policy
 
-    def evaluate(
-        self,
-        proposal: MemoryProposal,
-        *,
-        allow_terminal_actions: bool = True,
-    ) -> MemoryWriteCommand | None:
+    def evaluate(self, proposal: MemoryProposal) -> MemoryWriteCommand | None:
         """评估 MemoryProposal → MemoryWriteCommand（或 None）。
-
-        参数：
-          allow_terminal_actions —— 是否允许产出 COMPLETE / ABANDON 终态命令。
-            业务动作链路（action_proposal 非空 / leave_proposal_tool 成功）由
-            Pipeline 传 False：终态只能由 Java PendingAction 生命周期收口，
-            Python 侧发出终态命令是程序级禁止（抛 MemoryTerminalActionNotAllowed），
-            不依赖 LLM prompt。
 
         抛出：
           ValueError —— 输入结构不合法 / task_type 不在 policy 白名单内
                        （policy 层 fail-loud，调用方应降级为 noop）。
-          MemoryTerminalActionNotAllowed —— allow_terminal_actions=False 且
-                       proposal.action 是 COMPLETE / ABANDON（业务动作链路终态拦截）。
+          MemoryTerminalActionNotAllowed —— proposal 表达任何终态；终态只能由
+                       Java PendingAction 生命周期收口。
         """
         action = proposal.action
         if action == 'NONE':
@@ -243,9 +230,13 @@ class MemoryWritePolicy:
             # schema 已校验，但 policy 再兜底一次（防御未来 schema 调整）
             raise ValueError(f'未知的 MemoryProposal.action: {action}')
 
-        if not allow_terminal_actions and action in ('COMPLETE', 'ABANDON'):
+        if (
+            action in ('COMPLETE', 'ABANDON')
+            or proposal.status in ('COMPLETED', 'ABANDONED')
+        ):
             raise MemoryTerminalActionNotAllowed(
-                f'业务动作链路禁止 Python 侧终态命令: action={action}；'
+                f'Python 响应禁止终态 Memory 命令: '
+                f'action={action}, status={proposal.status}；'
                 f'终态（COMPLETED / ABANDONED）只能由 Java PendingAction 生命周期收口'
             )
 
@@ -255,23 +246,11 @@ class MemoryWritePolicy:
         self._task_type_policy.assert_allowed(task_type)
         raw_state = proposal.task_state if proposal.task_state is not None else self.DEFAULT_TASK_STATE
 
-        if action == 'UPSERT':
-            # UPSERT 必须显式提供 status / task_state（不允许 None 默认）
-            if status is None:
-                raise ValueError('MemoryProposal.action=UPSERT 必须显式提供 status')
-            if proposal.task_state is None:
-                raise ValueError('MemoryProposal.action=UPSERT 必须显式提供 task_state')
-        else:
-            # COMPLETE / ABANDON：要求 status 与 action 语义一致
-            expected_status = 'COMPLETED' if action == 'COMPLETE' else 'ABANDONED'
-            if status is None:
-                # 默认填齐到语义匹配的状态，避免下游再做 None 判断
-                status = expected_status
-            elif status != expected_status:
-                raise ValueError(
-                    f'MemoryProposal.action={action} 与 status={status} 不匹配；'
-                    f'期望 status={expected_status}'
-                )
+        # 通过终态守卫后只可能是 UPSERT + ACTIVE。
+        if status is None:
+            raise ValueError('MemoryProposal.action=UPSERT 必须显式提供 status')
+        if proposal.task_state is None:
+            raise ValueError('MemoryProposal.action=UPSERT 必须显式提供 task_state')
 
         # 安全规范化：剥离 forbidden 键 + 字符串脱敏
         scrubbed_state = _scrub_task_state(raw_state)

@@ -25,7 +25,6 @@ from app.schemas.memory_schema import (
     MemoryProposal,
 )
 
-
 # ---------- 正常 ----------
 
 class TestValidMemoryProposal:

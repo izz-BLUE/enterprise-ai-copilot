@@ -27,6 +27,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from app.memory.memory_audit import LoggingAuditRecorder
 from app.memory.memory_pipeline import (
     MemoryPipeline,
     MemoryPipelineError,
@@ -37,7 +38,6 @@ from app.memory.memory_runtime_hook import (
     MemoryRuntimeHook,
     MemoryRuntimeResult,
 )
-from app.memory.memory_audit import LoggingAuditRecorder
 from app.memory.memory_write_dispatcher import (
     MemoryWriteDispatcher,
     MemoryWriteDispatcherError,
@@ -45,7 +45,6 @@ from app.memory.memory_write_dispatcher import (
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.schemas.memory_schema import MemoryProposal
-
 
 # ---------------------------------------------------------------------------
 # 测试辅助
@@ -274,7 +273,7 @@ class TestTriggeredWithCommand:
         assert result.error is None
         assert dispatcher.received == [command]
 
-    def test_complete_action_dispatched(self) -> None:
+    def test_complete_action_blocked(self) -> None:
         command = _make_command(action='COMPLETE', status='COMPLETED')
         pipeline = _make_pipeline(triggered=True, command=command)
         dispatcher = _make_dispatcher()
@@ -285,8 +284,9 @@ class TestTriggeredWithCommand:
 
         result = hook.after_agent_response(_make_agent_result(), CONV_ID)
 
-        assert result.written is True
-        assert dispatcher.received == [command]
+        assert result.written is False
+        assert result.error is None
+        assert dispatcher.received == []
 
     def test_dispatcher_return_value_ignored(self) -> None:
         command = _make_command()
@@ -311,8 +311,8 @@ class TestTriggeredWithCommand:
 
 class TestConversationIdPassthrough:
     def test_conversation_id_not_injected_into_command(self) -> None:
-        # Hook 自身不把 conversation_id 注入 command；conversation_id 由 Dispatcher /
-        # writer 内部决定是否需要（JavaMemoryClient 不接收 conversationId）。
+        # Hook 自身不把 conversation_id 注入 command；Java 使用当前请求上下文
+        # 决定最终作用域。
         command = _make_command()
         pipeline = _make_pipeline(triggered=True, command=command)
         dispatcher = _make_dispatcher()
@@ -648,14 +648,13 @@ class TestPipelineResultPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# 业务动作链路终态命令拦截（terminal_command_blocked）
+# Python 终态命令拦截（terminal_command_blocked）
 # ---------------------------------------------------------------------------
 
 
-class TestBusinessActionTerminalBlocked:
-    """业务动作链路（action_proposal 非空 / leave_proposal_tool 成功）下，
-    COMPLETE / ABANDON 终态命令必须被程序层拦截：
-      - Dispatcher 不被调用（不写 Java）；
+class TestTerminalCommandBlocked:
+    """任何链路的 COMPLETE / ABANDON 终态命令都必须被程序层拦截：
+      - Dispatcher 不被调用；
       - written=False；
       - audit 记录 error_type=terminal_command_blocked；
       - 主响应不被阻断（error=None）。
@@ -755,9 +754,8 @@ class TestBusinessActionTerminalBlocked:
         assert dispatcher.received == [command]
         assert audit.events[-1].error_type is None  # 非拦截、非失败
 
-    def test_plain_flow_complete_keeps_existing_behavior(self):
-        """非业务动作链路（无 action_proposal / 无 eligible tool）保持既有行为：
-        COMPLETE 正常 dispatch（Python 可终结普通任务的 Memory）。"""
+    def test_plain_flow_complete_is_blocked(self):
+        """非业务动作链路也不能由 Python 终结 Memory。"""
         command = _make_command(action='COMPLETE', status='COMPLETED')
         pipeline = _make_pipeline(triggered=True, command=command)
         dispatcher = _make_dispatcher()
@@ -768,9 +766,9 @@ class TestBusinessActionTerminalBlocked:
             CONV_ID,
         )
 
-        assert result.written is True
-        assert dispatcher.received == [command]
-        assert audit.events[-1].error_type is None
+        assert result.written is False
+        assert dispatcher.received == []
+        assert audit.events[-1].error_type == TERMINAL_COMMAND_BLOCKED
 
     def test_pipeline_level_blocked_command_also_audited(self):
         """Pipeline 层已拦截（command=None + 终态 proposal）时，Hook 同样补记

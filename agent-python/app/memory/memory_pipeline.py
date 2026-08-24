@@ -39,7 +39,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict
 
-from app.memory.memory_extractor import MemoryExtractor, MemoryExtractionParseError
+from app.memory.memory_extractor import MemoryExtractionParseError, MemoryExtractor
 from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.memory.memory_trigger_policy import MemoryTriggerPolicy
 from app.memory.memory_write_policy import (
@@ -48,7 +48,6 @@ from app.memory.memory_write_policy import (
     MemoryWritePolicy,
 )
 from app.schemas.memory_schema import MemoryExtractionInput, MemoryProposal
-
 
 logger = logging.getLogger(__name__)
 
@@ -169,10 +168,6 @@ class MemoryPipeline:
 
         try:
             return self._process_inner(agent_result)
-        except (MemoryExtractionParseError, NotImplementedError):
-            # 这两类是子组件显式声明的\"可预期失败\"；不会进入此处
-            # （内部 _process_inner 已经分别处理），这里是双重防御。
-            raise  # pragma: no cover
         except MemoryPipelineError:
             # 内部已包装的 MemoryPipelineError 直接传出（不要二次包装）
             raise
@@ -184,27 +179,6 @@ class MemoryPipeline:
             raise MemoryPipelineError(
                 f'MemoryPipeline 调度失败: {type(exc).__name__}: {exc}'
             ) from exc
-
-    def _is_business_action_path(self, agent_result: dict[str, Any]) -> bool:
-        """确定性判定本次 Agent 执行是否属于受控业务动作链路。
-
-        业务动作链路的两个信号（与 MemoryTriggerPolicy 对齐）：
-          - action_proposal 非空（Proposal / Clarification 均已写入）；
-          - tool_history 中存在成功的 Memory-eligible Tool 调用
-            （当前白名单 leave_proposal_tool，由 trigger policy 动态提供）。
-
-        命中业务链路时，Extractor / LLM 只能表达任务上下文更新（UPSERT + ACTIVE），
-        终态（COMPLETE / ABANDON）只能由 Java PendingAction 生命周期收口。
-        """
-        if agent_result.get('action_proposal'):
-            return True
-        eligible_tools = self._trigger.eligible_tool_names
-        return any(
-            isinstance(item, dict)
-            and item.get('status') == 'success'
-            and item.get('tool_name') in eligible_tools
-            for item in agent_result.get('tool_history') or []
-        )
 
     def _process_inner(self, agent_result: dict[str, Any]) -> MemoryPipelineResult:
         # 1. Trigger Policy
@@ -239,19 +213,14 @@ class MemoryPipeline:
             )
 
         # 4. MemoryWritePolicy
-        #    业务动作链路禁止 Python 侧终态命令（COMPLETE / ABANDON）：
-        #    终态由 Java PendingAction 生命周期在同一事务内收口。
+        #    Python 响应只允许 UPSERT + ACTIVE；所有终态由 Java 业务生命周期收口。
         #    拦截是程序层确定性行为（不依赖 LLM prompt），降级为"无命令"，
         #    与 NONE / 解析失败同语义（不抛错、不阻断主响应）。
-        is_business_action = self._is_business_action_path(agent_result)
         try:
-            command = self._write_policy.evaluate(
-                proposal,
-                allow_terminal_actions=not is_business_action,
-            )
+            command = self._write_policy.evaluate(proposal)
         except MemoryTerminalActionNotAllowed as exc:
             logger.info(
-                'MemoryPipeline: 业务动作链路终态命令被拦截 (action=%s): %s',
+                'MemoryPipeline: Python 终态命令被拦截 (action=%s): %s',
                 proposal.action, exc,
             )
             command = None

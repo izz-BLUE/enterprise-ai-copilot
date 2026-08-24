@@ -11,7 +11,7 @@
 | 测试文件 | 覆盖范围 |
 | --- | --- |
 | `tests/test_memory_schema.py` | `MemoryProposal` / `MemoryExtractionInput` schema 校验 |
-| `tests/test_java_memory_client.py` | `JavaMemoryClient` HTTP 契约（含 scope 校验） |
+| `tests/test_memory_runtime_integration.py` | 响应内 Memory Proposal 集成契约 |
 
 ### 2. runtime（Memory Pipeline / Hook 行为）
 
@@ -56,6 +56,6 @@
 ## Phase 6 验收路径
 
 ```bash
-uv run pytest tests/test_memory_*.py tests/test_java_memory_client.py
+uv run pytest tests/test_memory_*.py
 uv run pytest tests/test_memory_dependency_boundary.py
 ```

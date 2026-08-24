@@ -17,8 +17,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "OPTIONS")
                 .allowedHeaders("Authorization", "X-Demo-User-Id", "X-Admin-Token",
-                        "Idempotency-Key", "Content-Type", "Accept")
-                .exposedHeaders("X-Trace-Id")
+                        "Idempotency-Key", "X-Requested-With", "Content-Type", "Accept")
+                .exposedHeaders("X-Trace-Id", "X-Conversation-Id", "Retry-After")
                 .allowCredentials(true);
     }
 }

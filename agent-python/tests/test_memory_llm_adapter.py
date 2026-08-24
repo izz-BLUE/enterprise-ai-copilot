@@ -38,7 +38,6 @@ from app.memory.memory_llm_adapter import (
 )
 from app.schemas.memory_schema import MemoryExtractionInput
 
-
 SYSTEM_PROMPT = 'SYSTEM_PROMPT_SENTINEL'
 USER_PROMPT = 'USER_PROMPT_SENTINEL'
 

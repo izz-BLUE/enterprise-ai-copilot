@@ -45,7 +45,7 @@ Phase 8-A 修订（Observability Review）：
 
 非职责（明确不做）：
   - 不读 agent_result / 不读 proposal.summary / 不读 task_state；
-  - 不修改 MemoryPipeline / Dispatcher / JavaMemoryClient 核心控制流；
+  - 不修改 MemoryPipeline / Dispatcher 核心控制流；
   - 不修改 LangGraph / AgentState / Planner / Tool Executor。
 """
 
@@ -55,7 +55,6 @@ import logging
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
-
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +235,7 @@ def classify_failure_category(error: BaseException | None) -> FailureCategoryLit
 
     映射规则：
       - MemoryPipelineError / Pipeline 调度类异常 → 'pipeline_error'
-      - MemoryWriteDispatcherError / JavaMemoryClientError → 'dispatcher_error'
+      - MemoryWriteDispatcherError → 'dispatcher_error'
       - MemoryExtractionParseError → 'extractor_parse_error'
       - 包含 forbidden keys / task_state 超限等 → 'invalid_snapshot'
       - 其他 → 'unknown'
@@ -247,7 +246,7 @@ def classify_failure_category(error: BaseException | None) -> FailureCategoryLit
     type_name = type(error).__name__
     if type_name == 'MemoryPipelineError':
         return 'pipeline_error'
-    if type_name in ('MemoryWriteDispatcherError', 'JavaMemoryClientError'):
+    if type_name == 'MemoryWriteDispatcherError':
         return 'dispatcher_error'
     if type_name == 'MemoryExtractionParseError':
         return 'extractor_parse_error'

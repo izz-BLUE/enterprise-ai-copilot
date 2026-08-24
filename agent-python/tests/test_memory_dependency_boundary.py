@@ -25,7 +25,6 @@ from pathlib import Path
 
 import pytest
 
-
 MEMORY_PACKAGE = Path(__file__).resolve().parents[1] / 'app' / 'memory'
 
 # 禁止 import 的根模块（与 import 路径前缀匹配）。
