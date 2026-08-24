@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import { Counter } from 'k6/metrics';
+import { authenticatedHeaders, loginForLoadTest } from './auth.js';
 
 const baseUrl = (__ENV.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const vus = Number(__ENV.VUS || 6);
@@ -34,14 +35,16 @@ export const options = {
   thresholds,
 };
 
-export default function () {
+export function setup() {
+  return loginForLoadTest(baseUrl);
+}
+
+export default function (data) {
   const response = http.post(
     `${baseUrl}/api/chat`,
     JSON.stringify({ message: question }),
     {
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: authenticatedHeaders(data),
       timeout: __ENV.REQUEST_TIMEOUT || '50s',
       tags: { layer: 'application', scenario: 'ai_overload' },
     },
