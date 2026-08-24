@@ -1,4 +1,27 @@
 services:
+  phoenix:
+    image: arizephoenix/phoenix:version-20.3.0
+    container_name: ai-copilot-phoenix
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: ${PHOENIX_DEFAULT_RETENTION_POLICY_DAYS:-7}
+    volumes:
+      - copilot-phoenix-data:/mnt/data
+    ports:
+      - "127.0.0.1:${PHOENIX_UI_PORT:-6006}:6006"
+    expose:
+      - "4317"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6006')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - ai-copilot-net
+
   postgres:
     image: postgres:16-alpine
     container_name: ai-copilot-postgres
@@ -33,11 +56,19 @@ services:
       AGENT_LOOP_ENABLED: ${AGENT_LOOP_ENABLED:-true}
       REWRITE_MODE: ${REWRITE_MODE:-rule}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-30}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-1024}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-0}
+      AGENT_REQUEST_TIMEOUT_SECONDS: ${AGENT_REQUEST_TIMEOUT_SECONDS:-40}
       AI_MAX_CONCURRENT_REQUESTS: ${AI_MAX_CONCURRENT_REQUESTS:-3}
       AI_QUEUE_TIMEOUT_MS: ${AI_QUEUE_TIMEOUT_MS:-500}
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL}"
+      PHOENIX_TRACING: "${PHOENIX_TRACING:-false}"
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
+      PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-enterprise-ai-copilot}"
+      PHOENIX_SAMPLE_RATE: "${PHOENIX_SAMPLE_RATE:-1.0}"
+      PHOENIX_CAPTURE_CONTENT: "${PHOENIX_CAPTURE_CONTENT:-false}"
     volumes:
       - /opt/enterprise-ai-copilot/models/bge-small-zh-v1.5-onnx:/app/models/embedding/bge-small-zh-v1.5-onnx:ro
       - /opt/enterprise-ai-copilot/data/processed:/data/processed:ro
@@ -45,7 +76,7 @@ services:
     expose:
       - "8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/agent/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/agent/ready')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -69,13 +100,15 @@ services:
     environment:
       PYTHON_AGENT_BASE_URL: http://python-agent:8000
       PYTHON_AGENT_CONNECT_TIMEOUT: ${PYTHON_AGENT_CONNECT_TIMEOUT:-3000}
-      PYTHON_AGENT_READ_TIMEOUT: ${PYTHON_AGENT_READ_TIMEOUT:-40000}
+      PYTHON_AGENT_READ_TIMEOUT: ${PYTHON_AGENT_READ_TIMEOUT:-50000}
+      PYTHON_AGENT_HTTP_MAX_CONNECTIONS: ${PYTHON_AGENT_HTTP_MAX_CONNECTIONS:-6}
       PYTHON_AGENT_MAX_CONCURRENT_REQUESTS: ${PYTHON_AGENT_MAX_CONCURRENT_REQUESTS:-3}
       PYTHON_AGENT_ACQUIRE_TIMEOUT_MS: ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500}
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
       CORS_ALLOWED_ORIGINS: http://localhost:5173,https://copilot.jintianchi.cn
       ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}"
       BUSINESS_ACTIONS_ENABLED: ${BUSINESS_ACTIONS_ENABLED:-false}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       DEMO_IDENTITY_ENABLED: ${DEMO_IDENTITY_ENABLED:-false}
       BUSINESS_ACTIONS_REQUIRE_ADMIN: ${BUSINESS_ACTIONS_REQUIRE_ADMIN:-true}
       BUSINESS_ACTION_TTL_SECONDS: ${BUSINESS_ACTION_TTL_SECONDS:-600}
@@ -89,7 +122,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -112,3 +145,4 @@ networks:
 
 volumes:
   copilot-postgres-data:
+  copilot-phoenix-data:

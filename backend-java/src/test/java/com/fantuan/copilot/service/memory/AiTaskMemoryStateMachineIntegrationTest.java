@@ -186,20 +186,29 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     // ---- 内容脱敏（Java 独立内容安全边界） ----
 
     @Test
-    void writeFromCommandRedactsSensitiveStringValues() {
-        AiTaskMemory saved = service.writeFromCommand(U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE",
+    void agentProposalRedactsSensitiveStringValues() {
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC",
                 new java.util.LinkedHashMap<>(java.util.Map.of(
                         "note", "please use Bearer abc.def to call api")), "ok");
+        AiTaskMemory saved = service.find(U1, CONV_A).orElseThrow();
         assertEquals("{\"note\":\"[REDACTED]\"}", saved.taskStateJson());
     }
 
     @Test
-    void writeFromCommandRedactsLongSensitiveStringValues() {
+    void agentProposalRedactsLongSensitiveStringValues() {
         String padded = "A".repeat(5000) + " Bearer secret-token";
-        AiTaskMemory saved = service.writeFromCommand(U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE",
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC",
                 new java.util.LinkedHashMap<>(java.util.Map.of("note", padded)), "");
+        AiTaskMemory saved = service.find(U1, CONV_A).orElseThrow();
         assertEquals("{\"note\":\"[REDACTED]\"}", saved.taskStateJson(),
                 "超长字符串同样必须被扫描脱敏（不允许长度绕过）");
+    }
+
+    @Test
+    void agentProposalRedactsSensitiveSummary() {
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC", java.util.Map.of(),
+                "Bearer TOP_SECRET");
+        assertEquals("[REDACTED]", service.find(U1, CONV_A).orElseThrow().summary());
     }
 
     @Test
@@ -216,7 +225,7 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
         java.util.LinkedHashMap<String, Object> state = new java.util.LinkedHashMap<>();
         state.put("waiting_for", "date");
         state.put("note", "normal note");
-        service.writeFromCommand(U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "safe");
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC", state, "safe");
         AiTaskMemory row = service.find(U1, CONV_A).orElseThrow();
         assertEquals("{\"waiting_for\":\"date\",\"note\":\"normal note\"}", row.taskStateJson());
     }
@@ -224,7 +233,7 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     // ---- 嵌套生命周期字段剥离（上下文污染防御） ----
 
     @Test
-    void writeFromCommandStripsNestedLifecycleFields() {
+    void agentProposalStripsNestedLifecycleFields() {
         java.util.LinkedHashMap<String, Object> state = new java.util.LinkedHashMap<>();
         state.put("pending_step", "confirmation");
         state.put("status", "COMPLETED");  // 顶层生命周期字段
@@ -240,8 +249,8 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
         items.add(item);
         state.put("items", items);
 
-        AiTaskMemory saved = service.writeFromCommand(
-                U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "ok");
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC", state, "ok");
+        AiTaskMemory saved = service.find(U1, CONV_A).orElseThrow();
         // 生命周期字段（顶层 / 嵌套 / list 内）一律剥离，业务字段保留
         assertFalse(saved.taskStateJson().contains("COMPLETED"), saved.taskStateJson());
         assertFalse(saved.taskStateJson().contains("ABANDONED"), saved.taskStateJson());
@@ -255,7 +264,7 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     }
 
     @Test
-    void writeFromCommandStripsCamelCaseLifecycleFields() {
+    void agentProposalStripsCamelCaseLifecycleFields() {
         java.util.LinkedHashMap<String, Object> state = new java.util.LinkedHashMap<>();
         state.put("lifecycleState", "ABANDONED");
         state.put("taskStatus", "COMPLETED");
@@ -263,8 +272,8 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
         state.put("completed", true);
         state.put("abandoned", false);
         state.put("leave_date", "2026-09-01");
-        AiTaskMemory saved = service.writeFromCommand(
-                U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE", state, "ok");
+        service.upsertActiveFromAgent(U1, CONV_A, "GENERIC", state, "ok");
+        AiTaskMemory saved = service.find(U1, CONV_A).orElseThrow();
         assertEquals("{\"leave_date\":\"2026-09-01\"}", saved.taskStateJson());
     }
 

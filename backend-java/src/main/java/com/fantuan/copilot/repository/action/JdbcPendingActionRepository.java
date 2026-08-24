@@ -81,11 +81,11 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
         if (ownerUserId == null || conversationId == null) {
             return false;
         }
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM business_action "
+        Boolean exists = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM business_action "
                         + "WHERE owner_user_id = :owner AND conversation_id = :conversation "
-                        + "AND status IN ('PENDING_CONFIRMATION', 'PROCESSING')",
-                Map.of("owner", ownerUserId, "conversation", conversationId), Integer.class);
-        return count != null && count > 0;
+                        + "AND status IN ('PENDING_CONFIRMATION', 'PROCESSING'))",
+                Map.of("owner", ownerUserId, "conversation", conversationId), Boolean.class);
+        return Boolean.TRUE.equals(exists);
     }
 
     @Override

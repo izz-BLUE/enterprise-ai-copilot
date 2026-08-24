@@ -8,6 +8,7 @@ public class AuthProperties {
     private String issuer = "enterprise-ai-copilot";
     private String audience = "enterprise-ai-copilot";
     private long accessTokenTtlSeconds = 3600;
+    private boolean cookieSecure;
 
     public String getSecret() {
         return secret;
@@ -40,4 +41,13 @@ public class AuthProperties {
     public void setAccessTokenTtlSeconds(long accessTokenTtlSeconds) {
         this.accessTokenTtlSeconds = accessTokenTtlSeconds;
     }
+
+    public boolean isCookieSecure() {
+        return cookieSecure;
+    }
+
+    public void setCookieSecure(boolean cookieSecure) {
+        this.cookieSecure = cookieSecure;
+    }
+
 }

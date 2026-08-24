@@ -20,9 +20,6 @@
 
 from unittest.mock import patch
 
-from pydantic import ValidationError
-import pytest
-
 from app.agents.planner_node import (
     PLANNER_SYSTEM_PROMPT,
     build_planner_prompt,
@@ -39,7 +36,6 @@ from app.schemas.planner_schema import (
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
 )
-
 
 _ACTIVE_MEMORY = {
     'taskType': 'GENERIC',

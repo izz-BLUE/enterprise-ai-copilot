@@ -47,12 +47,9 @@ P1-A 演进：
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict
 
 from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
-
 
 # 触发原因常量（debug 维度，非业务逻辑）
 TRIGGER_REASON_ACTION_PROPOSAL = 'action_proposal_present'

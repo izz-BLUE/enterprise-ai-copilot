@@ -36,10 +36,8 @@ Extract 接口：
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from app.memory.memory_extractor import (
-    MEMORY_EXTRACTOR_SYSTEM_PROMPT,
     MemoryExtractionParseError,
     MemoryExtractor,
 )

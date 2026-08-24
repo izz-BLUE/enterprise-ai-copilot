@@ -1,8 +1,8 @@
 """memory_runtime_hook.py —— Memory Runtime Hook 集成层（Phase 4C）
 
 职责：
-  把 Memory Write Path 整体编排进 Agent 响应生命周期：
-    agent_result → MemoryPipeline → MemoryWriteCommand → Dispatcher → JavaMemoryClient
+  把 Memory 提案链路编排进 Agent 响应生命周期：
+    agent_result → MemoryPipeline → MemoryWriteCommand → Dispatcher → response writer
 
   Hook 是 LangGraph Agent 出口层与 Memory 写入链路之间的**业务适配边界**：
 
@@ -13,9 +13,9 @@
        **绝不冒泡到 Agent 出口**——保证主响应永远不被 Memory 失败阻断。
 
 边界与不变量：
-  - conversation_id 来自 Java 端（X-Conversation-Id header），原样透传给 Dispatcher；
+  - conversation_id 来自 Java 端（X-Conversation-Id header），仅用于审计关联；
     Hook 不创建 conversationId、不从 memory_context 推导、不生成 userId。
-  - Hook 不接 HTTP / 不直接 JavaMemoryClient（Dispatcher 才是 HTTP 边界）；
+  - Hook 不接 HTTP，不持有 Java 服务凭证；
   - Hook 不修改 LangGraph / AgentState / Planner / Tool Executor；
   - Hook 修改 main.py 出口层（最小改动），不改 run_langgraph_agent 本身。
 
@@ -45,22 +45,19 @@ from app.memory.memory_pipeline import (
     MemoryPipelineError,
     MemoryPipelineResult,
 )
-from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.memory.memory_write_dispatcher import (
     MemoryWriteDispatcher,
     MemoryWriteDispatcherError,
 )
 from app.memory.memory_write_mode import (
     MemoryWriteExecutionPolicy,
-    MemoryWriteMode,
     make_execution_policy,
 )
 from app.memory.memory_write_policy import MemoryWriteCommand
 
-
 logger = logging.getLogger(__name__)
 
-# 业务动作链路终态命令被程序拦截的 audit error_type 标记。
+# Python 终态命令被程序拦截的 audit error_type 标记。
 # 这不是异常，而是确定性策略拦截：终态只能由 Java PendingAction 生命周期收口。
 TERMINAL_COMMAND_BLOCKED = 'terminal_command_blocked'
 
@@ -102,7 +99,7 @@ class MemoryRuntimeHook:
     用法（main.py 出口层最小改动）：
         hook = MemoryRuntimeHook(
             pipeline=MemoryPipeline(),
-            dispatcher=MemoryWriteDispatcher(writer=JavaMemoryClient(...)),
+            dispatcher=MemoryWriteDispatcher(writer=response_writer),
         )
         result = hook.after_agent_response(agent_result, conversation_id)
         # result 永不抛错；不修改 agent_result；不阻断主响应。
@@ -120,19 +117,12 @@ class MemoryRuntimeHook:
         dispatcher: MemoryWriteDispatcher | None = None,
         audit_recorder: MemoryAuditRecorder | None = None,
         write_execution_policy: MemoryWriteExecutionPolicy | None = None,
-        eligible_tool_names: frozenset[str] | None = None,
     ) -> None:
         self._pipeline = pipeline or MemoryPipeline()
         self._dispatcher = dispatcher or MemoryWriteDispatcher()
         self._audit_recorder = audit_recorder or LoggingAuditRecorder()
         # 默认 DISABLED：与 P0 阶段一致（实际不写入，仅 Pipeline fail-safe noop）。
         self._write_execution_policy = write_execution_policy or make_execution_policy('DISABLED')
-        # 业务动作链路判定用的 Memory-eligible tool 白名单（与 Trigger Policy 对齐）。
-        self._eligible_tool_names = (
-            eligible_tool_names
-            if eligible_tool_names is not None
-            else MemoryTaskTypePolicy.default().eligible_tool_names()
-        )
 
     @property
     def pipeline(self) -> MemoryPipeline:
@@ -150,28 +140,11 @@ class MemoryRuntimeHook:
     def write_execution_policy(self) -> MemoryWriteExecutionPolicy:
         return self._write_execution_policy
 
-    def _is_business_action_path(self, agent_result: dict[str, Any]) -> bool:
-        """确定性判定本次 Agent 执行是否属于受控业务动作链路。
-
-        信号（与 MemoryTriggerPolicy / MemoryPipeline 对齐）：
-          - action_proposal 非空；
-          - tool_history 中存在成功的 Memory-eligible Tool 调用
-            （当前白名单 leave_proposal_tool）。
-
-        命中业务链路时，终态（COMPLETE / ABANDON）命令必须被程序层拦截：
-        终态只能由 Java PendingAction 生命周期收口，Python / LLM 不得猜测。
-        """
-        if agent_result.get('action_proposal'):
-            return True
-        return any(
-            isinstance(item, dict)
-            and item.get('status') == 'success'
-            and item.get('tool_name') in self._eligible_tool_names
-            for item in agent_result.get('tool_history') or []
-        )
-
     def _is_terminal_command(self, command: MemoryWriteCommand) -> bool:
-        return command.action in ('COMPLETE', 'ABANDON')
+        return (
+            command.action in ('COMPLETE', 'ABANDON')
+            or command.status in ('COMPLETED', 'ABANDONED')
+        )
 
     def after_agent_response(
         self,
@@ -272,19 +245,18 @@ class MemoryRuntimeHook:
 
         # 3. Triggered=True 但 command 为 None → NONE / WritePolicy 拒绝
         if pipeline_result.command is None:
-            # 业务动作链路 + 终态 proposal：WritePolicy 已在 Pipeline 层拦截
-            # （allow_terminal_actions=False）。在此补记 terminal_command_blocked，
-            # 让两种拦截路径（本 Hook 的 command 拦截 / Pipeline 的 policy 拦截）
-            # 审计语义一致：终态只能由 Java PendingAction 生命周期收口。
+            # 终态 proposal 已由 WritePolicy 在 Pipeline 层拦截。
             terminal_blocked = (
-                self._is_business_action_path(agent_result)
-                and pipeline_result.proposal is not None
-                and pipeline_result.proposal.action in ('COMPLETE', 'ABANDON')
+                pipeline_result.proposal is not None
+                and (
+                    pipeline_result.proposal.action in ('COMPLETE', 'ABANDON')
+                    or pipeline_result.proposal.status in ('COMPLETED', 'ABANDONED')
+                )
             )
             logger.info(
                 'MemoryRuntimeHook: 触发但无 command (action=NONE 或 WritePolicy 拒绝'
                 '%s, conversation_id=%s)',
-                '，业务链路终态被拦截' if terminal_blocked else '',
+                '，终态被拦截' if terminal_blocked else '',
                 conversation_id,
             )
             self._emit_audit(
@@ -303,14 +275,11 @@ class MemoryRuntimeHook:
                 error=None,
             )
 
-        # 4. 业务动作链路终态命令拦截（第一层确定性保护）：
-        #    不调用 MemoryWriteDispatcher / JavaMemoryClient，不调用任何 abandon，
-        #    主 Agent 响应继续正常返回；仅记录 audit（terminal_command_blocked）。
-        if self._is_business_action_path(agent_result) and self._is_terminal_command(
-            pipeline_result.command
-        ):
+        # 4. 终态命令兜底拦截：即使注入的自定义 Pipeline 绕过 WritePolicy，
+        #    Python 也不能把终态提案交给 Java。
+        if self._is_terminal_command(pipeline_result.command):
             logger.warning(
-                'MemoryRuntimeHook: 业务动作链路终态命令被拦截 '
+                'MemoryRuntimeHook: Python 终态命令被拦截 '
                 '(conversation_id=%s, action=%s, task_type=%s)',
                 conversation_id, pipeline_result.command.action,
                 pipeline_result.command.task_type,
@@ -443,7 +412,7 @@ class MemoryRuntimeHook:
           - ``memory_resolution_reason`` 保留为空字符串（Read Path 集成后由
             MemoryTaskResolutionPolicy 注入；当前 Hook 范围仅 Write Path）。
 
-        terminal_blocked：业务动作链路终态命令被程序拦截（非异常）——
+        terminal_blocked：Python 终态命令被程序拦截（非异常）——
         error_type 记为 ``terminal_command_blocked``，failure_category 为 None。
         """
         event = MemoryAuditEvent(

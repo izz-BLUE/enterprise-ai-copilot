@@ -47,8 +47,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.memory.memory_extractor import (
-    MEMORY_EXTRACTOR_SYSTEM_PROMPT,
-    MemoryExtractionParseError,
     MemoryExtractor,
 )
 from app.memory.memory_pipeline import (
@@ -59,7 +57,6 @@ from app.memory.memory_pipeline import (
 from app.memory.memory_trigger_policy import MemoryTriggerPolicy
 from app.memory.memory_write_policy import MemoryWritePolicy
 from app.schemas.memory_schema import MemoryProposal
-
 
 # ---------- Pipeline 不触发路径 ----------
 
@@ -181,12 +178,8 @@ class TestTriggeredFullPath:
         assert result.command.summary == '等待用户补充请假日期'
         assert result.error is None
 
-    def test_business_action_complete_is_blocked(self):
-        """业务动作链路（action_proposal 非空）+ LLM 输出 COMPLETE → 终态命令被拦截。
-
-        终态只能由 Java PendingAction 生命周期收口；Python 侧不得终结业务动作
-        对应的 Memory（WritePolicy allow_terminal_actions=False 程序级拒绝）。
-        """
+    def test_complete_is_blocked(self):
+        """LLM 输出 COMPLETE 时终态命令被程序级拦截。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'COMPLETE',
@@ -202,8 +195,8 @@ class TestTriggeredFullPath:
         assert result.command is None
         assert result.error is None
 
-    def test_business_action_abandon_is_blocked(self):
-        """业务动作链路 + LLM 输出 ABANDON → 终态命令被拦截（同上）。"""
+    def test_abandon_is_blocked(self):
+        """LLM 输出 ABANDON 时终态命令被程序级拦截。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'ABANDON',
@@ -239,9 +232,8 @@ class TestTriggeredFullPath:
         assert result.command.status == 'ACTIVE'
         assert result.error is None
 
-    def test_leave_proposal_tool_success_is_business_action_path(self):
-        """tool_history 中 leave_proposal_tool 成功（即使 action_proposal 为空，
-        如 Clarification）同样视为业务动作链路，终态命令被拦截。"""
+    def test_leave_proposal_tool_success_terminal_is_blocked(self):
+        """Clarification 场景的终态命令同样被拦截。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'ABANDON',
@@ -260,9 +252,8 @@ class TestTriggeredFullPath:
         assert result.command is None
         assert result.error is None
 
-    def test_plain_flow_complete_still_yields_command(self):
-        """非业务动作链路（仅 existing_memory 触发）保持既有行为：COMPLETE 正常生成
-        command，不拦截（Python 可以终结普通任务的 Memory，不能终结业务动作的）。"""
+    def test_plain_flow_complete_is_also_blocked(self):
+        """仅 existing_memory 触发时，Python 也不能生成终态命令。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'COMPLETE',
@@ -276,8 +267,27 @@ class TestTriggeredFullPath:
         })
         assert result.triggered is True
         assert result.proposal.action == 'COMPLETE'
-        assert result.command is not None
-        assert result.command.action == 'COMPLETE'
+        assert result.command is None
+        assert result.error is None
+
+    def test_upsert_with_terminal_status_is_blocked(self):
+        """反例：UPSERT 不能伪装携带 COMPLETED 状态绕过终态守卫。"""
+        def fake_llm(system, user):
+            return json.dumps({
+                'action': 'UPSERT',
+                'task_type': 'GENERIC',
+                'status': 'COMPLETED',
+                'task_state': {'phase': 'done'},
+                'summary': 'done',
+            })
+
+        pipeline = MemoryPipeline(llm_callable=fake_llm)
+        result = pipeline.process({
+            'memory_context': {'task_type': 'GENERIC', 'status': 'ACTIVE'},
+        })
+        assert result.proposal.action == 'UPSERT'
+        assert result.proposal.status == 'COMPLETED'
+        assert result.command is None
         assert result.error is None
 
     # ---------- Error Boundary（Phase 3C-Fix：不再吞所有异常）----------
@@ -382,7 +392,7 @@ class TestResultContract:
     def test_result_extra_forbid_includes_error_field(self):
         """error 字段存在但 extra 仍禁止。"""
         err = MemoryPipelineError('boom')
-        result = MemoryPipelineResult(triggered=True, error=err)
+        MemoryPipelineResult(triggered=True, error=err)
         with pytest.raises(ValidationError):
             MemoryPipelineResult(
                 triggered=True,

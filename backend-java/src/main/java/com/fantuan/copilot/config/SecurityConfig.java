@@ -37,6 +37,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 @Configuration
 @EnableConfigurationProperties({AuthProperties.class, com.fantuan.copilot.auth.DemoAuthProperties.class})
@@ -50,8 +51,7 @@ public class SecurityConfig {
     @Bean
     AuthenticationManager authenticationManager(AppUserDetailsService users,
                                                 PasswordEncoder passwordEncoder) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(users);
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(users);
         provider.setPasswordEncoder(passwordEncoder);
         return new ProviderManager(provider);
     }
@@ -96,15 +96,13 @@ public class SecurityConfig {
                         .accessDeniedHandler(errors.accessDeniedHandler()))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/health", "/api/version", "/api/agent/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/health", "/api/ready", "/api/version",
+                                "/api/agent/health", "/api/agent/ready").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo/identities").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/agent/**").authenticated()
-                        // Memory write authenticates with X-Internal-Token plus a Java-signed,
-                        // conversation-bound scope; it must not require an end-user JWT.
-                        .requestMatchers("/api/internal/memory/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint(errors.authenticationEntryPoint())
@@ -122,10 +120,24 @@ public class SecurityConfig {
             if (path.startsWith("/api/internal/leave/")) {
                 return null;
             }
-            if (path.startsWith("/api/internal/memory/")) {
+            String bearer = delegate.resolve(request);
+            if (bearer != null) {
+                return bearer;
+            }
+            if (!Set.of("GET", "HEAD", "OPTIONS").contains(request.getMethod())
+                    && !"XMLHttpRequest".equals(request.getHeader("X-Requested-With"))) {
                 return null;
             }
-            return delegate.resolve(request);
+            if (request.getCookies() == null) {
+                return null;
+            }
+            for (var cookie : request.getCookies()) {
+                if (com.fantuan.copilot.controller.AuthController.ACCESS_TOKEN_COOKIE
+                        .equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
+            return null;
         };
     }
 

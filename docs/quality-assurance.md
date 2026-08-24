@@ -52,10 +52,20 @@ Bounded concurrency is tested at the Java and Python layers. k6 scenarios separa
 
 Release verification also checks the public page, Java and Python health endpoints, representative RAG questions, container restart counts, and the JSON 429 contract. These are short, controlled checks on a small single-server deployment and do not establish a production SLA.
 
+## Phoenix observability verification
+
+Phoenix tracing is opt-in and is not a test oracle. Unit tests verify disabled-mode
+No-op behavior, batch auto-instrumentation, sampling validation, content masking,
+business traceId correlation, and fail-open initialization/shutdown. A deployment
+performance check must compare tracing disabled with `batch=true` at the configured
+sample rate and record p50/p95/p99, Python/Phoenix CPU and RSS, disk growth, dropped
+spans, and 429/5xx counts. Collector unavailability must never change the public API
+response or the result of the deterministic test/evaluation suites.
+
 ## Known gaps
 
 - The retrieval set is intentionally small and domain-specific.
 - Playwright covers the main chat, Markdown, Safety Guard, and scrolling regressions; broad visual and cross-browser UAT is still manual.
 - Long-running, multi-client, distributed capacity tests have not been completed.
 - Authentication is a shared administrator token rather than per-user JWT/RBAC.
-- Observability does not yet include a full metrics, alerting, and audit stack.
+- Optional Phoenix tracing is available, but observability still does not include a full metrics, alerting, and audit stack.

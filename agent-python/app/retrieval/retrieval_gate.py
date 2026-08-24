@@ -35,6 +35,8 @@ _metrics = {
     'evaluated': 0,
     'shadow_pass': 0,
     'shadow_block': 0,
+    'enforce_pass': 0,
+    'enforce_block': 0,
     'gate_evaluation_error': 0,
     'gate_disabled': 0,
     'llm_called_after_shadow_block': 0,
@@ -56,23 +58,26 @@ def evaluate_gate(
         decision = GateDecision(True, 'gate_disabled', 'gate_disabled')
         _increment_metric('gate_disabled')
         return decision
-    if mode != 'shadow':
+    if mode not in {'shadow', 'enforce'}:
         raise ValueError(f'运行时不支持 RAG gate mode: {mode!r}')
+
+    pass_reason = f'{mode}_pass'
+    block_reason = f'{mode}_block'
 
     _increment_metric('evaluated')
     if not candidates:
-        decision = GateDecision(False, 'empty_candidates', 'shadow_block')
-        _increment_metric('shadow_block')
+        decision = GateDecision(False, 'empty_candidates', block_reason)
+        _increment_metric(block_reason)
         return decision
 
     for candidate in candidates:
         vector_score = candidate.vector_score
         if vector_score is not None and vector_score >= vector_strong:
             decision = GateDecision(
-                True, 'vector_strong', 'shadow_pass', candidate.chunk_id,
+                True, 'vector_strong', pass_reason, candidate.chunk_id,
                 vector_score, candidate.bm25_score,
             )
-            _increment_metric('shadow_pass')
+            _increment_metric(pass_reason)
             return decision
 
     for candidate in candidates:
@@ -85,14 +90,14 @@ def evaluate_gate(
             and bm25_score >= bm25_weak
         ):
             decision = GateDecision(
-                True, 'vector_bm25_weak_combined', 'shadow_pass',
+                True, 'vector_bm25_weak_combined', pass_reason,
                 candidate.chunk_id, vector_score, bm25_score,
             )
-            _increment_metric('shadow_pass')
+            _increment_metric(pass_reason)
             return decision
 
-    decision = GateDecision(False, 'below_threshold', 'shadow_block')
-    _increment_metric('shadow_block')
+    decision = GateDecision(False, 'below_threshold', block_reason)
+    _increment_metric(block_reason)
     return decision
 
 
@@ -115,10 +120,11 @@ def evaluate_gate_timed_fail_open(
             '[%s] rag_gate evaluation failed mode=%s exception_type=%s fail_open=true',
             trace_id, RAG_GATE_MODE, type(exc).__name__,
         )
+        enforce = RAG_GATE_MODE == 'enforce'
         decision = GateDecision(
-            answerable=True,
+            answerable=not enforce,
             reason_code='gate_evaluation_error',
-            mode_reason_code='shadow_fail_open',
+            mode_reason_code='enforce_error_block' if enforce else 'shadow_fail_open',
         )
     return decision, (perf_counter() - started) * 1000
 

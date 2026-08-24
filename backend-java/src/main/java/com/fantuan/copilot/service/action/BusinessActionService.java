@@ -1,7 +1,6 @@
 package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.adminlog.AdminLogBuffer;
-import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.AnnualLeaveSummary;
@@ -11,7 +10,6 @@ import com.fantuan.copilot.gateway.leave.LeaveExecutionResult;
 import com.fantuan.copilot.gateway.leave.LeaveSubmission;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
-import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
@@ -19,30 +17,21 @@ import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
-import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
 @Service
 public class BusinessActionService {
-    private static final Logger log = LoggerFactory.getLogger(BusinessActionService.class);
     private static final String SUCCESS_MESSAGE = "模拟年假申请已提交。";
     private static final String CANCELLED_MESSAGE = "申请草稿已取消。";
 
@@ -53,7 +42,7 @@ public class BusinessActionService {
     private final LeaveExecutionGateway leaveExecutionGateway;
     private final ActionNonceService nonceService;
     private final AiTaskMemoryService memoryService;
-    private final AdminLogBuffer adminLogBuffer;
+    private final BusinessActionAuditLogger auditLogger;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -73,7 +62,7 @@ public class BusinessActionService {
         this.leaveExecutionGateway = leaveExecutionGateway;
         this.nonceService = nonceService;
         this.memoryService = memoryService;
-        this.adminLogBuffer = adminLogBuffer;
+        this.auditLogger = new BusinessActionAuditLogger(adminLogBuffer);
         this.clock = clock;
     }
 
@@ -82,10 +71,6 @@ public class BusinessActionService {
     public boolean isAllowed(String presentedToken) {
         return properties.isEnabled()
                 && (!properties.isRequireAdmin() || adminAccessService.isAdmin(presentedToken));
-    }
-
-    public void requireAccess(String presentedToken) {
-        requireEnabledAndAdmin(presentedToken);
     }
 
     /**
@@ -101,8 +86,20 @@ public class BusinessActionService {
                                            String conversationId) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
-        ValidatedLeave validated = validate(proposal);
+        AnnualLeaveProposalValidator.ValidatedLeave validated =
+                AnnualLeaveProposalValidator.validate(proposal, businessDate());
         Instant now = clock.instant();
+
+        // 账户和冲突校验先按员工行锁并行执行，缩短全局容量锁的持有时间。
+        BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
+                .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
+        if (leaveExecutionGateway.hasConflict(identity.employeeId(),
+                proposal.startDate(), proposal.endDate())) {
+            throw rule("日期范围与已提交的模拟申请冲突。");
+        }
+        if (balanceBefore.compareTo(validated.days()) < 0) {
+            throw rule("模拟年假余额不足。");
+        }
 
         actions.lockControl();
         List<PendingAction> expired = actions.findExpired(now);
@@ -126,16 +123,6 @@ public class BusinessActionService {
                     "当前会话已有待确认的申请，请先确认或取消后再发起新申请。", null, null);
         }
 
-        BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
-                .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
-        if (leaveExecutionGateway.hasConflict(identity.employeeId(),
-                proposal.startDate(), proposal.endDate())) {
-            throw rule("日期范围与已提交的模拟申请冲突。");
-        }
-        if (balanceBefore.compareTo(validated.days()) < 0) {
-            throw rule("模拟年假余额不足。");
-        }
-
         BigDecimal balanceAfter = balanceBefore.subtract(validated.days());
         ActionNonceService.Nonce nonce = nonceService.create();
         PendingAction action = PendingAction.pending(randomActionId(),
@@ -146,7 +133,9 @@ public class BusinessActionService {
                 validated.days(), balanceBefore, balanceAfter, nonce.digest(), now,
                 now.plusSeconds(properties.getTtlSeconds()));
         actions.saveNew(action);
-        actions.maintainBounds(properties.getMaxCompleted());
+        if (actions.size() > properties.getMaxPending() + properties.getMaxCompleted()) {
+            actions.maintainBounds(properties.getMaxCompleted());
+        }
         audit(originTraceId, action, null, ActionStatus.PENDING_CONFIRMATION,
                 "ACTION_CREATED", null, null);
         return pendingView(action, nonce.plaintext());
@@ -289,55 +278,6 @@ public class BusinessActionService {
         }
     }
 
-    private ValidatedLeave validate(AnnualLeaveActionProposal proposal) {
-        if (proposal == null || proposal.actionType() != BusinessActionType.ANNUAL_LEAVE_REQUEST
-                || proposal.startDate() == null || proposal.endDate() == null
-                || proposal.halfDay() == null) {
-            throw rule("年假申请参数不完整。");
-        }
-        LocalDate businessDate = businessDate();
-        if (proposal.startDate().isBefore(businessDate)) {
-            throw rule("开始日期不能早于当前业务日期。");
-        }
-        if (proposal.endDate().isBefore(proposal.startDate())) {
-            throw rule("结束日期不能早于开始日期。");
-        }
-        long span = ChronoUnit.DAYS.between(proposal.startDate(), proposal.endDate()) + 1;
-        if (span > 31) {
-            throw rule("申请日期跨度不能超过31个日历日。");
-        }
-        String rawReason = proposal.reason() == null ? "" : proposal.reason();
-        String reason = rawReason.trim();
-        if (reason.isEmpty() || reason.length() > 200
-                || rawReason.codePoints().anyMatch(Character::isISOControl)) {
-            throw rule("申请原因必须为1到200个非控制字符。");
-        }
-        BigDecimal days;
-        if (proposal.halfDay() == HalfDay.AM || proposal.halfDay() == HalfDay.PM) {
-            if (!proposal.startDate().equals(proposal.endDate()) || isWeekend(proposal.startDate())) {
-                throw rule("半天年假仅支持工作日单日申请。");
-            }
-            days = new BigDecimal("0.5");
-        } else {
-            long weekdays = 0;
-            for (LocalDate day = proposal.startDate(); !day.isAfter(proposal.endDate()); day = day.plusDays(1)) {
-                if (!isWeekend(day)) {
-                    weekdays++;
-                }
-            }
-            days = BigDecimal.valueOf(weekdays).setScale(1);
-        }
-        if (days.compareTo(BigDecimal.ZERO) <= 0) {
-            throw rule("申请日期范围不包含有效工作日。");
-        }
-        return new ValidatedLeave(reason, days);
-    }
-
-    private boolean isWeekend(LocalDate date) {
-        return date.getDayOfWeek() == DayOfWeek.SATURDAY
-                || date.getDayOfWeek() == DayOfWeek.SUNDAY;
-    }
-
     private void requireEnabledAndAdmin(String presentedToken) {
         if (!properties.isEnabled()) {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
@@ -401,69 +341,11 @@ public class BusinessActionService {
 
     void audit(String traceId, PendingAction action, ActionStatus from,
                ActionStatus to, String resultCode, String requestId, Instant completedAt) {
-        log.info("action_audit traceId={} originTraceId={} actionRef={} actionType={} "
-                        + "statusFrom={} statusTo={} resultCode={} requestRef={} createdAt={} completedAt={}",
-                traceId, action.originTraceId(), auditRef(action.actionId()), action.actionType(), from, to,
-                resultCode, auditRef(requestId), action.createdAt(), completedAt);
-        emitAdminLog(traceId, action, from, to, resultCode);
-    }
-
-    private void emitAdminLog(String traceId, PendingAction action, ActionStatus from,
-                              ActionStatus to, String resultCode) {
-        try {
-            String actionRef = auditRef(action.actionId());
-            String userRef = auditRef(action.employeeId());
-            String fromName = from == null ? null : from.name();
-            String toName = to == null ? null : to.name();
-            String level = switch (to) {
-                case SUCCEEDED -> AdminLogEvent.LEVEL_INFO;
-                case CANCELLED -> AdminLogEvent.LEVEL_INFO;
-                case EXPIRED -> AdminLogEvent.LEVEL_WARN;
-                case FAILED -> AdminLogEvent.LEVEL_ERROR;
-                default -> AdminLogEvent.LEVEL_INFO;
-            };
-            adminLogBuffer.record(
-                    level,
-                    AdminLogEvent.CATEGORY_BUSINESS_ACTION,
-                    resultCode,
-                    traceId,
-                    userRef,
-                    actionRef,
-                    fromName,
-                    toName,
-                    null,
-                    safeBusinessActionMessage(resultCode));
-        } catch (RuntimeException ex) {
-            log.warn("[{}] admin log 写入失败: {}", traceId, ex.getMessage());
-        }
-    }
-
-    private static String safeBusinessActionMessage(String resultCode) {
-        return switch (resultCode) {
-            case "ACTION_CREATED" -> "Business action created";
-            case "ACTION_SUCCEEDED" -> "Business action succeeded";
-            case "ACTION_CANCELLED" -> "Business action cancelled";
-            case "ACTION_EXPIRED" -> "Business action expired";
-            case "ACTION_FAILED" -> "Business action failed";
-            case "ACTION_STALE" -> "Business action stale";
-            case "ACTION_CONVERSATION_IN_PROGRESS" -> "Conversation has active action";
-            case "ACTION_CAPACITY_EXCEEDED" -> "Pending action capacity exceeded";
-            default -> "Business action event";
-        };
+        auditLogger.audit(traceId, action, from, to, resultCode, requestId, completedAt);
     }
 
     static String auditRef(String rawId) {
-        if (rawId == null) {
-            return "-";
-        }
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(rawId.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, 6);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 unavailable", exception);
-        }
+        return BusinessActionAuditLogger.auditRef(rawId);
     }
 
-    private record ValidatedLeave(String reason, BigDecimal days) {}
 }

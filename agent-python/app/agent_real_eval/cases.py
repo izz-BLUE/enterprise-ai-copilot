@@ -315,7 +315,11 @@ REAL_AGENT_EVAL_CASES: list[RealAgentEvalCase] = [
         allowed_stop_reasons=('task_complete',),
         max_step_count=4,
         max_tool_call_count=3,
-        required_call_specs=(('rag_answer_tool', 'annual_leave'), ('eval_report_tool', 'all'), ('rag_answer_tool', 'expense')),
+        required_call_specs=(
+            ('rag_answer_tool', 'annual_leave'),
+            ('eval_report_tool', 'all'),
+            ('rag_answer_tool', 'expense'),
+        ),
         description='三步：RAG → Eval → RAG(不同主题)',
     ),
     RealAgentEvalCase(

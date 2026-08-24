@@ -122,4 +122,21 @@ class AdminLogBufferTest {
         List<AdminLogEvent> snapshot = buffer.snapshot(null, null, null, null);
         assertEquals(50, snapshot.size());
     }
+
+    @Test
+    void pageReturnsAccurateTotalAndStableOffset() {
+        AdminLogBuffer buffer = new AdminLogBuffer();
+        for (int i = 0; i < 7; i++) {
+            buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM,
+                    "E" + i, null, Instant.ofEpochMilli(i)));
+        }
+        AdminLogBuffer.Page page = buffer.snapshotPage(null, null, null, 3, 3);
+        assertEquals(7, page.total());
+        assertEquals(3, page.offset());
+        assertTrue(page.hasMore());
+        assertEquals(List.of("E3", "E2", "E1"),
+                page.items().stream().map(AdminLogEvent::event).toList());
+        assertThrows(IllegalArgumentException.class,
+                () -> buffer.snapshotPage(null, null, null, 3, -1));
+    }
 }

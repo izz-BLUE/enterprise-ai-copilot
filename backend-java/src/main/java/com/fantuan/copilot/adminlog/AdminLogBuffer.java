@@ -5,7 +5,6 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -130,10 +129,26 @@ public class AdminLogBuffer {
                                                     String category,
                                                     String traceId,
                                                     Integer limit) {
+        return snapshotPage(level, category, traceId, limit, 0).items();
+    }
+
+    /**
+     * 按时间倒序分页返回快照，并返回过滤后的准确总数。
+     */
+    public synchronized Page snapshotPage(String level,
+                                          String category,
+                                          String traceId,
+                                          Integer limit,
+                                          Integer offset) {
         int effectiveLimit = limit == null ? DEFAULT_LIMIT : limit;
         if (effectiveLimit < 1 || effectiveLimit > MAX_LIMIT) {
             throw new IllegalArgumentException(
                     "limit must be between 1 and " + MAX_LIMIT);
+        }
+        int effectiveOffset = offset == null ? 0 : offset;
+        if (effectiveOffset < 0 || effectiveOffset > capacity) {
+            throw new IllegalArgumentException(
+                    "offset must be between 0 and " + capacity);
         }
         String effectiveLevel = normalize(level);
         String effectiveCategory = normalize(category);
@@ -148,6 +163,7 @@ public class AdminLogBuffer {
         String traceNeedle = normalize(traceId);
 
         List<AdminLogEvent> matched = new ArrayList<>();
+        int total = 0;
         // 倒序遍历：deque 尾是最新
         var it = deque.descendingIterator();
         while (it.hasNext()) {
@@ -156,13 +172,16 @@ public class AdminLogBuffer {
             if (effectiveCategory != null && !effectiveCategory.equals(e.category())) continue;
             if (traceNeedle != null
                     && (e.traceId() == null || !e.traceId().contains(traceNeedle))) continue;
-            matched.add(e);
-            if (matched.size() >= effectiveLimit) break;
+            if (total >= effectiveOffset && matched.size() < effectiveLimit) {
+                matched.add(e);
+            }
+            total++;
         }
-        // 防御性二次排序，确保时间倒序
-        matched.sort(Comparator.comparing(AdminLogEvent::timestamp).reversed());
-        return matched;
+        return new Page(List.copyOf(matched), total, effectiveOffset,
+                effectiveOffset + matched.size() < total);
     }
+
+    public record Page(List<AdminLogEvent> items, int total, int offset, boolean hasMore) {}
 
     private static String normalize(String value) {
         if (value == null) return null;

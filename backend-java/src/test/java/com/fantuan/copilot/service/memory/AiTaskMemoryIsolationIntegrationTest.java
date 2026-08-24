@@ -185,7 +185,7 @@ class AiTaskMemoryIsolationIntegrationTest extends PostgresIntegrationTestBase {
     @Test
     void upsertRejectsCamelCaseTrustedRuntimeFields() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
-                service.writeFromCommand(U1, CONV_A, "UPSERT", "GENERIC", "ACTIVE",
+                service.upsertActiveFromAgent(U1, CONV_A, "GENERIC",
                         new java.util.LinkedHashMap<>(Map.of(
                                 "businessDate", "2026-08-20",
                                 "nested", Map.of("traceId", "t1"))), ""));

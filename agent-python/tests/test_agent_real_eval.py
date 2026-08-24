@@ -23,9 +23,6 @@ CI 绝不能调用真实 LLM。
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
-from datetime import date
-from typing import Any
 
 import pytest
 
@@ -33,23 +30,22 @@ from app.agent_real_eval.cases import (
     REAL_AGENT_EVAL_CASES,
     REAL_AGENT_EVAL_SUITE_VERSION,
     RealAgentEvalCase,
-    ToolScenario,
     case_by_id,
 )
 from app.agent_real_eval.runner import (
     RealEvalCaseReport,
     RealEvalRunResult,
-    _evaluate_run,
-    _completed_required_tools,
     _check_finish_when_complete,
+    _completed_required_tools,
     _detect_unauthorized,
-    _percentile,
+    _evaluate_run,
     _matched_sequence,
-    compute_metrics,
+    _percentile,
     build_suite_report,
+    compute_metrics,
+    report_to_jsonable,
     run_case_repeatedly,
     run_single_run,
-    report_to_jsonable,
 )
 from app.agent_real_eval.tool_stubs import (
     RealEvalToolStubs,
@@ -641,7 +637,7 @@ def test_report_metadata_omits_api_key():
     dump = json.dumps(report_to_jsonable(suite), ensure_ascii=False)
     assert 'DEEPSEEK_API_KEY' not in dump
     assert 'sk-' not in dump  # 常见 API Key 前缀（宽松检查）
-    assert 'LANGSMITH_API_KEY' not in dump
+    assert 'PHOENIX_API_KEY' not in dump
     assert suite.suite_version == REAL_AGENT_EVAL_SUITE_VERSION
     assert suite.real_tools is False
     assert suite.max_planner_steps >= 1

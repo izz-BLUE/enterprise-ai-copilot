@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError
+
 from app.core.config import DEEPSEEK_MODEL
 from app.schemas.action_schema import (
     AnnualLeaveActionProposal,
@@ -21,7 +22,6 @@ from app.services.annual_leave_input_service import (
     clarification_question,
 )
 from app.services.llm_service import _get_controlled_tool_client
-
 
 for logger_name in ("httpx", "httpcore", "openai", "openai._base_client"):
     logging.getLogger(logger_name).setLevel(logging.WARNING)

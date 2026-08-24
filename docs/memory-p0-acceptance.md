@@ -1,8 +1,8 @@
 # Scoped Conversation Memory P0 验收基线
 
-本文件记录 Scoped Conversation Memory P0 在当前分支（`feat/scoped-conversation-memory-p0`）
-上的最终审计结论、Pre-commit Gates、归档组件与最近一次验收结果摘要，作为后续
-Phase 的回归锚点。
+本文件是早期 P0 验收历史快照，其中反向 HTTP write scope 设计已被后续安全修复替代。
+当前运行时基线以 [memory-architecture.md](memory-architecture.md) 与
+[memory-security.md](memory-security.md) 为准；下文仅用于追溯当时的验收口径。
 
 ---
 

@@ -1,14 +1,20 @@
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from app.core.config import (
-    DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL,
-    DEEPSEEK_TEMPERATURE, LANGSMITH_TRACING, LLM_TIMEOUT, logger,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
+    DEEPSEEK_TEMPERATURE,
+    LLM_MAX_OUTPUT_TOKENS,
+    LLM_MAX_RETRIES,
+    LLM_TIMEOUT,
+    logger,
 )
 
 _client: OpenAI | None = None
 _controlled_tool_client: OpenAI | None = None
 
-# Provider 错误分类（应用层语义）。SDK 默认 retry 行为保持不变。
+# Provider 错误分类（应用层语义）。重试次数由配置显式控制。
 PROVIDER_ERROR_TIMEOUT = 'provider_timeout'
 PROVIDER_ERROR_RATE_LIMITED = 'provider_rate_limited'
 PROVIDER_ERROR_UNAVAILABLE = 'provider_unavailable'
@@ -58,7 +64,7 @@ def _classify_provider_error(exc: BaseException) -> LLMProviderError:
     )
 
 
-def _build_client(*, max_retries: int | None = None) -> OpenAI:
+def _build_client(*, max_retries: int = LLM_MAX_RETRIES) -> OpenAI:
     missing = [
         name for name, value in (
             ('DEEPSEEK_API_KEY', DEEPSEEK_API_KEY),
@@ -73,21 +79,16 @@ def _build_client(*, max_retries: int | None = None) -> OpenAI:
         'api_key': DEEPSEEK_API_KEY,
         'base_url': DEEPSEEK_BASE_URL,
         'timeout': float(LLM_TIMEOUT),
+        'max_retries': max_retries,
     }
-    if max_retries is not None:
-        options['max_retries'] = max_retries
-    client = OpenAI(**options)
-    if LANGSMITH_TRACING:
-        # 统一插桩：Planner / 旧 SDK RAG / 受控业务动作的裸 SDK 调用都经此 client
-        from langsmith.wrappers import wrap_openai
-        return wrap_openai(client)
-    return client
+    # Phoenix/OpenInference 在应用启动时对 OpenAI SDK 统一自动插桩；这里保持
+    # Provider client 的构造与 retry 语义不变，不引入 vendor wrapper。
+    return OpenAI(**options)
 
 
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        # Preserve the SDK's existing retry behavior for standard RAG calls.
         _client = _build_client()
     return _client
 
@@ -100,13 +101,21 @@ def _get_controlled_tool_client() -> OpenAI:
     return _controlled_tool_client
 
 
-def call_llm(system_prompt: str, user_prompt: str) -> str:
+def call_llm(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    timeout_seconds: float | None = None,
+) -> str:
     """调用 LLM 并返回首个 choice 的 content 文本。失败时抛 LLMProviderError。
 
     应用层不引入额外网络 retry；SDK 自身的 max_retries 行为保持不变。
     """
     client = _get_client()
     try:
+        request_options = {}
+        if timeout_seconds is not None:
+            request_options['timeout'] = max(0.1, min(float(LLM_TIMEOUT), timeout_seconds))
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[
@@ -114,6 +123,8 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
                 {'role': 'user', 'content': user_prompt},
             ],
             temperature=DEEPSEEK_TEMPERATURE,
+            max_tokens=LLM_MAX_OUTPUT_TOKENS,
+            **request_options,
         )
     except (APITimeoutError, APIStatusError, APIConnectionError) as exc:
         wrapped = _classify_provider_error(exc)

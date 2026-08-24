@@ -8,12 +8,51 @@ export class AuthExpiredError extends Error {
   }
 }
 
+export class AuthServiceError extends Error {
+  constructor(message, httpStatus = null) {
+    super(message)
+    this.name = 'AuthServiceError'
+    this.httpStatus = httpStatus
+  }
+}
+
+export class RequestTimeoutError extends Error {
+  constructor() {
+    super('请求等待时间过长，请稍后重试。')
+    this.name = 'RequestTimeoutError'
+  }
+}
+
+export const DEFAULT_REQUEST_TIMEOUT_MS = 55_000
+
+function requestSignal(externalSignal, timeoutMs) {
+  const controller = new AbortController()
+  let timedOut = false
+  const relayAbort = () => controller.abort(externalSignal?.reason)
+  externalSignal?.addEventListener('abort', relayAbort, { once: true })
+  const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, timeoutMs)
+    : null
+  return {
+    signal: controller.signal,
+    didTimeOut: () => timedOut,
+    cleanup: () => {
+      if (timer) clearTimeout(timer)
+      externalSignal?.removeEventListener('abort', relayAbort)
+    },
+  }
+}
+
 export async function login(username, password) {
   let response
   try {
     response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ username, password }),
     })
   } catch {
@@ -30,32 +69,47 @@ export async function login(username, password) {
 }
 
 export async function fetchCurrentUser(accessToken, signal) {
-  const response = await fetch('/api/auth/me', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
+  const response = await authenticatedFetch('/api/auth/me', accessToken, {
+    headers: { Accept: 'application/json' },
     cache: 'no-store',
     signal,
+    timeoutMs: 10_000,
   })
   const data = await parseJson(response)
   if (!response.ok) {
-    throw new AuthExpiredError()
+    throw new AuthServiceError(
+      typeof data?.message === 'string' && data.message.trim()
+        ? data.message
+        : `登录状态校验失败（HTTP ${response.status}）。`,
+      response.status,
+    )
   }
   return data
 }
 
 export async function authenticatedFetch(path, accessToken, options = {}) {
-  if (!accessToken) {
-    throw new AuthExpiredError()
-  }
   const headers = new Headers(options.headers || {})
-  headers.set('Authorization', `Bearer ${accessToken}`)
-  const response = await fetch(path, { ...options, headers })
-  if (response.status === 401) {
-    throw new AuthExpiredError()
+  headers.set('X-Requested-With', 'XMLHttpRequest')
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, signal: externalSignal, ...fetchOptions } = options
+  const managedSignal = requestSignal(externalSignal, timeoutMs)
+  try {
+    const response = await fetch(path, {
+      ...fetchOptions,
+      headers,
+      credentials: 'same-origin',
+      signal: managedSignal.signal,
+    })
+    if (response.status === 401 || (response.status === 403 && path === '/api/auth/me')) {
+      throw new AuthExpiredError()
+    }
+    return response
+  } catch (error) {
+    if (managedSignal.didTimeOut()) throw new RequestTimeoutError()
+    throw error
+  } finally {
+    managedSignal.cleanup()
   }
-  return response
 }
 
 export function readAuthState() {
@@ -63,8 +117,8 @@ export function readAuthState() {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY)
     if (!raw) return null
     const state = JSON.parse(raw)
-    if (!state?.accessToken || typeof state.accessToken !== 'string') return null
-    const normalized = { accessToken: state.accessToken }
+    if (state?.authenticated !== true && typeof state?.accessToken !== 'string') return null
+    const normalized = { authenticated: true }
     if (raw !== JSON.stringify(normalized)) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalized))
     }
@@ -75,15 +129,21 @@ export function readAuthState() {
 }
 
 export function saveAuthState(response) {
-  const state = {
-    accessToken: response.accessToken,
-  }
+  const state = { authenticated: true }
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(state))
   return { ...state, user: response.user }
 }
 
 export function clearAuthState() {
   localStorage.removeItem(AUTH_STORAGE_KEY)
+}
+
+export async function logout() {
+  try {
+    await authenticatedFetch('/api/auth/logout', null, { method: 'POST', timeoutMs: 10_000 })
+  } finally {
+    clearAuthState()
+  }
 }
 
 async function parseJson(response) {

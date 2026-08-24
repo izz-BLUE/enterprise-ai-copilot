@@ -33,14 +33,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.memory.memory_trigger_policy import (
-    MemoryTriggerDecision,
-    MemoryTriggerPolicy,
     NO_TRIGGER_REASON_AGENT_FAILURE,
     NO_TRIGGER_REASON_NO_SIGNAL,
     NO_TRIGGER_REASON_SAFETY_BLOCKED,
     TRIGGER_REASON_ACTION_PROPOSAL,
     TRIGGER_REASON_EXISTING_MEMORY,
     TRIGGER_REASON_TOOL_SUCCESS,
+    MemoryTriggerDecision,
+    MemoryTriggerPolicy,
 )
 
 

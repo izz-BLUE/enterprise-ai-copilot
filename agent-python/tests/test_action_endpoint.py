@@ -1,9 +1,13 @@
+import json
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import Request
 
 from app.main import langgraph_chat
+from app.memory.memory_write_mode import make_execution_policy
+from app.memory.memory_write_policy import MemoryWriteCommand
 from app.schemas.chat_schema import ChatRequest
 
 
@@ -53,6 +57,44 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
     assert response.traceId == "java-trace"
     assert response.missing_fields == ["start_date", "end_date"]
     assert response.action_proposal is None
+
+
+def test_enabled_memory_is_returned_as_non_authoritative_response_proposal():
+    req = request({"X-Trace-Id": "java-trace", "X-Conversation-Id": "conv-1"})
+    result = {
+        "answer": "请补充日期。",
+        "route": "action",
+        "safe": True,
+        "category": "business_action",
+        "reason": "",
+        "sources": [],
+        "action_proposal": None,
+    }
+    command = MemoryWriteCommand(
+        action="UPSERT",
+        task_type="LEAVE_REQUEST",
+        status="ACTIVE",
+        task_state={"waiting_for": "date"},
+        summary="等待用户补充请假日期",
+    )
+    hook = SimpleNamespace(
+        after_agent_response=lambda agent_result, conversation_id: SimpleNamespace(written=True)
+    )
+    writer = SimpleNamespace(command=command)
+
+    with patch("app.main.run_langgraph_agent", return_value=result), \
+            patch("app.main._memory_execution_policy", make_execution_policy("ENABLED")), \
+            patch("app.main._build_memory_runtime_hook", return_value=(hook, writer)):
+        response = langgraph_chat(ChatRequest(message="我想请年假"), req)
+
+    assert response.memory_proposal is not None
+    assert response.memory_proposal.task_type == "LEAVE_REQUEST"
+    assert response.memory_proposal.task_state == {"waiting_for": "date"}
+    dumped = response.memory_proposal.model_dump()
+    assert "user_id" not in dumped
+    assert "conversation_id" not in dumped
+    assert "action" not in dumped
+    assert "status" not in dumped
 
 
 def test_invalid_or_missing_business_date_does_not_use_python_clock():
@@ -192,9 +234,11 @@ def test_endpoint_failure_when_route_is_error():
     }
     with patch("app.main.run_langgraph_agent", return_value=result):
         response = langgraph_chat(ChatRequest(message="hi"), request({}))
-    assert response.route == "error"
-    assert response.category == "error"
-    assert response.success is False
+    payload = json.loads(response.body)
+    assert response.status_code == 502
+    assert payload["route"] == "error"
+    assert payload["category"] == "error"
+    assert payload["success"] is False
 
 
 def test_endpoint_success_for_action_route():

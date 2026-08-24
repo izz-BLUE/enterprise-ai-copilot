@@ -37,7 +37,7 @@ from app.memory.memory_pipeline import (
     MemoryPipelineError,
     MemoryPipelineResult,
 )
-from app.memory.memory_runtime_hook import MemoryRuntimeHook, MemoryRuntimeResult
+from app.memory.memory_runtime_hook import MemoryRuntimeHook
 from app.memory.memory_write_dispatcher import (
     MemoryWriteDispatcher,
     MemoryWriteDispatcherError,
@@ -45,7 +45,6 @@ from app.memory.memory_write_dispatcher import (
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.schemas.memory_schema import MemoryProposal
-
 
 CONV_ID = '11111111-1111-1111-1111-111111111111'
 
@@ -673,7 +672,6 @@ class TestDefaultRecorder:
         assert isinstance(hook.audit_recorder, LoggingAuditRecorder)
 
     def test_default_hook_records_event(self) -> None:
-        hook = MemoryRuntimeHook()
         pipeline = _make_pipeline(triggered=False, trigger_reason='no_trigger')
         dispatcher = _make_dispatcher()
         # 注入 pipeline 后 recorder 仍保持默认

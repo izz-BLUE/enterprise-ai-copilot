@@ -37,6 +37,7 @@ class TestDirectOnnxConfig(unittest.TestCase):
         """未配置 EMBEDDING_MODEL_PATH 应报错。"""
         with patch.dict(os.environ, {'EMBEDDING_MODEL_PATH': ''}, clear=False):
             import importlib
+
             import app.retrieval.direct_onnx_embedding as mod
             importlib.reload(mod)
             with self.assertRaises(ValueError) as ctx:
@@ -47,6 +48,7 @@ class TestDirectOnnxConfig(unittest.TestCase):
         """不存在的路径应报错。"""
         with patch.dict(os.environ, {'EMBEDDING_MODEL_PATH': '/nonexistent'}, clear=False):
             import importlib
+
             import app.retrieval.direct_onnx_embedding as mod
             importlib.reload(mod)
             with self.assertRaises(FileNotFoundError):
@@ -65,6 +67,7 @@ class TestDirectOnnxConfig(unittest.TestCase):
                 'EMBEDDING_PROVIDER': 'CUDAExecutionProvider',
             }, clear=False):
                 import importlib
+
                 import app.retrieval.direct_onnx_embedding as mod
                 importlib.reload(mod)
                 with self.assertRaises(ValueError) as ctx:
@@ -233,9 +236,12 @@ class TestDirectOnnxEncode(unittest.TestCase):
             'sep_token_id': 102,
             'pad_token_id': 0,
         }
-        enc1 = MagicMock(); enc1.ids = [101, 100, 102]
-        enc2 = MagicMock(); enc2.ids = [101, 200, 102]
-        enc3 = MagicMock(); enc3.ids = [101, 300, 102]
+        enc1 = MagicMock()
+        enc1.ids = [101, 100, 102]
+        enc2 = MagicMock()
+        enc2.ids = [101, 200, 102]
+        enc3 = MagicMock()
+        enc3.ids = [101, 300, 102]
         mock_tokenizer['tokenizer'].encode_batch.return_value = [enc1, enc2, enc3]
 
         orig = mod._session, mod._tokenizer, mod._pooling_config, mod._model_loaded
@@ -262,7 +268,8 @@ class TestDirectOnnxEncode(unittest.TestCase):
             'sep_token_id': 102,
             'pad_token_id': 0,
         }
-        mock_enc = MagicMock(); mock_enc.ids = [101, 100, 102]
+        mock_enc = MagicMock()
+        mock_enc.ids = [101, 100, 102]
         mock_tokenizer['tokenizer'].encode_batch.return_value = [mock_enc]
 
         orig = mod._session, mod._tokenizer, mod._pooling_config, mod._model_loaded

@@ -89,7 +89,7 @@ PENDING_CONFIRMATION
 
 `confirmationNonce` 由 Java 在 `BusinessActionService.createPending` 内部用 32 字节 `SecureRandom` 生成，明文只在创建响应返回；数据库只保存 32 字节 SHA-256 摘要，Java 使用常量时间比较。浏览器刷新后 nonce 不会恢复，因为明文仅存在页面内存。confirm 要求 UUID `Idempotency-Key`。
 
-`createPending` 先锁定 `business_action_control`，并发安全地执行过期转换、容量检查和历史清理；随后只锁定当前 identity 的 `leave_account`。冲突查询始终包含 employeeId，所以不同用户可提交相同日期，同一用户仍拒绝重叠日期。confirm/cancel 使用 `SELECT ... FOR UPDATE` 锁定 Action 行并先校验 owner；归属不符与 Action 不存在统一返回 `ACTION_NOT_FOUND`。confirm 再锁定当前 Account 行，在一个事务内通过 `LeaveExecutionGateway` 复查冲突、写入唯一 `source_action_id` 的 LeaveRequest、扣减余额并写入成功结果。任何数据库异常会整体回滚，草稿保持可重试。
+`createPending` 先按员工锁定 `leave_account` 并完成余额/冲突复核，再短时锁定 `business_action_control` 执行过期转换、全局容量判定和落库，缩短不同员工之间的串行区；活动 `(owner_user_id, conversation_id)` 另有数据库部分唯一索引兜底。冲突查询始终包含 employeeId，所以不同用户可提交相同日期，同一用户仍拒绝重叠日期。confirm/cancel 使用 `SELECT ... FOR UPDATE` 锁定 Action 行并先校验 owner；归属不符与 Action 不存在统一返回 `ACTION_NOT_FOUND`。confirm 再锁定当前 Account 行，在一个事务内通过 `LeaveExecutionGateway` 复查冲突、写入唯一 `source_action_id` 的 LeaveRequest、扣减余额并写入成功结果。任何数据库异常会整体回滚，草稿保持可重试。
 
 同一 `(owner_user_id, conversation_id)` 至多一个活动 PendingAction（`PENDING_CONFIRMATION` / `PROCESSING`）。这是 `ai_task_memory` 以 `(user_id, conversation_id)` 为唯一键、每条会话只有一条任务记忆的配套约束：若允许同会话多个活动动作，任一动作进入终态都会收口整条会话 Memory，误伤其他仍在等待确认的动作的续接。`createPending` 在控制锁内检查该约束，命中返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；`conversationId` 为 null（无 Memory 关联的历史路径）不限制。动作确认 / 取消 / 过期 / 失败后，同会话可再次发起新申请。
 

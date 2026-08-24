@@ -6,8 +6,6 @@ AGENT_LOOP_ENABLED 是服务端配置开关，不暴露给客户端 header / 请
 """
 
 import importlib
-import os
-
 from unittest.mock import patch
 
 from fastapi import Request

@@ -27,7 +27,6 @@ from app.memory.memory_write_dispatcher import (
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.schemas.memory_schema import MemoryProposal
 
-
 # ---------------------------------------------------------------------------
 # 测试辅助
 # ---------------------------------------------------------------------------

@@ -66,7 +66,6 @@ from typing import Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # 默认 task_type 白名单（与 P0 MemoryTaskType Literal 保持一致）。
 # 任何新增项必须显式注册（见 create_for / create_from_registry），
 # schema / Java / DB 不需要改。

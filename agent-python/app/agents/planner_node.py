@@ -7,10 +7,11 @@ planner_node.py —— Planner 节点
 """
 
 import json
+from time import monotonic
 
 from pydantic import ValidationError
 
-from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, logger
+from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
@@ -369,6 +370,13 @@ def planner_node(state: dict) -> dict:
     employee_id = state.get('employee_id', '')
     step_count = state.get('step_count', 0)
 
+    deadline = state.get('deadline_monotonic')
+    remaining_seconds = deadline - monotonic() if isinstance(deadline, (int, float)) else None
+    if remaining_seconds is not None and remaining_seconds <= 0:
+        decision = _refuse_decision(
+            '当前任务处理超时，请缩短问题或稍后重试。', 'cannot_complete')
+        return _decision_result(state, decision, 'request_timeout')
+
     # 步骤预算前置检查：预算耗尽时不再调用 LLM，直接终止，step_count 保持上限
     if step_count >= MAX_PLANNER_STEPS:
         logger.info('[%s] planner 步骤预算耗尽，终止决策 (step_count=%d)', trace_id, step_count)
@@ -401,7 +409,14 @@ def planner_node(state: dict) -> dict:
     system_prompt = build_planner_system_prompt(current_visible_tools)
 
     try:
-        raw = call_llm(system_prompt, user_prompt)
+        if remaining_seconds is not None and remaining_seconds < LLM_TIMEOUT:
+            raw = call_llm(
+                system_prompt,
+                user_prompt,
+                timeout_seconds=remaining_seconds,
+            )
+        else:
+            raw = call_llm(system_prompt, user_prompt)
     except LLMProviderError as exc:
         # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
         # 不引入 timeout/5xx 应用层 retry。
@@ -422,37 +437,13 @@ def planner_node(state: dict) -> dict:
             'provider_error',
         )
 
-    # 偶发空响应恢复：None / 空字符串 / 纯空白属于 Provider 偶发问题，
-    # 在同一次 Planner 决策内部重试 1 次；非空但 JSON 非法不重试，走 invalid_decision。
-    # Model Reliability P0：仅在空响应时重试，不针对 timeout/5xx。
     if raw is None or not str(raw).strip():
-        logger.warning('[%s] planner LLM 首次返回空响应，进行 1 次内部重试', trace_id)
-        try:
-            raw = call_llm(system_prompt, user_prompt)
-        except LLMProviderError as exc:
-            logger.error(
-                '[%s] planner LLM 重试 Provider 错误: code=%s message=%s',
-                trace_id, exc.code, exc,
-            )
-            return _decision_result(
-                state,
-                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
-                'provider_error',
-            )
-        except Exception:
-            logger.exception('[%s] planner LLM 重试调用失败', trace_id)
-            return _decision_result(
-                state,
-                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
-                'provider_error',
-            )
-        if raw is None or not str(raw).strip():
-            logger.warning('[%s] planner LLM 重试后仍返回空响应', trace_id)
-            return _decision_result(
-                state,
-                _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
-                'invalid_decision',
-            )
+        logger.warning('[%s] planner LLM 返回空响应', trace_id)
+        return _decision_result(
+            state,
+            _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
+            'invalid_decision',
+        )
 
     try:
         decision = PlannerDecision.model_validate(json.loads(raw))

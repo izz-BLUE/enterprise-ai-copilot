@@ -26,7 +26,6 @@ from app.agent_real_eval.cases import (
     observation_injection_prompt,
 )
 
-
 # 将被 patch 替换的两个 Tool 名称（与 Planner 决策 schema 对齐）
 RAG_TOOL = 'rag_answer_tool'
 EVAL_TOOL = 'eval_report_tool'

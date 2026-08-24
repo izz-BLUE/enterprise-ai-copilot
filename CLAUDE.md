@@ -56,6 +56,13 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d
   /api/agent/actions/{id}/confirm → Business Action 确认
 ```
 
+### Phoenix 可观测性
+
+- `PHOENIX_TRACING=false` 为默认值；Phoenix 是可选旁路，不改变 Java → Python API 契约。
+- 启用时统一使用 OpenTelemetry/OpenInference 自动插桩与 BatchSpanProcessor；初始化、导出和关闭失败不得阻断业务。
+- 默认不采集 Prompt、用户输入、检索正文和模型输出；`business_trace_id` 只做 Trace 关联，不参与身份、权限或业务决策。
+- Phoenix 不替代仓库内 deterministic retrieval/generation/agent eval；自托管控制台通过 Compose `observability` profile 按需启动。
+
 ### Python Agent 状态图（LangGraph）
 
 main 同时保留两套互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：

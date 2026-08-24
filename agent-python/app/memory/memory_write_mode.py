@@ -1,8 +1,8 @@
 """memory_write_mode.py —— Memory Write Execution Mode（Phase 4E）
 
 职责：
-  控制 Memory Write Path 是否实际写入持久化层（Disabled / Audit only / Real write）。
-  在生产启用 Memory Write 前，应先以 AUDIT_ONLY 模式观察 Pipeline 触发率与
+  控制 Memory Write Path 是否实际向 Java 返回提案（Disabled / Audit only / Enabled）。
+  在生产启用 Memory Proposal 前，应先以 AUDIT_ONLY 模式观察 Pipeline 触发率与
   提案质量，确认无误触发 / 数据合规后再切到 ENABLED。
 
 边界与不变量：
@@ -18,7 +18,7 @@
      如需切换，请重新构造 Hook 整体。
 
 非职责（明确不做）：
-  - 不修改 Pipeline / Dispatcher / JavaMemoryClient / Java Endpoint；
+  - 不修改 Pipeline / Dispatcher / Java 持久化实现；
   - 不修改 LangGraph / AgentState / Planner / Tool Executor；
   - 不读环境变量 / config 文件；
   - 不修改 MemoryProposal / MemoryWriteCommand 字段。
@@ -31,7 +31,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.memory.memory_write_policy import MemoryWriteCommand
-
 
 # ---------------------------------------------------------------------------
 # Mode enum

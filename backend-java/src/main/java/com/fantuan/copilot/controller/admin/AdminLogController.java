@@ -1,7 +1,6 @@
 package com.fantuan.copilot.controller.admin;
 
 import com.fantuan.copilot.adminlog.AdminLogBuffer;
-import com.fantuan.copilot.adminlog.AdminLogEvent;
 import com.fantuan.copilot.dto.auth.AuthErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.CacheControl;
@@ -12,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,13 +34,17 @@ public class AdminLogController {
             @RequestParam(required = false) String level,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String traceId,
-            @RequestParam(required = false) Integer limit) {
-        List<AdminLogEvent> items = buffer.snapshot(level, category, traceId, limit);
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) Integer offset) {
+        AdminLogBuffer.Page page = buffer.snapshotPage(level, category, traceId, limit, offset);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(Map.of(
-                        "items", items,
-                        "count", items.size()));
+                        "items", page.items(),
+                        "count", page.items().size(),
+                        "total", page.total(),
+                        "offset", page.offset(),
+                        "hasMore", page.hasMore()));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

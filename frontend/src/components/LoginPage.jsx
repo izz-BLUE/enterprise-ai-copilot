@@ -3,7 +3,8 @@ import { login } from '../services/authApi'
 import './LoginPage.css'
 
 export default function LoginPage({ onLogin }) {
-  const [username, setUsername] = useState('zhangsan')
+  const demoAuthEnabled = import.meta.env.DEV || import.meta.env.VITE_DEMO_AUTH_ENABLED === 'true'
+  const [username, setUsername] = useState(demoAuthEnabled ? 'zhangsan' : '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -52,7 +53,9 @@ export default function LoginPage({ onLogin }) {
             disabled={loading}
           />
 
-          <p className="login-demo-hint">演示账号：张三（普通员工）</p>
+          {demoAuthEnabled && (
+            <p className="login-demo-hint">演示账号：张三（普通员工）</p>
+          )}
           {error && <p className="login-error" role="alert">{error}</p>}
 
           <button type="submit" className="login-submit" disabled={loading || !username.trim() || !password}>

@@ -39,6 +39,21 @@ class ChatResponse(BaseModel):
     model: str
     traceId: str
     success: bool
+    sources: list[str] = Field(default_factory=list)
+
+
+class AgentMemoryProposal(BaseModel):
+    """Python → Java 的非权威任务记忆提案。
+
+    owner、conversationId 与生命周期状态均不属于该契约：Java 使用当前已认证
+    请求上下文决定 owner，并固定按 UPSERT + ACTIVE 持久化。
+    """
+
+    model_config = ConfigDict(extra='forbid')
+
+    task_type: str = Field(default='GENERIC', max_length=64)
+    task_state: dict[str, Any] = Field(default_factory=dict)
+    summary: str = Field(default='', max_length=500)
 
 
 class AgentResponse(BaseModel):
@@ -52,3 +67,4 @@ class AgentResponse(BaseModel):
     traceId: str = ""
     action_proposal: AnnualLeaveActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
+    memory_proposal: AgentMemoryProposal | None = None

@@ -5,14 +5,11 @@
 正常：
   1. NONE proposal → None（不产生 command）
   2. UPSERT proposal（task_state 含业务字段）→ 完整 command
-  3. COMPLETE proposal（默认填齐 status=COMPLETED）
-  4. ABANDON proposal（默认填齐 status=ABANDONED）
 
 边界 / 安全：
-  5. UPSERT 缺 status 抛错
-  6. UPSERT 缺 task_state 抛错
-  7. COMPLETE 携带 status=ACTIVE 抛错（语义不一致）
-  8. ABANDON 携带 status=COMPLETED 抛错
+  3. UPSERT 缺 status 抛错
+  4. UPSERT 缺 task_state 抛错
+  5. COMPLETE / ABANDON 与任何终态 status 均被拒绝
   9. task_state 内顶层 trusted 字段被剥离（employee_id / user_id 等）
  10. task_state 嵌套 dict 内 trusted 字段递归剥离
  11. task_state list 内 dict 同样递归剥离
@@ -27,7 +24,6 @@
  18. Command 的 action 不含 NONE（None 已在 policy 层处理）
  19. Command extra='forbid'（额外字段拒绝）
  20. Policy 默认 task_type=GENERIC 当 proposal 未提供
- 21. Policy 默认 task_state={} 当 proposal 未提供且非 UPSERT
 """
 
 import pytest
@@ -70,31 +66,6 @@ class TestHappyPath:
         assert cmd.task_state == {'waiting_for': 'date'}
         assert cmd.summary == '等待用户补充请假日期'
 
-    def test_complete_proposal_default_status(self, policy):
-        """COMPLETE 不带 status 时 policy 默认填 COMPLETED。"""
-        proposal = MemoryProposal(action='COMPLETE')
-        cmd = policy.evaluate(proposal)
-        assert cmd is not None
-        assert cmd.action == 'COMPLETE'
-        assert cmd.status == 'COMPLETED'
-        # 其他字段填默认值
-        assert cmd.task_type == 'GENERIC'
-        assert cmd.task_state == {}
-        assert cmd.summary == ''
-
-    def test_complete_proposal_explicit_status_matches(self, policy):
-        proposal = MemoryProposal(action='COMPLETE', status='COMPLETED', summary='done')
-        cmd = policy.evaluate(proposal)
-        assert cmd.action == 'COMPLETE'
-        assert cmd.status == 'COMPLETED'
-        assert cmd.summary == 'done'
-
-    def test_abandon_proposal_default_status(self, policy):
-        proposal = MemoryProposal(action='ABANDON')
-        cmd = policy.evaluate(proposal)
-        assert cmd.action == 'ABANDON'
-        assert cmd.status == 'ABANDONED'
-
     def test_default_task_type_is_generic(self, policy):
         """UPSERT 但未提供 task_type 时使用默认 GENERIC。"""
         proposal = MemoryProposal(
@@ -106,22 +77,31 @@ class TestHappyPath:
         assert cmd.task_type == 'GENERIC'
 
 
-# ---------- 业务动作链路终态拦截（allow_terminal_actions=False）----------
+# ---------- Python 终态拦截 ----------
 
 class TestTerminalActionGuard:
-    """业务动作链路（Pipeline 传 allow_terminal_actions=False）下，Python 侧
-    COMPLETE / ABANDON 终态命令被程序级拒绝 —— 终态只能由 Java PendingAction
-    生命周期收口。UPSERT + ACTIVE 上下文更新不受影响。"""
+    """Python 侧任何终态表达都被程序级拒绝。"""
 
     def test_business_action_complete_rejected(self, policy):
         proposal = MemoryProposal(action='COMPLETE', status='COMPLETED')
         with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
-            policy.evaluate(proposal, allow_terminal_actions=False)
+            policy.evaluate(proposal)
 
     def test_business_action_abandon_rejected(self, policy):
         proposal = MemoryProposal(action='ABANDON', status='ABANDONED')
         with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
-            policy.evaluate(proposal, allow_terminal_actions=False)
+            policy.evaluate(proposal)
+
+    @pytest.mark.parametrize('status', ['COMPLETED', 'ABANDONED'])
+    def test_upsert_with_terminal_status_rejected(self, policy, status):
+        proposal = MemoryProposal(
+            action='UPSERT',
+            task_type='LEAVE_REQUEST',
+            status=status,
+            task_state={'waiting_for': 'date'},
+        )
+        with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
+            policy.evaluate(proposal)
 
     def test_business_action_upsert_allowed(self, policy):
         proposal = MemoryProposal(
@@ -131,19 +111,10 @@ class TestTerminalActionGuard:
             task_state={'waiting_for': 'date'},
             summary='等待补充日期',
         )
-        cmd = policy.evaluate(proposal, allow_terminal_actions=False)
+        cmd = policy.evaluate(proposal)
         assert cmd is not None
         assert cmd.action == 'UPSERT'
         assert cmd.status == 'ACTIVE'
-
-    def test_default_allow_terminal_actions_true_keeps_complete(self, policy):
-        """默认（非业务链路调用方）仍允许 COMPLETE / ABANDON，兼容既有行为。"""
-        cmd = policy.evaluate(MemoryProposal(action='COMPLETE', status='COMPLETED'))
-        assert cmd is not None
-        assert cmd.action == 'COMPLETE'
-        cmd = policy.evaluate(MemoryProposal(action='ABANDON', status='ABANDONED'))
-        assert cmd is not None
-        assert cmd.action == 'ABANDON'
 
 
 # ---------- 边界 / 拒绝 ----------
@@ -169,12 +140,12 @@ class TestValidation:
 
     def test_complete_with_wrong_status_rejected(self, policy):
         proposal = MemoryProposal(action='COMPLETE', status='ACTIVE')
-        with pytest.raises(ValueError, match='status=ACTIVE 不匹配'):
+        with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
             policy.evaluate(proposal)
 
     def test_abandon_with_wrong_status_rejected(self, policy):
         proposal = MemoryProposal(action='ABANDON', status='COMPLETED')
-        with pytest.raises(ValueError, match='status=COMPLETED 不匹配'):
+        with pytest.raises(MemoryTerminalActionNotAllowed, match='终态'):
             policy.evaluate(proposal)
 
     def test_task_state_oversize_rejected(self, policy):

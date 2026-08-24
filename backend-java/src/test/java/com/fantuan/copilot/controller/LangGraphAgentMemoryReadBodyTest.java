@@ -10,12 +10,12 @@ import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.InternalAgentChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
+import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
-import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
 import com.fantuan.copilot.identity.IdentityContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -27,7 +27,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
@@ -80,18 +79,19 @@ class LangGraphAgentMemoryReadBodyTest {
         actionService = mock(BusinessActionService.class);
         memoryService = mock(AiTaskMemoryService.class);
         identities = mock(DemoIdentityService.class);
-        controller = new LangGraphAgentController(restTemplate, bulkhead, admin, actionService,
+        controller = new LangGraphAgentController(
+                new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
+                admin, actionService,
                 new IdentityContext(identities), memoryService,
-                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
                 new AdminLogBuffer());
-        ReflectionTestUtils.setField(controller, "agentBaseUrl", "http://python-agent");
 
         when(admin.isAdmin(any())).thenReturn(false);
         when(actionService.isAllowed(any())).thenReturn(false);
         when(actionService.businessDate()).thenReturn(java.time.LocalDate.of(2026, 8, 20));
 
         PythonAgentResponse python = new PythonAgentResponse(
-                "answer", "rag", true, "normal", "", List.of(), true, "py-trace", null, List.of());
+                "answer", "rag", true, "normal", "", List.of(), true, "py-trace", null,
+                List.of(), null);
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
     }

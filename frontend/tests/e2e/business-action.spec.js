@@ -107,7 +107,7 @@ test('展示完整年假草稿且敏感确认数据不进入 DOM', async ({ page
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
 
-test('Agent请求携带Bearer身份且不发送Demo身份Header', async ({ page }) => {
+test('Agent请求使用HttpOnly Cookie会话且不发送Demo身份Header', async ({ page }) => {
   let captured
   await page.route('**/api/agent/langgraph/chat', async route => {
     captured = {
@@ -123,7 +123,8 @@ test('Agent请求携带Bearer身份且不发送Demo身份Header', async ({ page 
   await page.goto('/')
   await askForLeave(page)
 
-  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers.authorization).toBeUndefined()
+  expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.body).toEqual({ message: '请帮我申请年假' })
   expect(captured.body.userId).toBeUndefined()
@@ -153,7 +154,8 @@ test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page 
   await expect(page.getByText('申请编号：LR-202607-0001')).toBeVisible()
   expect(new URL(captured.url).pathname).toBe(`/api/agent/actions/${TEST_ACTION_ID}/confirm`)
   expect(captured.headers['x-admin-token']).toBe('test-only')
-  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers.authorization).toBeUndefined()
+  expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -264,7 +266,8 @@ test('Cancel 不发送 Idempotency-Key 且成功后隐藏操作按钮', async ({
   await expect(page.getByText('申请草稿已取消')).toBeVisible()
   await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
   expect(captured.headers['x-admin-token']).toBe('test-only')
-  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers.authorization).toBeUndefined()
+  expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toBeUndefined()
   expect(captured.body).toEqual({ confirmationNonce: TEST_NONCE })
@@ -307,7 +310,7 @@ test('Confirm收到401后清理登录态与待确认敏感状态', async ({ page
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
 
-test('标准RAG携带Bearer身份且不发送Demo身份Header', async ({ page }) => {
+test('标准RAG使用HttpOnly Cookie会话且不发送Demo身份Header', async ({ page }) => {
   let captured
   await page.route('**/api/chat', async route => {
     captured = {
@@ -328,7 +331,8 @@ test('标准RAG携带Bearer身份且不发送Demo身份Header', async ({ page })
   await input.press('Enter')
 
   await expect(page.getByText('标准问答', { exact: true }).last()).toBeVisible()
-  expect(captured.headers.authorization).toBe('Bearer test-token')
+  expect(captured.headers.authorization).toBeUndefined()
+  expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.body).toEqual({ message: '几点上班？' })

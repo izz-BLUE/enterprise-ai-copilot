@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -24,7 +24,7 @@ class VersionControllerTest {
 
     // WebMvcTest 切片会实例化 Filter 实现（TraceIdFilter），其构造依赖
     // AdminLogBuffer（@Component 不在切片内），此处用 mock 补齐依赖。
-    @MockBean
+    @MockitoBean
     private AdminLogBuffer adminLogBuffer;
 
     @Autowired

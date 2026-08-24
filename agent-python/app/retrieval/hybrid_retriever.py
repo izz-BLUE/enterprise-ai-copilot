@@ -7,8 +7,7 @@ Hybrid Retriever — 支持 vector / hybrid / hybrid_rerank 三种模式。
 """
 
 from app.core.config import RERANK_CANDIDATE_K, logger
-from app.retrieval import faiss_retriever, keyword_retriever, bm25_retriever
-from app.retrieval import cross_encoder_reranker
+from app.retrieval import bm25_retriever, cross_encoder_reranker, faiss_retriever, keyword_retriever
 from app.retrieval.retrieval_gate import CandidateSignals
 
 # RRF 常数

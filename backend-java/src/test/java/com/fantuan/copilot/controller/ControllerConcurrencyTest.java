@@ -5,14 +5,14 @@ import com.fantuan.copilot.concurrency.PythonAgentBulkhead;
 import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.ChatResponse;
+import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoRole;
-import com.fantuan.copilot.service.memory.MemoryWriteScopeService;
-import com.fantuan.copilot.service.memory.NoopAiTaskMemoryService;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -35,7 +35,8 @@ class ControllerConcurrencyTest {
         assertNotNull(held);
 
         HttpServletRequest servletRequest = requestWithTraceId("trace-standard");
-        ChatController controller = new ChatController(mock(RestTemplate.class), bulkhead);
+        ChatController controller = new ChatController(new PythonAgentGateway(
+                mock(RestTemplate.class), bulkhead, "http://python-agent"));
         ResponseEntity<ChatResponse> response = controller.chat(
                 new ChatRequest("几点上班？"), servletRequest);
 
@@ -54,11 +55,13 @@ class ControllerConcurrencyTest {
         assertNotNull(held);
 
         HttpServletRequest servletRequest = requestWithTraceId("trace-agent");
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        when(actionService.businessDate()).thenReturn(java.time.LocalDate.of(2026, 8, 24));
         LangGraphAgentController controller = new LangGraphAgentController(
-                mock(RestTemplate.class), bulkhead, mock(AdminAccessService.class),
-                mock(BusinessActionService.class), new IdentityContext(identitiesWithDemoUser()),
-                new NoopAiTaskMemoryService(),
-                new MemoryWriteScopeService("", java.time.Clock.systemUTC()),
+                new PythonAgentGateway(mock(RestTemplate.class), bulkhead, "http://python-agent"),
+                mock(AdminAccessService.class),
+                actionService, new IdentityContext(identitiesWithDemoUser()),
+                mock(AiTaskMemoryService.class),
                 new AdminLogBuffer());
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
                 new ChatRequest("几点上班？"), requestWithDemoIdentity(servletRequest));

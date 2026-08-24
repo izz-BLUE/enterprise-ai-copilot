@@ -7,7 +7,7 @@ import com.fantuan.copilot.security.SecurityErrorHandlers;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -56,13 +56,13 @@ class AdminLogSecurityWebMvcTest {
     @Autowired AdminLogBuffer adminLogBuffer;
 
     // SecurityConfig 装配的真实依赖；mock 它们以避免完整 bean 启动。
-    @MockBean JwtEncoder jwtEncoder;
-    @MockBean com.fantuan.copilot.auth.AppUserDetailsService appUserDetailsService;
-    @MockBean com.fantuan.copilot.service.demo.DemoIdentityService demoIdentityService;
+    @MockitoBean JwtEncoder jwtEncoder;
+    @MockitoBean com.fantuan.copilot.auth.AppUserDetailsService appUserDetailsService;
+    @MockitoBean com.fantuan.copilot.service.demo.DemoIdentityService demoIdentityService;
 
     // 用 mock JwtDecoder 把任意 Bearer token 翻译成带 role claim 的 Jwt。
     // JwtPrincipalConverter 会把 role claim → ROLE_<role>，从而被 hasRole("ADMIN") 接受。
-    @MockBean JwtDecoder jwtDecoder;
+    @MockitoBean JwtDecoder jwtDecoder;
 
     private RequestPostProcessor bearer(String role) {
         // 任意 token 字符串都会被 mock JwtDecoder 解析为同一份 Jwt

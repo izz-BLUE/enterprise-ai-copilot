@@ -38,7 +38,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ---- 枚举 ----
 
 # MemoryProposal.action：提议行为

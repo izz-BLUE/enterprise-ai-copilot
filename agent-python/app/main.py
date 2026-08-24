@@ -1,9 +1,8 @@
 import os
 import uuid
+from contextlib import asynccontextmanager, nullcontext
 from datetime import date
-from typing import Any
 
-import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -11,26 +10,48 @@ from app.agents.langgraph_agent import run_langgraph_agent
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import (
     AGENT_LOOP_ENABLED,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
-    JAVA_BASE_URL,
-    JAVA_INTERNAL_TOKEN,
-    JAVA_TIMEOUT_SECONDS,
-    MEMORY_WRITE_MODE,
     MAX_MESSAGE_LENGTH,
+    MEMORY_WRITE_MODE,
     logger,
 )
-from app.clients.java_memory_client import JavaMemoryClient
+from app.core.observability import (
+    initialize_observability,
+    record_ai_response,
+    shutdown_observability,
+    trace_ai_request,
+)
 from app.memory.memory_llm_adapter import MemoryLLMAdapter
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
 from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
 from app.memory.memory_write_mode import make_execution_policy
-from app.schemas.chat_schema import AgentResponse, ChatRequest, ChatResponse
+from app.memory.memory_write_policy import MemoryWriteCommand
+from app.retrieval.chunk_store import chunk_store_status
+from app.retrieval.faiss_retriever import faiss_status
+from app.schemas.chat_schema import (
+    AgentMemoryProposal,
+    AgentResponse,
+    ChatRequest,
+    ChatResponse,
+)
 from app.schemas.version_schema import VersionResponse
 from app.services.llm_service import call_llm
 from app.services.rag_service import process_chat
 
-app = FastAPI(title='Agent Python Service')
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_observability()
+    try:
+        yield
+    finally:
+        shutdown_observability()
+
+
+app = FastAPI(title='Agent Python Service', lifespan=lifespan)
 
 _BOUNDED_AI_PATHS = {'/agent/chat', '/agent/langgraph/chat'}
 
@@ -38,69 +59,39 @@ _BOUNDED_AI_PATHS = {'/agent/chat', '/agent/langgraph/chat'}
 _memory_execution_policy = make_execution_policy(MEMORY_WRITE_MODE)
 
 
-class _JavaMemoryHttpClient:
-    """为 JavaMemoryClient 注入固定超时的最小 HTTP 适配器。"""
+class _ResponseMemoryWriter:
+    """收集 policy-approved command，随 Agent 响应返回给 Java。
 
-    def __init__(self, timeout_seconds: int) -> None:
-        self._timeout = httpx.Timeout(timeout_seconds, connect=timeout_seconds)
+    该 writer 不接触 HTTP、身份或数据库。Java 收到提案后使用当前请求的
+    VerifiedIdentity 与 conversationId 决定真实持久化作用域。
+    """
 
-    def post(
-        self,
-        url: str,
-        json: dict[str, Any],  # noqa: A002
-        headers: dict[str, str] | None = None,
-    ) -> httpx.Response:
-        return httpx.post(url, json=json, headers=headers, timeout=self._timeout)
+    def __init__(self) -> None:
+        self.command: MemoryWriteCommand | None = None
 
-
-def _unavailable_memory_writer(command: Any) -> None:
-    """ENABLED 缺少 Java scope/config 时的 fail-closed writer。"""
-    raise RuntimeError('Memory Java writer 配置或 trusted scope 不完整')
+    def __call__(self, command: MemoryWriteCommand) -> None:
+        if command.action != 'UPSERT' or command.status != 'ACTIVE':
+            raise RuntimeError('Memory response 只允许 UPSERT + ACTIVE')
+        self.command = command
 
 
 def _build_memory_runtime_hook(
-    *,
-    conversation_id: str,
-    scope_token: str,
-    trace_id: str,
-) -> MemoryRuntimeHook | None:
-    """按请求组装真实 Memory Pipeline 与 Java writer。
-
-    scope_token 来自 Java 已验证请求的内部 header；Python 不解析、不生成、不改写
-    user_id。DISABLED 在调用本函数前由 endpoint 短路，保证零额外 Extractor 成本。
-    """
+    *, trace_id: str,
+) -> tuple[MemoryRuntimeHook, _ResponseMemoryWriter] | None:
+    """按请求组装 Memory Pipeline 与响应内提案 writer。"""
     if _memory_execution_policy.mode == 'DISABLED':
         return None
 
     pipeline = MemoryPipeline(llm_callable=MemoryLLMAdapter(call_llm))
-    if (
-        _memory_execution_policy.mode == 'ENABLED'
-        and JAVA_BASE_URL
-        and JAVA_INTERNAL_TOKEN
-        and conversation_id
-        and scope_token
-    ):
-        writer = JavaMemoryClient(
-            http_client=_JavaMemoryHttpClient(JAVA_TIMEOUT_SECONDS),
-            base_url=JAVA_BASE_URL,
-            conversation_id=conversation_id,
-            internal_token=JAVA_INTERNAL_TOKEN,
-            scope_token=scope_token,
-            trace_id=trace_id,
-        )
-        dispatcher = MemoryWriteDispatcher(writer=writer)
-    elif _memory_execution_policy.mode == 'ENABLED':
-        # 不把 Dispatcher 的无 writer noop 当成“写入成功”。
-        dispatcher = MemoryWriteDispatcher(writer=_unavailable_memory_writer)
-    else:
-        # AUDIT_ONLY 不需要任何 Java writer，也不会产生 HTTP 请求。
-        dispatcher = MemoryWriteDispatcher()
-
-    return MemoryRuntimeHook(
+    writer = _ResponseMemoryWriter()
+    dispatcher = MemoryWriteDispatcher(writer=writer)
+    hook = MemoryRuntimeHook(
         pipeline=pipeline,
         dispatcher=dispatcher,
         write_execution_policy=_memory_execution_policy,
     )
+    logger.debug('[%s] Memory response pipeline 已组装', trace_id)
+    return hook, writer
 
 
 def _busy_response(path: str, trace_id: str) -> JSONResponse:
@@ -134,22 +125,36 @@ async def trace_id_middleware(request: Request, call_next):
         trace_id = str(uuid.uuid4())
     request.state.trace_id = trace_id
 
-    acquired = False
-    if request.method == 'POST' and request.url.path in _BOUNDED_AI_PATHS:
+    is_ai_request = request.method == 'POST' and request.url.path in _BOUNDED_AI_PATHS
+    trace_context = trace_ai_request(
+        method=request.method,
+        path=request.url.path,
+        business_trace_id=trace_id,
+    ) if is_ai_request else nullcontext(None)
+    with trace_context as span:
+        acquired = False
+        if is_ai_request:
+            try:
+                request.state.queue_wait_ms = await ai_request_limiter.acquire(trace_id)
+                acquired = True
+            except ConcurrencyLimitExceeded:
+                response = _busy_response(request.url.path, trace_id)
+                record_ai_response(span, status_code=429, queue_wait_ms=None)
+                return response
+
         try:
-            request.state.queue_wait_ms = await ai_request_limiter.acquire(trace_id)
-            acquired = True
-        except ConcurrencyLimitExceeded:
-            return _busy_response(request.url.path, trace_id)
+            response: Response = await call_next(request)
+        finally:
+            if acquired:
+                ai_request_limiter.release(trace_id)
 
-    try:
-        response: Response = await call_next(request)
-    finally:
-        if acquired:
-            ai_request_limiter.release(trace_id)
-
-    response.headers['X-Trace-Id'] = trace_id
-    return response
+        response.headers['X-Trace-Id'] = trace_id
+        record_ai_response(
+            span,
+            status_code=response.status_code,
+            queue_wait_ms=getattr(request.state, 'queue_wait_ms', None),
+        )
+        return response
 
 
 @app.get('/agent/health')
@@ -159,6 +164,26 @@ def health():
         'status': 'UP',
         'concurrency': ai_request_limiter.snapshot(),
     }
+
+
+@app.get('/agent/ready')
+def readiness() -> Response:
+    provider_ready = bool(DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL and DEEPSEEK_MODEL)
+    chunks = chunk_store_status()
+    vector = faiss_status()
+    checks = {
+        'provider_config': {'ready': provider_ready},
+        'chunks': chunks,
+        'faiss': vector,
+    }
+    ready = provider_ready and bool(chunks['ready']) and bool(vector['ready'])
+    payload = {
+        'service': 'agent-python',
+        'status': 'READY' if ready else 'NOT_READY',
+        'checks': checks,
+        'concurrency': ai_request_limiter.snapshot(),
+    }
+    return JSONResponse(status_code=200 if ready else 503, content=payload)
 
 
 @app.get('/agent/version', response_model=VersionResponse)
@@ -191,33 +216,37 @@ def _memory_context_to_dict(memory_context) -> dict | None:
     return data
 
 
-@app.post('/agent/chat')
-def chat(request: ChatRequest, req: Request) -> ChatResponse:
+@app.post('/agent/chat', response_model=ChatResponse)
+def chat(request: ChatRequest, req: Request) -> ChatResponse | JSONResponse:
     trace_id = req.state.trace_id
     logger.info('[%s] 收到普通 RAG 请求 (len=%d)', trace_id, len(request.message))
 
     if _validate_message_length(request.message, trace_id):
         logger.warning('[%s] 输入过长 (len=%d > %d)', trace_id,
                        len(request.message), MAX_MESSAGE_LENGTH)
-        return ChatResponse(
+        response = ChatResponse(
             answer='输入内容过长，请精简后重试。',
             model=DEEPSEEK_MODEL,
             traceId=trace_id,
             success=False,
         )
+        return JSONResponse(status_code=422, content=response.model_dump(mode='json'))
 
-    return process_chat(request.message, trace_id=trace_id)
+    response = process_chat(request.message, trace_id=trace_id)
+    if not response.success:
+        return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+    return response
 
 
-@app.post('/agent/langgraph/chat')
-def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
+@app.post('/agent/langgraph/chat', response_model=AgentResponse)
+def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONResponse:
     trace_id = req.state.trace_id
     logger.info('[%s] 收到 LangGraph Agent 请求 (len=%d)', trace_id, len(request.message))
 
     if _validate_message_length(request.message, trace_id):
         logger.warning('[%s] 输入过长 (len=%d > %d)', trace_id,
                        len(request.message), MAX_MESSAGE_LENGTH)
-        return AgentResponse(
+        response = AgentResponse(
             answer='输入内容过长，请精简后重试。',
             route='error',
             safe=True,
@@ -227,6 +256,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             success=False,
             traceId=trace_id,
         )
+        return JSONResponse(status_code=422, content=response.model_dump(mode='json'))
 
     allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
     allow_business_actions = (
@@ -263,18 +293,24 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             memory_context=memory_context,
         )
 
-        # Memory 写入是出口层旁路；任何 Pipeline / Java 失败都不得阻断主响应。
+        # Memory 提案是出口层旁路；任何 Pipeline 失败都不得阻断主响应。
+        # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
         conversation_id = req.headers.get('x-conversation-id', '')
+        memory_proposal = None
         if _memory_execution_policy.mode != 'DISABLED':
-            memory_hook = _build_memory_runtime_hook(
-                conversation_id=conversation_id,
-                scope_token=req.headers.get('x-memory-write-scope', ''),
-                trace_id=trace_id,
-            )
-            if memory_hook is not None:
-                memory_hook.after_agent_response(result, conversation_id)
+            runtime = _build_memory_runtime_hook(trace_id=trace_id)
+            if runtime is not None:
+                memory_hook, response_writer = runtime
+                runtime_result = memory_hook.after_agent_response(result, conversation_id)
+                if runtime_result.written and response_writer.command is not None:
+                    command = response_writer.command
+                    memory_proposal = AgentMemoryProposal(
+                        task_type=command.task_type,
+                        task_state=command.task_state,
+                        summary=command.summary,
+                    )
 
-        return AgentResponse(
+        response = AgentResponse(
             answer=result.get('answer', ''),
             route=result.get('route', ''),
             safe=result.get('safe', True),
@@ -285,10 +321,14 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             traceId=trace_id,
             action_proposal=result.get('action_proposal'),
             missing_fields=result.get('missing_fields', []),
+            memory_proposal=memory_proposal,
         )
+        if not response.success:
+            return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+        return response
     except Exception:
         logger.exception('[%s] LangGraph Agent 异常', trace_id)
-        return AgentResponse(
+        response = AgentResponse(
             answer='当前 Agent 服务暂时不可用，请稍后重试。',
             route='error',
             safe=True,
@@ -298,3 +338,4 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse:
             success=False,
             traceId=trace_id,
         )
+        return JSONResponse(status_code=502, content=response.model_dump(mode='json'))

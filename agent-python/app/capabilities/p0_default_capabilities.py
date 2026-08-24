@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from app.capabilities.memory_capability import MemoryCapability
 
-
 # ---------------------------------------------------------------------------
 # P0 capability 声明样例
 # ---------------------------------------------------------------------------

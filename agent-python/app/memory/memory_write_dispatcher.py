@@ -1,8 +1,8 @@
 """memory_write_dispatcher.py —— Memory Write Path 写入边界层（Phase 3F）
 
 职责：
-  将 MemoryWriteCommand 路由到具体的 Writer 客户端（Java HTTP / 持久化 /
-  测试桩）。Dispatcher 是"Command → 实际写入"之间唯一合法的边界层。
+  将 MemoryWriteCommand 路由到具体的 Writer（响应提案收集器 / 持久化 /
+  测试桩）。Dispatcher 是"Command → 输出边界"之间唯一合法的边界层。
 
 边界与不变式：
   1. 只做"分发"，不做"加工"：
@@ -32,7 +32,6 @@ import logging
 from typing import Any, Callable, Union
 
 from app.memory.memory_write_policy import MemoryWriteCommand
-
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +94,7 @@ class MemoryWriteDispatcher:
             )
 
         if self._call is None:
-            # 测试 / AUDIT_ONLY 兼容路径：未注入 writer 不产生 HTTP 副作用。
-            # ENABLED 的 main.py 会显式注入 JavaMemoryClient；配置缺失时注入 fail-closed writer。
+            # 测试 / AUDIT_ONLY 兼容路径：未注入 writer 不产生副作用。
             logger.info(
                 'MemoryWriteDispatcher: 未注入 writer，跳过 dispatch（command=%s）',
                 command.action,

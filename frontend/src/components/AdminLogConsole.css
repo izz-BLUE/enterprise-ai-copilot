@@ -2,9 +2,11 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-lg);
-  gap: var(--space-md);
+  min-width: 0;
+  padding: var(--space-xl);
+  gap: var(--space-lg);
   overflow: auto;
+  background: var(--color-bg);
 }
 
 .admin-log-header {
@@ -16,24 +18,49 @@
 
 .admin-log-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.admin-log-subtitle {
+  margin: 3px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .admin-log-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-sm);
+}
+
+.admin-log-count {
+  margin-right: var(--space-xs);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .admin-log-refresh,
 .admin-log-back {
+  padding: 7px 12px;
   border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.admin-log-refresh:hover:not(:disabled),
+.admin-log-back:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .admin-log-refresh:disabled {
@@ -43,81 +70,168 @@
 
 .admin-log-filters {
   display: flex;
-  gap: var(--space-md);
-  flex-wrap: wrap;
   align-items: flex-end;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  flex-wrap: wrap;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .admin-log-filter {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
+  gap: 5px;
   color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .admin-log-filter select,
 .admin-log-filter input {
-  min-width: 140px;
-  padding: 6px 8px;
+  min-width: 160px;
+  padding: 8px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 13px;
+  font-weight: 400;
+  outline: none;
+}
+
+.admin-log-filter input {
+  min-width: 240px;
+}
+
+.admin-log-filter select:focus,
+.admin-log-filter input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
 .admin-log-error {
-  color: var(--color-danger, #c0392b);
-  background: rgba(192, 57, 43, 0.08);
-  border: 1px solid rgba(192, 57, 43, 0.3);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
   margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-size: 13px;
 }
 
 .admin-log-empty {
+  margin: 0;
+  padding: var(--space-xl);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-size: 13px;
-  margin: 0;
+  text-align: center;
 }
 
 .admin-log-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .admin-log-table {
   width: 100%;
+  min-width: 980px;
   border-collapse: collapse;
   font-size: 13px;
 }
 
+.admin-log-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.admin-log-pagination button {
+  padding: 6px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.admin-log-pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .admin-log-table th,
 .admin-log-table td {
-  padding: 8px 12px;
-  text-align: left;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border-light);
+  text-align: left;
   white-space: nowrap;
 }
 
 .admin-log-table thead th {
-  background: var(--color-surface-alt, rgba(0, 0, 0, 0.03));
-  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: #f1f5f9;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-log-table tbody tr {
+  transition: background 0.12s ease;
+}
+
+.admin-log-table tbody tr:hover {
+  background: var(--color-primary-light);
 }
 
 .admin-log-cell-time {
-  font-family: var(--font-mono, monospace);
   color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.admin-log-cell-category {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.admin-log-cell-event {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
 }
 
 .admin-log-cell-trace {
-  font-family: var(--font-mono, monospace);
-  color: var(--color-text-secondary);
-  max-width: 280px;
+  max-width: 220px;
   overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.admin-log-cell-message {
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--color-text-secondary);
   text-overflow: ellipsis;
 }
 
@@ -126,21 +240,21 @@
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .admin-log-level-INFO {
   background: rgba(46, 160, 67, 0.15);
-  color: #2ea043;
+  color: #15803d;
 }
 
 .admin-log-level-WARN {
   background: rgba(212, 145, 0, 0.18);
-  color: #b38600;
+  color: #a16207;
 }
 
 .admin-log-level-ERROR {
   background: rgba(192, 57, 43, 0.18);
-  color: #c0392b;
+  color: #b91c1c;
 }

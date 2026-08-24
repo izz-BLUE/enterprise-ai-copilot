@@ -41,13 +41,16 @@ Java 和 Python 的健康接口都暴露不含敏感信息的并发快照：`max
 | `PYTHON_AGENT_ACQUIRE_TIMEOUT_MS` | `500` | Java 获取槽位的最长等待时间 |
 | `LLM_TIMEOUT` | `30` | Python LLM 超时，单位秒 |
 | `PYTHON_AGENT_CONNECT_TIMEOUT` | `3000` | Java 连接 Python 超时，单位毫秒 |
-| `PYTHON_AGENT_READ_TIMEOUT` | `40000` | Java 读取 Python 超时，单位毫秒 |
+| `PYTHON_AGENT_READ_TIMEOUT` | `50000` | Java 读取 Python 超时，单位毫秒；须大于 Python 整体请求截止时间 |
 
 两个并发上限应保持一致。当前默认值是针对 512 MiB Python / 512 MiB Java 的保守起点，必须用目标服务器实测后再调整。
 
 ## k6 脚本
 
 脚本位于 `load-tests/k6/`。建议固定使用已经验证过的 k6 版本，并将原始输出和 `--summary-export` JSON 一并保存到测试记录中。
+
+L2/L3 是受保护接口，必须通过 `ACCESS_TOKEN`，或同时通过
+`K6_USERNAME` / `K6_PASSWORD` 在 setup 阶段登录。不要把凭据写进脚本或提交到仓库。
 
 ```bash
 mkdir -p load-tests/results
@@ -60,6 +63,7 @@ mkdir -p load-tests/results
 ```bash
 k6 run \
   -e BASE_URL=http://127.0.0.1:8080 \
+  -e ACCESS_TOKEN="$ACCESS_TOKEN" \
   -e VUS=2 \
   -e DURATION=2m \
   --summary-export=load-tests/results/health-soak-summary.json \
@@ -73,6 +77,7 @@ k6 run \
 ```bash
 k6 run \
   -e BASE_URL=http://127.0.0.1:8080 \
+  -e ACCESS_TOKEN="$ACCESS_TOKEN" \
   -e VUS=3 \
   -e ITERATIONS=30 \
   --summary-export=load-tests/results/safety-baseline-summary.json \

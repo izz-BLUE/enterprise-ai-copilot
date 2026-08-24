@@ -7,16 +7,14 @@ import pytest
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 
 from app.schemas.action_schema import ProposalPlanningResult
-from app.services.annual_leave_input_service import AnnualLeaveInputAnalysis
 from app.services import llm_service, tool_calling_service
-
+from app.services.annual_leave_input_service import AnnualLeaveInputAnalysis
 from app.services.tool_calling_service import (
     SYSTEM_MESSAGE,
     TOOL_NAME,
     USER_MESSAGE,
     plan_annual_leave_action,
 )
-
 
 BUSINESS_DATE = date(2026, 7, 16)
 COMPLETE = "申请2026-07-20一天年假，原因为私事"

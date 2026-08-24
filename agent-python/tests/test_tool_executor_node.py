@@ -7,8 +7,6 @@
 import json
 from unittest.mock import patch
 
-import pytest
-
 from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
