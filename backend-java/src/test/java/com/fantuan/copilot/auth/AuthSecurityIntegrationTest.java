@@ -3,6 +3,8 @@ package com.fantuan.copilot.auth;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fantuan.copilot.PostgresIntegrationTestBase;
+import com.fantuan.copilot.controller.AuthController;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -104,6 +106,48 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
                 .andExpect(jsonPath("$.userId").value("U10001"))
                 .andExpect(jsonPath("$.employeeId").value("E10001"))
                 .andExpect(jsonPath("$.role").value("EMPLOYEE"));
+    }
+
+    @Test
+    void browserCookieIsHttpOnlyAndWriteRequestsRequireAjaxHeader() throws Exception {
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", "zhangsan")
+                                .put("password", TEST_PASSWORD)
+                                .toString()))
+                .andExpect(status().isOk())
+                .andReturn();
+        String setCookie = login.getResponse().getHeader("Set-Cookie");
+        assertTrue(setCookie.contains("HttpOnly"));
+        assertTrue(setCookie.contains("SameSite=Strict"));
+        Cookie cookie = login.getResponse().getCookie(AuthController.ACCESS_TOKEN_COOKIE);
+
+        mockMvc.perform(get("/api/auth/me").cookie(cookie))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value("U10001"));
+
+        mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
+                        .cookie(cookie)
+                        .header("X-Admin-Token", "required-admin-token")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"confirmationNonce\":\"nonce\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
+                        .cookie(cookie)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .header("X-Admin-Token", "required-admin-token")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"confirmationNonce\":\"nonce\"}"))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .cookie(cookie)
+                        .header("X-Requested-With", "XMLHttpRequest"))
+                .andExpect(status().isNoContent())
+                .andExpect(result -> assertTrue(
+                        result.getResponse().getHeader("Set-Cookie").contains("Max-Age=0")));
     }
 
     @Test

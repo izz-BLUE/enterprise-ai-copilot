@@ -10,7 +10,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -22,17 +21,15 @@ import java.util.List;
  */
 public class DemoIdentityFallbackAuthenticationFilter extends OncePerRequestFilter {
     private final DemoIdentityService identities;
-    private final List<AntPathRequestMatcher> matchers = List.of(
-            new AntPathRequestMatcher("/api/agent/langgraph/chat"),
-            new AntPathRequestMatcher("/api/agent/actions/**"));
-
     public DemoIdentityFallbackAuthenticationFilter(DemoIdentityService identities) {
         this.identities = identities;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return matchers.stream().noneMatch(matcher -> matcher.matches(request));
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return !path.equals("/api/agent/langgraph/chat")
+                && !path.startsWith("/api/agent/actions/");
     }
 
     @Override
