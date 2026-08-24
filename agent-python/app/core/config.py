@@ -14,9 +14,6 @@ def _load_rag_gate_settings(environ: Mapping[str, str]) -> tuple[str, float, flo
         raise ValueError(
             f'RAG_GATE_MODE={mode!r} 非法，允许值为 off|shadow|enforce'
         )
-    if mode == 'enforce':
-        raise ValueError('RAG_GATE_MODE=enforce 尚未开放；精简 V1 仅允许 off 或 shadow')
-
     try:
         vector_strong = float(environ.get('RAG_VECTOR_STRONG_THRESHOLD', '0.65'))
         vector_weak = float(environ.get('RAG_VECTOR_WEAK_THRESHOLD', '0.61'))
@@ -34,6 +31,33 @@ def _load_rag_gate_settings(environ: Mapping[str, str]) -> tuple[str, float, flo
         raise ValueError('RAG_BM25_WEAK_THRESHOLD 必须处于 [0, 1000]')
 
     return mode, vector_strong, vector_weak, bm25_weak
+
+
+def _load_phoenix_settings(
+    environ: Mapping[str, str],
+) -> tuple[bool, str, str, float, bool]:
+    """加载 Phoenix/OpenTelemetry 配置并验证采样率。"""
+    tracing = environ.get('PHOENIX_TRACING', 'false').strip().lower() == 'true'
+    endpoint = environ.get(
+        'PHOENIX_COLLECTOR_ENDPOINT', 'http://localhost:4317',
+    ).strip()
+    project_name = environ.get(
+        'PHOENIX_PROJECT_NAME', 'enterprise-ai-copilot',
+    ).strip()
+    capture_content = (
+        environ.get('PHOENIX_CAPTURE_CONTENT', 'false').strip().lower() == 'true'
+    )
+    try:
+        sample_rate = float(environ.get('PHOENIX_SAMPLE_RATE', '1.0'))
+    except ValueError as exc:
+        raise ValueError('PHOENIX_SAMPLE_RATE 必须是 [0, 1] 范围内的数字') from exc
+    if not 0.0 <= sample_rate <= 1.0:
+        raise ValueError('PHOENIX_SAMPLE_RATE 必须处于 [0, 1]')
+    if tracing and not endpoint:
+        raise ValueError('PHOENIX_TRACING=true 时 PHOENIX_COLLECTOR_ENDPOINT 不能为空')
+    if tracing and not project_name:
+        raise ValueError('PHOENIX_TRACING=true 时 PHOENIX_PROJECT_NAME 不能为空')
+    return tracing, endpoint, project_name, sample_rate, capture_content
 
 # Logger
 logger = logging.getLogger('agent')
@@ -64,15 +88,24 @@ REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
 
 # LLM Timeout (seconds)
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
+LLM_MAX_RETRIES = int(os.getenv('LLM_MAX_RETRIES', '0'))
+LLM_MAX_OUTPUT_TOKENS = int(os.getenv('LLM_MAX_OUTPUT_TOKENS', '1024'))
+if LLM_TIMEOUT < 1:
+    raise ValueError('LLM_TIMEOUT 必须大于等于 1')
+if not 0 <= LLM_MAX_RETRIES <= 2:
+    raise ValueError('LLM_MAX_RETRIES 必须处于 [0, 2]')
+if not 64 <= LLM_MAX_OUTPUT_TOKENS <= 8192:
+    raise ValueError('LLM_MAX_OUTPUT_TOKENS 必须处于 [64, 8192]')
 
-# LangSmith Observability（默认关闭）。关闭时零侵入、行为与不接入完全一致；
-# 开启后 LangGraph / LangChain / OpenAI SDK 调用自动进入 LangSmith Trace。
-LANGSMITH_TRACING = os.getenv('LANGSMITH_TRACING', 'false').strip().lower() == 'true'
-LANGSMITH_API_KEY = os.getenv('LANGSMITH_API_KEY', '')
-LANGSMITH_PROJECT = os.getenv('LANGSMITH_PROJECT', 'enterprise-ai-copilot')
-
-if LANGSMITH_TRACING and not LANGSMITH_API_KEY:
-    logger.warning('LANGSMITH_TRACING=true 但未配置 LANGSMITH_API_KEY，Trace 将无法上传到 LangSmith')
+# Phoenix/OpenTelemetry Observability（默认关闭）。启用时统一采用 BatchSpanProcessor，
+# Collector 故障不进入业务异常路径；默认不采集 Prompt、用户输入和模型输出正文。
+(
+    PHOENIX_TRACING,
+    PHOENIX_COLLECTOR_ENDPOINT,
+    PHOENIX_PROJECT_NAME,
+    PHOENIX_SAMPLE_RATE,
+    PHOENIX_CAPTURE_CONTENT,
+) = _load_phoenix_settings(os.environ)
 
 # Bounded concurrency for AI endpoints. This protects the single-worker demo
 # from admitting more retrieval / LLM work than the small host can sustain.
@@ -87,13 +120,16 @@ if AI_QUEUE_TIMEOUT_MS < 1:
 # Agent Loop 开关（默认开启）：/agent/langgraph/chat 使用 Planner ⇄ Tool Executor
 # Loop；关闭时回退旧确定性 Graph（safety → router → rag|eval|action|refuse）。
 AGENT_LOOP_ENABLED = os.getenv('AGENT_LOOP_ENABLED', 'true').strip().lower() == 'true'
+AGENT_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AGENT_REQUEST_TIMEOUT_SECONDS', '40'))
+if AGENT_REQUEST_TIMEOUT_SECONDS < 5:
+    raise ValueError('AGENT_REQUEST_TIMEOUT_SECONDS 必须大于等于 5')
 
 # Input Validation
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
 
-# 企业 Tool / Scoped Memory P0：Python → Java 内部 HTTP 客户端配置。
+# 企业只读 Tool：Python → Java 内部 HTTP 客户端配置。
 # JAVA_BASE_URL: Java 后端地址，示例 http://localhost:8080；空值 = Tool 直接返回 LEAVE_READ_DISABLED。
-# JAVA_INTERNAL_TOKEN: 与 Java leave.read.internal-token 完全一致；缺失时只读 Tool 与 Memory writer 均不可用。
+# JAVA_INTERNAL_TOKEN: 与 Java leave.read.internal-token 完全一致；缺失时只读 Tool 不可用。
 # JAVA_TIMEOUT_SECONDS: 固定请求超时，不做重试 / fallback。
 JAVA_BASE_URL = os.getenv('JAVA_BASE_URL', '').strip()
 JAVA_INTERNAL_TOKEN = os.getenv('JAVA_INTERNAL_TOKEN', '').strip()
@@ -105,7 +141,7 @@ if JAVA_TIMEOUT_SECONDS < 1:
     raise ValueError('JAVA_TIMEOUT_SECONDS 必须大于等于 1')
 
 # Scoped Conversation Memory P0：写入模式默认关闭，避免未显式配置时产生额外
-# Extractor LLM 成本或任何 Java 写入。模式合法性在 Runtime Hook 构造时再次校验。
+# Extractor LLM 成本或 Memory 提案。模式合法性在 Runtime Hook 构造时再次校验。
 MEMORY_WRITE_MODE = os.getenv('MEMORY_WRITE_MODE', 'DISABLED').strip()
 
 # Experimental retrieval relevance gate (off by default; enforce is prohibited).

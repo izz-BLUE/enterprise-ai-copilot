@@ -14,25 +14,18 @@
   才允许 wrapper 触发；CI 测试不会走到 wrapper 实际内部（CI 路径
   见 tests/test_agent_real_eval.py 中的 stub LLM fixture）
 - 不强行 Patch 业务 Action / Safety / Refuse 任何节点
-- 不进 LangSmith 网络测试路径（脚本本身不强制开启 tracing）
+- 不进 Phoenix 网络测试路径（脚本本身不强制开启 tracing）
 """
 
 from __future__ import annotations
 
 import json
 import os
-import statistics
 import subprocess
 import time
-from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterator
 from unittest.mock import patch
-
-from app.agents.langgraph_agent import run_langgraph_agent
-from app.agents.planner_node import MAX_PLANNER_STEPS
-from app.agents.tool_executor_node import MAX_TOOL_CALLS
-from app.schemas.planner_schema import EVAL_TOOL_NAME, RAG_TOOL_NAME
 
 from app.agent_real_eval.cases import (
     REAL_AGENT_EVAL_CASES,
@@ -40,6 +33,11 @@ from app.agent_real_eval.cases import (
     RealAgentEvalCase,
     rag_topics_for_question,
 )
+from app.agent_real_eval.tool_stubs import make_stub
+from app.agents.langgraph_agent import run_langgraph_agent
+from app.agents.planner_node import MAX_PLANNER_STEPS
+from app.agents.tool_executor_node import MAX_TOOL_CALLS
+from app.schemas.planner_schema import EVAL_TOOL_NAME, RAG_TOOL_NAME
 
 # Eval report_type → topic id (固定表)
 _EVAL_TOPIC_BY_REPORT_TYPE = {
@@ -47,7 +45,6 @@ _EVAL_TOPIC_BY_REPORT_TYPE = {
     'generation': 'generation',
     'all': 'all',
 }
-from app.agent_real_eval.tool_stubs import RealEvalToolStubs, make_stub
 
 # P0 评估指标中"完成态之后的冗余调用"相关：本模块的判定函数使用
 FINISH_WHEN_COMPLETE_TOLERANCE = 0  # 容忍 0 个多余 Tool 调用尝试
@@ -122,7 +119,7 @@ class RealEvalSuiteReport:
     max_planner_steps: int
     max_tool_calls: int
     real_tools: bool
-    langsmith_tracing: bool
+    phoenix_tracing: bool
     cases: list[RealEvalCaseReport] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     # 全局失败原因聚合
@@ -547,7 +544,9 @@ def _evaluate_run(
         failure_reasons=failure_reasons,
         passed=passed,
         planner_raw_outputs=raw_outputs,
-        unauthorized_attempt=(_attempt_unauth_global if not case.pre_planner_blocked else False) and not case.allow_eval,
+        unauthorized_attempt=(
+            _attempt_unauth_global if not case.pre_planner_blocked else False
+        ) and not case.allow_eval,
         unauthorized_execution=(_exec_unauth_global if not case.pre_planner_blocked else False) and not case.allow_eval,
         finish_when_complete=_finish_when_complete_global if not case.pre_planner_blocked else True,
         failure_categories=failure_categories,
@@ -817,7 +816,7 @@ def build_suite_report(
         max_planner_steps=MAX_PLANNER_STEPS,
         max_tool_calls=MAX_TOOL_CALLS,
         real_tools=False,  # Real Eval P0 始终使用 Stub Tool
-        langsmith_tracing=os.getenv('LANGSMITH_TRACING', 'false').lower() == 'true',
+        phoenix_tracing=os.getenv('PHOENIX_TRACING', 'false').lower() == 'true',
         cases=case_reports,
     )
     suite.metrics = compute_metrics(case_reports, runs_per_case)

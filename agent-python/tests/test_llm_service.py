@@ -6,8 +6,8 @@
 3. _get_controlled_tool_client 不受 LLMProviderError 影响（保持 max_retries=0）。
 """
 
-import sys
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -16,10 +16,10 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from app.services import llm_service
 from app.services.llm_service import (
-    LLMProviderError,
     PROVIDER_ERROR_RATE_LIMITED,
     PROVIDER_ERROR_TIMEOUT,
     PROVIDER_ERROR_UNAVAILABLE,
+    LLMProviderError,
     call_llm,
 )
 
@@ -152,7 +152,6 @@ class TestControlledClientUnchanged:
         # 注入 _build_client 要求的三项 Provider 变量，避免依赖运行环境。
         with patch.object(llm_service, 'OpenAI', _StubOpenAI), \
              patch.object(llm_service, '_controlled_tool_client', None), \
-             patch.object(llm_service, 'LANGSMITH_TRACING', False), \
              patch.object(llm_service, 'DEEPSEEK_API_KEY', 'test-key'), \
              patch.object(llm_service, 'DEEPSEEK_BASE_URL', 'https://provider.test/v1'), \
              patch.object(llm_service, 'DEEPSEEK_MODEL', 'test-model'):

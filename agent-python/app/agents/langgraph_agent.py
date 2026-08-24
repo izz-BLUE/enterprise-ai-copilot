@@ -11,24 +11,25 @@ langgraph_agent.py —— LangGraph Agent 核心模块
 
 import json
 from datetime import date
+from functools import lru_cache
+from time import monotonic
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from app.core.config import REWRITE_MODE, logger
-from app.guards.safety_guard import check_user_query_safety
-from app.retrieval.query_rewriter import rewrite_query
-from app.services.annual_leave_input_service import is_annual_leave_action_intent
-from app.services.tool_calling_service import plan_annual_leave_action
-from app.tools.rag_tools import eval_report_tool, rag_answer_tool
-
 from app.agents.planner_node import planner_node
 from app.agents.tool_executor_node import tool_executor_node
+from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
+from app.guards.safety_guard import check_user_query_safety
+from app.retrieval.query_rewriter import rewrite_query
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
 )
+from app.services.annual_leave_input_service import is_annual_leave_action_intent
+from app.services.tool_calling_service import plan_annual_leave_action
+from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
 EVAL_KEYWORDS = ['评估', '通过率', 'pass_rate', '命中率', 'baseline', '回归', 'flaky']
 
@@ -64,6 +65,7 @@ class AgentState(TypedDict):
     # 当前可见 Tool 集合或任何 trusted 系统字段（employee_id / business_date /
     # allow_eval / allow_business_actions）。
     memory_context: dict | None
+    deadline_monotonic: float
 
 
 def safety_node(state: AgentState) -> dict:
@@ -240,6 +242,7 @@ def refuse_node(state: AgentState) -> dict:
     return {"answer": answer}
 
 
+@lru_cache(maxsize=1)
 def build_agent_graph():
     graph = StateGraph(AgentState)
 
@@ -272,6 +275,7 @@ def build_agent_graph():
     return graph.compile()
 
 
+@lru_cache(maxsize=1)
 def build_agent_loop_graph():
     """最小有限 Agent Loop：safety → planner ⇄ tool_executor。
 
@@ -481,8 +485,9 @@ def run_langgraph_agent(
         "planner_decision": None,
         "stop_reason": "",
         "memory_context": memory_context,
+        "deadline_monotonic": monotonic() + AGENT_REQUEST_TIMEOUT_SECONDS,
     }
-    # LangSmith metadata：业务 trace_id 仅用于关联定位，不覆盖 LangSmith 自身 Trace ID；
+    # Observability metadata：业务 trace_id 仅用于关联定位，不覆盖 OTel Trace ID；
     # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
     config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
     result = dict(graph.invoke(initial, config=config))
