@@ -1,4 +1,5 @@
 // Local chat-history persistence (per authenticated user, browser-only).
+import { AUTHORITATIVE_TERMINAL_STATUSES, phaseForTerminalStatus } from '../domain/actionState.js'
 //
 // 目标：在同一浏览器同一账号下，刷新 / 关闭重开 / 退出后重新登录后，
 // 恢复之前的 conversationId 和聊天记录，仅保存在 localStorage，不上传。
@@ -10,16 +11,11 @@
 // 回退到 null，调用方继续使用纯内存聊天，不阻断主流程。
 
 const STORAGE_PREFIX = 'enterprise-ai-copilot.chat-history.'
-const MAX_MESSAGES = 100
+export const MAX_MESSAGES = 100
 
 // Java PendingAction 的权威业务终态（详见 backend-java ActionStatus）。
 // 命中后客户端不再复用当前 conversationId，下次请求会触发服务端生成新的。
-export const TERMINAL_ACTION_STATUSES = new Set([
-  'SUCCEEDED',
-  'FAILED',
-  'CANCELLED',
-  'EXPIRED',
-])
+export const TERMINAL_ACTION_STATUSES = AUTHORITATIVE_TERMINAL_STATUSES
 
 // actionUi 是 PendingActionCard 的 UI 状态机，公开字段白名单。
 // execution 子对象只保留恢复"已提交卡片"展示所必需的最小公开字段
@@ -206,15 +202,7 @@ export const isHistoryTerminal = (messages) => {
 
 // 把持久化后的 PendingAction status 映射回 actionUi.phase，
 // 仅在持久化中缺少有效 actionUi 时使用；持久化的 phase 优先（保留用户真实看到的状态）。
-const phaseForPendingStatus = (status) => {
-  switch (status) {
-    case 'SUCCEEDED': return 'succeeded'
-    case 'CANCELLED': return 'cancelled'
-    case 'EXPIRED': return 'expired'
-    case 'FAILED': return 'error'
-    default: return null
-  }
-}
+const phaseForPendingStatus = phaseForTerminalStatus
 
 // 公开 API：把从 localStorage 读出的 messages 修复为 App 期望的形状。
 // - 用户消息：原样返回；

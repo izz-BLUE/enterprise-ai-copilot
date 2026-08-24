@@ -47,7 +47,7 @@ test('loads the chat workspace', async ({ page }) => {
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: '智能体问答' })).toBeVisible()
-  await expect(page.getByText('欢迎使用 Enterprise AI Copilot')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '今天需要我协助什么？' })).toBeVisible()
   await expect(page.getByRole('button', { name: /发送/ })).toBeDisabled()
 })
 

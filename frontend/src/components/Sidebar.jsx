@@ -1,20 +1,21 @@
 import './Sidebar.css'
+import UiIcon from './UiIcon'
 
-const IS_PUBLIC_DEMO = typeof window !== 'undefined'
-  && window.location.hostname === 'copilot.jintianchi.cn'
+const ENVIRONMENT_LABEL = import.meta.env.VITE_ENVIRONMENT_LABEL
+  || (import.meta.env.DEV ? '本地开发环境' : '生产环境')
 
 const MODES = [
   {
     key: 'agent',
     label: '智能体问答',
-    desc: 'Safety Guard + 意图路由 + 工具调用',
-    icon: '🤖',
+    desc: '知识查询、任务协助与人工确认',
+    icon: 'sparkles',
   },
   {
     key: 'rag',
     label: '标准问答',
-    desc: '固定知识库 RAG 检索问答',
-    icon: '📚',
+    desc: '企业制度与知识库检索',
+    icon: 'book-open',
   },
 ]
 
@@ -24,7 +25,7 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
     <aside className="sidebar">
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <span className="logo-icon">⬡</span>
+          <span className="logo-icon"><UiIcon name="hexagon" size={24} /></span>
           <div className="logo-text">
             <h1 className="logo-title">Enterprise AI Copilot</h1>
             <p className="logo-subtitle">企业知识问答与智能体工作台</p>
@@ -45,7 +46,7 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
             onClick={() => onModeChange(m.key)}
             disabled={loading}
           >
-            <span className="nav-icon">{m.icon}</span>
+            <span className="nav-icon"><UiIcon name={m.icon} size={19} /></span>
             <div className="nav-content">
               <span className="nav-label">{m.label}</span>
               <span className="nav-desc">{m.desc}</span>
@@ -66,7 +67,7 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
               onClick={() => onAdminLogsOpen()}
               disabled={loading}
             >
-              <span className="nav-icon">📋</span>
+              <span className="nav-icon"><UiIcon name="clipboard-list" size={19} /></span>
               <div className="nav-content">
                 <span className="nav-label">日志控制台</span>
                 <span className="nav-desc">管理员运行日志查询</span>
@@ -80,10 +81,10 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
       <div className="sidebar-footer">
         <div className="env-badge">
           <span className="env-dot" />
-          <span>{IS_PUBLIC_DEMO ? '公网演示环境' : '本地 Demo 环境'}</span>
+          <span>{ENVIRONMENT_LABEL}</span>
         </div>
         <div className="env-info">
-          {IS_PUBLIC_DEMO ? 'HTTPS → Nginx → Java → Python' : 'Java :8080 → Python :8000'}
+          环境标识（非实时健康状态）
         </div>
       </div>
     </aside>

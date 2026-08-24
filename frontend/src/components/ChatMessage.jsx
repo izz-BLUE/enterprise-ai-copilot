@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import PendingActionCard from './PendingActionCard'
+import UiIcon from './UiIcon'
 import './ChatMessage.css'
 
 const CATEGORY_LABELS = {
@@ -66,25 +67,25 @@ function CopyButton({ text }) {
 function MessageTags({ result, resultMode }) {
   const status = getStatusInfo(result)
   const route = ROUTE_LABELS[result?.route]
+  const category = result?.category
+  const showCategory = resultMode === 'agent'
+    && category
+    && !['normal', 'error', 'business_action'].includes(category)
+    && CATEGORY_LABELS[category] !== route?.label
 
   return (
     <div className="msg-tags">
       <span className={`msg-tag ${status.cls}`}>{status.label}</span>
-      {resultMode === 'agent' && route && (
+      {route && route.label !== status.label && (
         <span className={`msg-tag ${route.cls}`}>{route.label}</span>
       )}
-      {resultMode === 'agent' && result?.safe !== undefined && (
-        <span className={`msg-tag ${result.safe ? 'tag-green' : 'tag-red'}`}>
-          {result.safe ? '安全通过' : '安全拦截'}
-        </span>
+      {resultMode === 'agent' && result?.safe === false && (
+        <span className="msg-tag tag-red">安全拦截</span>
       )}
-      {resultMode === 'agent' && result?.category && result.category !== 'normal' && result.category !== 'error' && (
+      {showCategory && (
         <span className="msg-tag tag-orange">
-          {CATEGORY_LABELS[result.category] || result.category}
+          {CATEGORY_LABELS[category] || category}
         </span>
-      )}
-      {resultMode === 'rag' && result?.model && (
-        <span className="msg-tag tag-blue">{result.model}</span>
       )}
     </div>
   )
@@ -106,7 +107,7 @@ export default function ChatMessage({
   return (
     <div className="chat-message assistant">
       <div className="message-avatar">
-        <span className="avatar-icon">⬡</span>
+        <span className="avatar-icon"><UiIcon name="sparkles" size={16} /></span>
       </div>
       <div className="message-body">
         <div className="message-header">
@@ -168,24 +169,39 @@ export function UserMessage({ question }) {
         <div className="message-content">{question}</div>
       </div>
       <div className="message-avatar user-avatar">
-        <span className="avatar-icon">U</span>
+        <span className="avatar-icon">我</span>
       </div>
     </div>
   )
 }
 
 export function LoadingMessage() {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - started) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const stage = elapsedSeconds < 8
+    ? '正在准备请求'
+    : elapsedSeconds < 22
+      ? '正在检索与分析'
+      : elapsedSeconds < 40
+        ? '正在生成回答'
+        : '即将到达请求超时，请稍候'
   return (
     <div className="chat-message assistant">
       <div className="message-avatar">
-        <span className="avatar-icon">⬡</span>
+        <span className="avatar-icon"><UiIcon name="sparkles" size={16} /></span>
       </div>
       <div className="message-body">
         <div className="loading-indicator">
           <div className="loading-dots">
             <span /><span /><span />
           </div>
-          <span className="loading-text">正在思考中...</span>
+          <span className="loading-text">{stage} · {elapsedSeconds} 秒</span>
         </div>
       </div>
     </div>

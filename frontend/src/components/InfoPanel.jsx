@@ -1,28 +1,19 @@
 import { useState } from 'react'
+import UiIcon from './UiIcon'
 import './InfoPanel.css'
 
 const PIPELINE_MAP = {
   rag: [
-    { label: 'Frontend', detail: 'React + Vite' },
+    { label: 'Web', detail: 'React' },
     { label: 'Gateway', detail: 'Java /api/chat' },
-    { label: 'Service', detail: 'Python /agent/chat' },
-    { label: 'Engine', detail: 'RAG Pipeline' },
+    { label: 'AI Service', detail: 'Python /agent/chat' },
   ],
   agent: [
-    { label: 'Frontend', detail: 'React + Vite' },
+    { label: 'Web', detail: 'React' },
     { label: 'Gateway', detail: 'Java /api/agent/langgraph/chat' },
-    { label: 'Service', detail: 'Python /agent/langgraph/chat' },
-    { label: 'Engine', detail: 'LangGraph Agent' },
+    { label: 'AI Service', detail: 'Python /agent/langgraph/chat' },
   ],
 }
-
-const CAPABILITIES = [
-  { icon: '🔍', title: 'RAG 检索问答', desc: '基于 FAISS 向量索引的企业知识库检索' },
-  { icon: '🔗', title: '混合检索', desc: '向量检索 + BM25 关键词检索融合排序' },
-  { icon: '🛡', title: 'Safety Guard', desc: '规则路由安全检查，拦截违规请求' },
-  { icon: '📊', title: '评估体系', desc: '确定性规则评分，衡量回答质量' },
-  { icon: '✅', title: '受控业务动作', desc: '人工确认后执行模拟写操作' },
-]
 
 const ACTION_STATUS_LABELS = {
   pending: '等待确认',
@@ -54,12 +45,12 @@ function CopyButton({ text }) {
   )
 }
 
-function MetaItem({ label, value, mono, copyable }) {
+function MetaItem({ label, value, mono, copyable, tone }) {
   if (value === undefined || value === null) return null
   return (
     <div className="meta-item">
       <span className="meta-label">{label}</span>
-      <span className={`meta-value ${mono ? 'mono' : ''}`}>
+      <span className={`meta-value ${mono ? 'mono' : ''} ${tone ? `tone-${tone}` : ''}`}>
         {String(value)}
         {copyable && <CopyButton text={String(value)} />}
       </span>
@@ -67,97 +58,108 @@ function MetaItem({ label, value, mono, copyable }) {
   )
 }
 
-export default function InfoPanel({ result, resultMode, actionUi }) {
+function InfoCardHeader({ icon, title, caption }) {
+  return (
+    <div className="info-card-header">
+      <span className="info-card-icon"><UiIcon name={icon} size={17} /></span>
+      <div>
+        <h3 className="info-card-title">{title}</h3>
+        {caption && <p className="info-card-caption">{caption}</p>}
+      </div>
+    </div>
+  )
+}
+
+export default function InfoPanel({ result, resultMode, actionUi, compact = false }) {
   const pipeline = PIPELINE_MAP[resultMode] || PIPELINE_MAP.rag
+  const sources = Array.isArray(result?.sources) ? result.sources : []
 
   return (
-    <aside className="info-panel">
-      {/* 调用链路 */}
-      <div className="info-card">
-        <div className="info-card-header">
-          <span className="info-card-icon">🔗</span>
-          <h3 className="info-card-title">调用链路</h3>
-        </div>
-        <div className="pipeline-chain">
-          {pipeline.map((step, i) => (
-            <div key={i} className="pipeline-step">
-              <div className="pipeline-node">
-                <span className="pipeline-label">{step.label}</span>
-                <span className="pipeline-detail">{step.detail}</span>
-              </div>
-              {i < pipeline.length - 1 && (
-                <div className="pipeline-arrow">→</div>
-              )}
-            </div>
-          ))}
-        </div>
+    <aside className={`info-panel${compact ? ' inline-details' : ''}`} aria-label="回答辅助信息">
+      <div className="info-panel-heading">
+        <span className="info-panel-kicker">ANSWER CONTEXT</span>
+        <h2>回答辅助信息</h2>
+        <p>查看本次回答的状态与依据</p>
       </div>
 
-      {/* 回答信息 */}
-      <div className="info-card">
-        <div className="info-card-header">
-          <span className="info-card-icon">📋</span>
-          <h3 className="info-card-title">最新回答信息</h3>
-        </div>
+      <div className="info-card info-card-overview">
+        <InfoCardHeader icon="info" title="回答概览" />
         {result ? (
           <div className="meta-list">
-            <MetaItem label="状态" value={result.success ? '成功' : '失败'} />
-            <MetaItem label="模式" value={resultMode === 'agent' ? '智能体' : '标准 RAG'} />
-            <MetaItem label="路由" value={result.route} />
             <MetaItem
-              label="动作类型"
+              label="状态"
+              value={result.success ? '回答完成' : '处理失败'}
+              tone={result.success ? 'success' : 'error'}
+            />
+            <MetaItem label="模式" value={resultMode === 'agent' ? '智能体问答' : '知识库问答'} />
+            <MetaItem
+              label="业务动作"
               value={result.pendingAction?.type === 'ANNUAL_LEAVE_REQUEST' ? '年假申请' : undefined}
             />
             <MetaItem label="动作状态" value={ACTION_STATUS_LABELS[actionUi?.phase]} />
-            <MetaItem label="安全" value={result.safe !== undefined ? (result.safe ? '通过' : '拦截') : undefined} />
-            <MetaItem label="模型" value={result.model} mono />
-            <MetaItem label="traceId" value={result.traceId} mono copyable />
+            <MetaItem
+              label="安全检查"
+              value={result.safe !== undefined ? (result.safe ? '已通过' : '已拦截') : undefined}
+              tone={result.safe === false ? 'error' : undefined}
+            />
           </div>
         ) : (
-          <div className="info-empty">发送问题后显示最新回答信息</div>
+          <div className="info-empty">
+            <UiIcon name="sparkles" size={22} />
+            <span>提交问题后，这里会显示回答状态。</span>
+          </div>
         )}
       </div>
 
-      {/* 来源引用 */}
       <div className="info-card">
-        <div className="info-card-header">
-          <span className="info-card-icon">📄</span>
-          <h3 className="info-card-title">最新回答来源</h3>
-        </div>
-        {result?.sources && result.sources.length > 0 ? (
+        <InfoCardHeader
+          icon="sources"
+          title="引用来源"
+          caption={sources.length > 0 ? `${sources.length} 条参考依据` : undefined}
+        />
+        {sources.length > 0 ? (
           <div className="sources-list">
-            {result.sources.map((s, i) => (
-              <div key={i} className="source-item">
-                <span className="source-index">{i + 1}</span>
-                <span className="source-name" title={s}>{s}</span>
+            {sources.map((source, index) => (
+              <div key={`${source}-${index}`} className="source-item">
+                <span className="source-index">{index + 1}</span>
+                <span className="source-name" title={source}>{source}</span>
               </div>
             ))}
           </div>
         ) : (
-          <div className="info-empty">
-            {result ? '本次回答无引用来源' : '发送问题后显示最新回答来源'}
+          <div className="info-empty compact">
+            <span>{result ? '本次回答未引用知识库文档' : '回答完成后显示参考来源'}</span>
           </div>
         )}
       </div>
 
-      {/* 能力说明 */}
-      <div className="info-card">
-        <div className="info-card-header">
-          <span className="info-card-icon">⚡</span>
-          <h3 className="info-card-title">系统能力</h3>
-        </div>
-        <div className="capabilities-list">
-          {CAPABILITIES.map((cap, i) => (
-            <div key={i} className="capability-item">
-              <span className="capability-icon">{cap.icon}</span>
-              <div className="capability-content">
-                <span className="capability-title">{cap.title}</span>
-                <span className="capability-desc">{cap.desc}</span>
-              </div>
+      <details className="technical-details">
+        <summary>
+          <span className="technical-summary-icon"><UiIcon name="code" size={16} /></span>
+          <span>技术详情</span>
+          <span className="technical-summary-hint">按需查看</span>
+        </summary>
+        <div className="technical-body">
+          {result && (
+            <div className="technical-meta">
+              <MetaItem label="路由" value={result.route} mono />
+              <MetaItem label="模型" value={result.model} mono />
+              <MetaItem label="traceId" value={result.traceId} mono copyable />
             </div>
-          ))}
+          )}
+          <div className="pipeline-chain">
+            {pipeline.map((step, index) => (
+              <div key={step.label} className="pipeline-step">
+                <span className="pipeline-index">{index + 1}</span>
+                <div className="pipeline-node">
+                  <span className="pipeline-label">{step.label}</span>
+                  <span className="pipeline-detail">{step.detail}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </details>
     </aside>
   )
 }

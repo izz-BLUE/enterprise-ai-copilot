@@ -8,12 +8,29 @@
 /* ── 主内容区 ── */
 .main-area {
   flex: 1;
+  min-width: 0;
   margin-left: var(--sidebar-width);
   margin-right: var(--info-panel-width);
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: var(--color-bg);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.main-area.admin-view {
+  margin-right: 0;
 }
 
 /* ── 顶部标题栏 ── */
@@ -140,6 +157,7 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+  scroll-padding-top: 72px;
 }
 
 .messages-list {
@@ -176,14 +194,27 @@
   flex-shrink: 0;
 }
 
-.error-banner span:last-child {
+.error-text {
   font-size: 13px;
   color: var(--color-error);
+}
+
+.error-retry {
+  margin-left: auto;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-error);
+  cursor: pointer;
+  font-size: 12px;
 }
 
 /* ── 窄屏适配 ── */
 @media (max-width: 1024px) {
   .main-area {
+    margin-left: 0;
     margin-right: 0;
   }
 
@@ -193,12 +224,29 @@
 }
 
 @media (max-width: 768px) {
-  .main-area {
-    margin-left: 0;
-  }
-
   .main-header {
     padding: var(--space-md) var(--space-lg);
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .header-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: var(--space-sm);
+  }
+
+  .header-title {
+    white-space: nowrap;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
+  .header-badge {
+    display: none;
   }
 
   .messages-list {
@@ -207,5 +255,37 @@
 
   .input-section {
     padding: 0 var(--space-lg) var(--space-lg);
+  }
+}
+
+@media (max-width: 480px) {
+  .main-header {
+    padding: 10px 12px;
+  }
+
+  .mobile-mode-switch {
+    flex: 1 1 100%;
+  }
+
+  .mode-select {
+    width: 100%;
+  }
+
+  .current-user,
+  .header-title {
+    display: none;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .messages-list {
+    padding: var(--space-md);
+  }
+
+  .input-section {
+    padding: 0 var(--space-md) var(--space-md);
   }
 }

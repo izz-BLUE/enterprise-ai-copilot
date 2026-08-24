@@ -1,7 +1,5 @@
 import { authenticatedFetch, AuthExpiredError } from './authApi'
 
-const JAVA_BASE_URL = ''
-
 export class BusinessActionApiError extends Error {
   constructor({ message, errorCode, status, traceId, httpStatus }) {
     super(message)
@@ -29,7 +27,7 @@ async function postDecision({
   }
   let response
   try {
-    response = await authenticatedFetch(`${JAVA_BASE_URL}${path}`, accessToken, {
+    response = await authenticatedFetch(path, accessToken, {
       method: 'POST',
       headers,
       body: JSON.stringify({ confirmationNonce }),

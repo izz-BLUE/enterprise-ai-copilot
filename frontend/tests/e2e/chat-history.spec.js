@@ -253,6 +253,7 @@ test('agent / rag 各自消息并存:来回切换只显示对应模式,清空 ra
 
   // 清空会话(rag 模式):仅删 .rag 历史,agent 历史不受影响
   await page.getByRole('button', { name: '清空会话' }).click()
+  await page.getByRole('button', { name: '确认清空会话' }).click()
   await expect(page.getByRole('heading', { name: '标准问答' })).toBeVisible()
   expect(await readHistoryRecord(page, ADMIN_USER.userId, 'rag')).toBeNull()
   expect(await readHistoryRecord(page, ADMIN_USER.userId, 'agent')).not.toBeNull()
@@ -383,7 +384,7 @@ test('旧格式历史兼容迁移:无模式后缀的历史按默认 agent 迁移
     updatedAt: Date.now(),
   }
   await page.addInitScript(({ authKey, legacyKey, record }) => {
-    window.localStorage.setItem(authKey, JSON.stringify({ accessToken: 'test-token' }))
+    window.localStorage.setItem(authKey, JSON.stringify({ authenticated: true }))
     window.localStorage.setItem(legacyKey, JSON.stringify(record))
   }, {
     authKey: 'enterprise-ai-copilot.auth',

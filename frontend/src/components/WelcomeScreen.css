@@ -13,14 +13,30 @@
 }
 
 .welcome-icon {
-  font-size: 48px;
+  display: grid;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto var(--space-lg);
+  place-items: center;
   color: var(--color-primary);
-  margin-bottom: var(--space-lg);
-  opacity: 0.8;
+  border: 1px solid var(--color-primary-border);
+  border-radius: 18px;
+  background: linear-gradient(145deg, var(--color-surface), var(--color-primary-light));
+  box-shadow: var(--shadow-sm);
+}
+
+.welcome-eyebrow {
+  display: block;
+  margin-bottom: var(--space-sm);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .welcome-title {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
   color: var(--color-text);
   margin: 0 0 var(--space-md);
@@ -42,7 +58,7 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: 0.05em;
   display: block;
   margin-bottom: var(--space-md);
@@ -58,6 +74,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  min-height: 58px;
   padding: var(--space-md) var(--space-lg);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -79,13 +96,19 @@
 }
 
 .quick-icon {
-  font-size: 20px;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
   flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .quick-text {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-text);
 }
 

@@ -25,7 +25,7 @@ async function loginAs(page, user) {
   await page.addInitScript(() => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
-      JSON.stringify({ accessToken: 'test-token' })
+      JSON.stringify({ authenticated: true })
     )
   })
   await page.route('**/api/auth/me', route =>
@@ -45,6 +45,7 @@ test('EMPLOYEE 看不到日志控制台入口', async ({ page }) => {
 })
 
 test('ADMIN 看到入口并能加载日志列表', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await loginAs(page, ADMIN_USER)
   const sampleItem = {
     id: 'sample-1',
@@ -79,6 +80,16 @@ test('ADMIN 看到入口并能加载日志列表', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '管理员运行日志' })).toBeVisible()
   await expect(page.getByText('AGENT_REQUEST_RECEIVED')).toBeVisible()
   await expect(page.getByText('LangGraph Agent request received')).toBeVisible()
+  await expect(page.locator('.info-panel')).toHaveCount(0)
+
+  const layout = await page.locator('.main-area').evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    return { left: rect.left, right: rect.right, width: rect.width, scrollWidth: element.scrollWidth }
+  })
+  expect(layout.left).toBe(260)
+  expect(layout.right).toBeLessThanOrEqual(1440)
+  expect(layout.width).toBeGreaterThan(1100)
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width)
 })
 
 test('手动刷新会重新请求 /api/admin/logs', async ({ page }) => {
@@ -279,7 +290,7 @@ test('EMPLOYEE 端到端：日志控制台往返 + 待确认卡片 + nonce + con
   await page.addInitScript((uid) => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
-      JSON.stringify({ accessToken: 'test-token' })
+      JSON.stringify({ authenticated: true })
     )
     try {
       for (const suffix of ['', '.agent', '.rag', '.last-mode']) {
@@ -328,7 +339,7 @@ test('EMPLOYEE 端到端：日志控制台往返 + 待确认卡片 + nonce + con
           ttlSeconds: 600,
           employeeId: 'E10001',
           displayName: '张三',
-          expiresAt: '2026-08-23T20:00:00Z',
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
           confirmationNonce: TEST_NONCE,
         },
       }),
@@ -446,7 +457,7 @@ test('ADMIN 进入日志控制台不会影响 sessionStorage 中 conversation-id
   await page.addInitScript(() => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
-      JSON.stringify({ accessToken: 'test-token' })
+      JSON.stringify({ authenticated: true })
     )
     window.sessionStorage.setItem(
       'enterprise-ai-copilot.conversation-id',
@@ -514,7 +525,7 @@ test('ADMIN 端到端：待确认卡片 → 日志控制台往返 → 卡片保�
   await page.addInitScript((uid) => {
     window.localStorage.setItem(
       'enterprise-ai-copilot.auth',
-      JSON.stringify({ accessToken: 'test-token' })
+      JSON.stringify({ authenticated: true })
     )
     try {
       for (const suffix of ['', '.agent', '.rag', '.last-mode']) {
@@ -563,7 +574,7 @@ test('ADMIN 端到端：待确认卡片 → 日志控制台往返 → 卡片保�
           ttlSeconds: 600,
           employeeId: 'E10001',
           displayName: '张三',
-          expiresAt: '2026-08-23T20:00:00Z',
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
           confirmationNonce: TEST_NONCE,
         },
       }),
@@ -688,7 +699,7 @@ test('ADMIN 日志控制台点击当前"智能体问答"：退出控制台且消
           ttlSeconds: 600,
           employeeId: 'E10001',
           displayName: '张三',
-          expiresAt: '2026-08-23T20:00:00Z',
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
           confirmationNonce: TEST_NONCE,
         },
       }),
@@ -895,4 +906,38 @@ test('ADMIN rag 模式日志控制台点击"智能体问答"：退出控制台�
   })
   expect(ragRecord).not.toBeNull()
   expect(ragRecord.messages).toHaveLength(2)
+})
+
+test('日志分页会请求下一页并更新记录', async ({ page }) => {
+  await loginAs(page, ADMIN_USER)
+  const offsets = []
+  await page.route('**/api/admin/logs**', async route => {
+    const offset = Number(new URL(route.request().url()).searchParams.get('offset') || 0)
+    offsets.push(offset)
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [{
+          id: `page-${offset}`,
+          timestamp: '2026-08-23T10:00:00Z',
+          level: 'INFO',
+          category: 'SYSTEM',
+          event: offset === 0 ? 'FIRST_PAGE_EVENT' : 'SECOND_PAGE_EVENT',
+          message: 'page event',
+        }],
+        count: 1,
+        total: 51,
+        offset,
+        hasMore: offset === 0,
+      }),
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: '日志控制台' }).click()
+  await expect(page.getByText('FIRST_PAGE_EVENT')).toBeVisible()
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByText('SECOND_PAGE_EVENT')).toBeVisible()
+  expect(offsets).toContain(50)
 })
