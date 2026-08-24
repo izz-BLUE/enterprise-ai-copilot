@@ -5,26 +5,12 @@ BM25 Retriever — 轻量实现，无外部依赖。
 使用字符级 n-gram 分词（2-gram + 3-gram），对中文友好。
 """
 
-import json
 import math
-import os
-import re
 from collections import Counter
 
-from app.core.config import CHUNKS_FILE, logger
-
-# ── 停用词 ──────────────────────────────────────────────────────
-_STOP_WORDS = frozenset({
-    '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一',
-    '一个', '可以', '我们', '你们', '他们', '它们', '这个', '那个', '什么',
-    '怎么', '如何', '哪', '哪儿', '哪里', '谁', '为什么', '哪些', '多少',
-    '请', '问', '请问', '帮', '帮忙', '想', '要', '需要', '应该', '能',
-    '能够', '会', '可能', '好', '吗', '吧', '呢', '啊', '哦', '嗯',
-    '对', '对于', '关于', '把', '被', '让', '给', '跟', '与', '以',
-    '从', '到', '去', '来', '上', '下', '大', '小', '多', '少', '很',
-    '太', '非常', '比较', '也', '还', '又', '再', '才', '刚', '已经',
-    '正在', '着', '过', '了', '呢', '吧', '吗', '啊', '嗯',
-})
+from app.core.config import logger
+from app.retrieval.chunk_store import get_chunks
+from app.retrieval.text_tokenizer import character_ngrams
 
 # ── BM25 参数 ────────────────────────────────────────────────────
 _K1 = 1.5
@@ -39,43 +25,18 @@ _idf: dict[str, float] = {}
 _doc_count: int = 0
 
 
-def _tokenize(text: str) -> list[str]:
-    """中文分词：按标点切分后生成 2-gram 和 3-gram。"""
-    tokens = re.split(r'[，。！？、；：""''（）【】《》\s,\.!?;:()\[\]{}<>/\\|]+', text)
-    tokens = [t.strip() for t in tokens if t.strip()]
-
-    grams = []
-    for token in tokens:
-        if len(token) >= 4:
-            grams.append(token)
-        for i in range(len(token) - 1):
-            g = token[i:i + 2]
-            if g not in _STOP_WORDS:
-                grams.append(g)
-        for i in range(len(token) - 2):
-            g = token[i:i + 3]
-            if g not in _STOP_WORDS:
-                grams.append(g)
-    return grams
-
-
 def _build_index():
     """构建 BM25 索引：词频、文档频率、IDF。"""
     global _chunks, _tokenized_chunks, _doc_freqs, _avgdl, _idf, _doc_count
 
-    if not os.path.isfile(CHUNKS_FILE):
-        logger.warning('chunks.json 不存在，BM25 检索不可用: %s', CHUNKS_FILE)
-        return
-
-    with open(CHUNKS_FILE, 'r', encoding='utf-8') as f:
-        _chunks = json.load(f)
+    _chunks = list(get_chunks())
 
     _doc_count = len(_chunks)
     if _doc_count == 0:
         return
 
     # 分词
-    _tokenized_chunks = [_tokenize(c['content']) for c in _chunks]
+    _tokenized_chunks = [character_ngrams(c['content']) for c in _chunks]
     _doc_freqs = [Counter(toks) for toks in _tokenized_chunks]
 
     # 平均文档长度
@@ -96,44 +57,7 @@ def _build_index():
 
 def retrieve(query: str, top_k: int = 3) -> list[dict]:
     """BM25 检索，返回 top_k 个 chunk。"""
-    if not _chunks:
-        return []
-
-    query_tokens = _tokenize(query)
-    if not query_tokens:
-        return []
-
-    # 计算每个 chunk 的 BM25 分数
-    scores = []
-    for i, doc_freq in enumerate(_doc_freqs):
-        doc_len = len(_tokenized_chunks[i])
-        score = 0.0
-        for qt in query_tokens:
-            if qt not in doc_freq:
-                continue
-            tf = doc_freq[qt]
-            idf = _idf.get(qt, 0.0)
-            tf_norm = (tf * (_K1 + 1)) / (tf + _K1 * (1 - _B + _B * doc_len / _avgdl))
-            score += idf * tf_norm
-        scores.append((score, i))
-
-    # 按分数降序排列
-    scores.sort(key=lambda x: -x[0])
-
-    results = []
-    for score, idx in scores[:top_k]:
-        if score <= 0:
-            break
-        chunk = _chunks[idx]
-        results.append({
-            'id': chunk['id'],
-            'domain': chunk['domain'],
-            'source_file': chunk['source_file'],
-            'chunk_index': chunk['chunk_index'],
-            'content': chunk['content'],
-        })
-
-    return results
+    return [chunk for chunk, _score in retrieve_with_scores(query, top_k)]
 
 
 def retrieve_with_scores(query: str, top_k: int = 3) -> list[tuple[dict, float]]:
@@ -141,7 +65,7 @@ def retrieve_with_scores(query: str, top_k: int = 3) -> list[tuple[dict, float]]
     if not _chunks:
         return []
 
-    query_tokens = _tokenize(query)
+    query_tokens = character_ngrams(query)
     if not query_tokens:
         return []
 

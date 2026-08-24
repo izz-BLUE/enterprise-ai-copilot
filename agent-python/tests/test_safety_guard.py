@@ -112,15 +112,13 @@ class TestOriginalQuestionPreserved:
         })
 
         # 模拟 rag_service 调用路径
-        monkeypatch.setattr("app.services.rag_service.rewrite_query", mock_rewrite)
-        monkeypatch.setattr("app.services.rag_service.retrieve_with_signals",
+        monkeypatch.setattr("app.services.rag_answer_service.rewrite_query", mock_rewrite)
+        monkeypatch.setattr("app.services.rag_answer_service.retrieve_with_signals",
                             Mock(return_value=([], [])))
-        monkeypatch.setattr("app.services.rag_service.evaluate_gate_timed_fail_open",
-                            Mock(return_value=("pass", 0.0)))
-        monkeypatch.setattr("app.services.rag_service.log_gate_event", Mock())
-        monkeypatch.setattr("app.services.rag_service.build_rag_prompt",
+        monkeypatch.setattr("app.services.rag_answer_service.log_gate_event", Mock())
+        monkeypatch.setattr("app.services.rag_answer_service.build_rag_prompt",
                             Mock(return_value="prompt"))
-        monkeypatch.setattr("app.services.rag_service.call_llm",
+        monkeypatch.setattr("app.services.rag_answer_service.call_llm",
                             Mock(return_value="answer"))
 
         from app.services.rag_service import process_chat

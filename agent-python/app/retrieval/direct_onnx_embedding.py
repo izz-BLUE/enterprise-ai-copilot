@@ -147,8 +147,6 @@ def _tokenize(texts: list[str]) -> dict[str, np.ndarray]:
     tok_info = _tokenizer
     tokenizer = tok_info['tokenizer']
     max_length = tok_info['max_length']
-    cls_id = tok_info['cls_token_id']
-    sep_id = tok_info['sep_token_id']
     pad_id = tok_info['pad_token_id']
 
     # 批量编码
