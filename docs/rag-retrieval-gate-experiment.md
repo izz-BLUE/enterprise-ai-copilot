@@ -146,16 +146,16 @@ Calibration 的相对最优 `0.58` 在一次性 Holdout 上只拦截 `1/8` no-an
 
 因此首轮阈值仅保留用于复现实验，生产默认模式改为 `off`。
 
-## 14. 为什么禁止 Enforcement
+## 14. 为什么默认不启用 Enforcement
 
 Enforcement 会让 Gate block 真正阻断生成。当前 Holdout 已证明该决策不可靠，启用后会同时造成正常问题误拒和无答案问题漏放。
 
-配置层继续明确拒绝 `RAG_GATE_MODE=enforce`，而不是提供一个未验证的隐藏开关。
+后续实现保留了显式 `RAG_GATE_MODE=enforce` 供目标数据集验收：block 会真正阻断生成，evaluator 异常时 fail-closed。该模式仍不是仓库部署默认值，未完成目标数据集阈值验收不得启用。
 
 ## 15. 当前最终状态
 
 - Scored Retrieval、同候选信号合并、Shadow 日志和 evaluator fail-open 已实现。
-- Gate 默认模式为 `off`；只有显式设置 `RAG_GATE_MODE=shadow` 才启用分析。
+- Gate 默认模式为 `off`；`shadow` 只分析不阻断；`enforce` 仅供显式验收后启用。
 - 当前没有实现可靠的生成前无答案拦截。
 - 当前没有减少实际 LLM 调用。
 - Shadow 数据不能作为生产准确率。
