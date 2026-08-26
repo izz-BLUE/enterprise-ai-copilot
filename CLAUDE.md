@@ -118,6 +118,7 @@ Java 和 Python 都有并发限制：
 - Java: `PythonAgentBulkhead`（Semaphore，默认 3 并发）
 - Python: `ai_request_limiter`（默认 3 并发，500ms 队列超时）
 - POSTGRES LangGraph thread：单 worker 进程内同一最终 thread 的 history hydrate + Graph invoke 由 `active_thread_ids` 保护，忙时快速返回 `429 + Retry-After`；不同 thread 不互相阻塞。多 worker / 多实例的分布式锁未实现。
+- Java LangGraph conversation：`AgentRuntimeThreadExecutionGuard` 在 Memory Read 前保护 `Memory Read → Python → PendingAction/Memory persist → response`，同一 runtime thread 忙时快速返回 `429 + Retry-After`；多 Java 实例的分布式 lease/lock 未实现。
 
 ### Business Action 流程
 

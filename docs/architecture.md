@@ -155,6 +155,7 @@ flowchart TD
 - **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
 - **SecurityConfig / AuthController**：`app_user` + BCrypt 登录并签发短期 JWT；浏览器使用 HttpOnly + SameSite=Strict Cookie（Web Storage 不保存 Token），API 客户端继续支持 Bearer；Cookie 写请求要求 `X-Requested-With`；Agent/Business Action 使用 `authenticated()`，无效凭据不回退 Demo；`/api/internal/leave/**` 保持 X-Internal-Token 服务间认证
 - **LangGraphAgentController**：在 Python 调用前解析 JWT 或显式 Demo fallback 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id`、Java 权威 `business_date`，以及由 `VerifiedIdentity.userId()` + 已解析 `conversationId` 计算的 `X-Agent-Thread-Id`；Admin Token 和客户端伪造的 thread header 不下传。Python 返回的 `action_proposal` 用于生成 PendingAction：`BusinessActionService.createPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）
+- **AgentRuntimeThreadExecutionGuard**：Java 单实例进程级 conversation guard；在最终 runtime thread 生成后、Memory Read 之前原子占用，覆盖 Memory Read、Python 调用、PendingAction / Memory 后处理及所有 early return，忙时返回 `429 + Retry-After: 1`；多实例分布式 lease/lock 延后实现
 - **BusinessActionController**：`POST /api/agent/actions/{actionId}/confirm` 与 `/cancel`；强制要求 owner 校验、nonce 校验、状态机、TTL、幂等
 - **HealthController / AgentHealthController**：健康检查
 - **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
@@ -383,6 +384,8 @@ React sessionStorage conversationId
 ```
 
 身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Java 直接使用当前认证上下文。`conversationId` 只作 namespace，并由 Java 在当前请求内解析。Read Path 只注入 `ACTIVE`；终态只由 Java PendingAction 生命周期收口，无 TTL、归档、向量或 Profile Memory。
+
+P3-2 Audit Fix：Java 先生成最终 runtime thread，再由 `AgentRuntimeThreadExecutionGuard` 获取进程内 guard，随后才读取 ACTIVE Memory；该 guard 一直覆盖 Python 调用、PendingAction 创建、Memory persist 和响应返回。这样 Memory Read 与 Python Checkpoint read-modify-write 不会被同一 conversation 的并发请求交错。Python `CheckpointRuntime.active_thread_ids` 仍保留，职责仅是保护 Python 侧 history hydrate 到最终 Checkpoint 的区间。
 
 执行快照与 Memory 不同：Memory 记“用户在做什么”，是 Java 控制的对话范围任务生命周期；`tool_history` 记“这一轮刚刚执行了什么”，每个新请求清空；`execution_history` 记“以前做过哪些执行步骤”，只保存有限的成功 Tool 摘要并统一为 `CONTEXT_ONLY`。Checkpoint 保存这些 Agent 状态，但 `execution_history` 不能作为用户画像、当前业务事实、PendingAction 查询源或权限来源。历史 invoice 的 `valid / duplicate`、历史 trip 的 `status` 都不能直接复用，当前决策必须重新调用对应 Tool；Java 业务数据库仍是当前业务事实的权威来源。
 
