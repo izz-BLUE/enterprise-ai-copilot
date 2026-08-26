@@ -1,4 +1,4 @@
-"""memory_trigger_policy.py —— Memory Trigger Policy（Phase 3B-1 / P1-A 修订）
+"""memory_trigger_policy.py —— Memory Trigger Policy
 
 职责：
   确定一次 Agent 执行结束后，是否值得调用 Memory Extractor。
@@ -10,24 +10,27 @@
   Trigger Policy 之于 Memory Extractor。
   它是\"是否进入 Memory Extraction 流程\"的入口守门员，是确定性纯 Python 判定。
 
-设计原则（按 Phase 3A review 调整后的边界）：
+设计原则：
   1. Trigger 输入是 LangGraph Agent 终态 dict（含 trusted runtime signal），
      而非 MemoryExtractionInput（后者已剥离 signal，仅承载事实信息）。
   2. trusted signal 用于判定\"是否触发 Extractor\"，**绝不**进入 Extractor 输入。
-  3. 判定规则只关心\"Agent 是否产生了跨请求值得保留的工作痕迹\"。
+  3. **Trigger 只判定"本次 Agent Execution 是否产生了值得记忆的业务状态变化信号"**：
+     "用户是否拥有历史 ACTIVE Memory" 不是 Trigger 关心的事——Read Path 与
+     Planner 已经基于 ACTIVE Memory 完成历史上下文注入；Trigger 不再因
+     ``memory_context`` / ``existing_memory`` 存在而重复触发 Extractor，
+     避免无意义 LLM 调用、Token 浪费与基于错误文本误判 UPSERT /
+     COMPLETE / ABANDON 的风险。
 
-触发规则（满足任一即触发）：
+触发规则（满足任一即触发，全部要求是"业务状态变化信号"）：
   - action_proposal 非空：用户进入受控业务动作链路（Proposal / Clarification），
     其上下文值得后续会话续接；
   - tool_history 存在成功的 **Memory-eligible Tool** 调用：白名单由注入的
-    ``MemoryTaskTypePolicy.eligible_tool_names()`` 提供（不再是 P0 的
-    ``MEMORY_TRIGGER_TOOL_NAMES = {LEAVE_PROPOSAL_TOOL_NAME}`` 硬编码）；
-    普通查询 Tool（RAG / eval / balance / leave_request）一律不触发；
-  - existing_memory（Phase2 Read Path 注入的历史 memory）非空：
-    当前会话续接了上一轮 memory，应当尝试更新状态（避免 stale）。
+    ``MemoryTaskTypePolicy.eligible_tool_names()``（或其上游
+    ``MemoryCapabilityRegistry``）动态提供。
+    普通查询 Tool（RAG / eval / balance / leave_request）一律不触发。
 
 不触发条件（与上述互斥，safety / 短任务 / 失败终态）：
-  - 完全空执行：question 空 + 无 tool 调用 + 无 action_proposal + 无 existing_memory；
+  - 完全空执行：question + 无 tool + 无 action_proposal；
   - 仅 Safety 拦截（safe=False） → 不进入 Extractor；Safety reason 已记录；
   - Agent 失败终态（route=error 或 stop_reason ∈ provider_error /
     invalid_decision / step_budget_exhausted）→ 不进入 Extractor。
@@ -39,6 +42,12 @@ P1-A 演进：
   通过 ``policy.eligible_tool_names()`` 读取"具备 Memory Capability Signal 的
   Tool 集合"。新增业务（例如 EXPENSE_REQUEST）只需在 policy 中注册
   ``expense_proposal_tool → EXPENSE_REQUEST``，Trigger / WritePolicy 自动跟随。
+  Policy 由 ``MemoryCapabilityRegistry`` 装配时，Trigger 同样自动跟随。
+
+Read Path 解耦：
+  ``agent_result['memory_context']``（Phase2 Read Path 注入）作为 Planner 的
+  不可信历史任务上下文渲染输入保留不动；Trigger 不再以它为触发信号。
+  Planner 渲染逻辑与 Java 查询逻辑均不在本文件修改范围内。
 
 输出：
   MemoryTriggerDecision { should_extract: bool, reason: str }
@@ -54,7 +63,6 @@ from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 # 触发原因常量（debug 维度，非业务逻辑）
 TRIGGER_REASON_ACTION_PROPOSAL = 'action_proposal_present'
 TRIGGER_REASON_TOOL_SUCCESS = 'tool_history_has_success'
-TRIGGER_REASON_EXISTING_MEMORY = 'existing_memory_present'
 
 NO_TRIGGER_REASON_NO_SIGNAL = 'no_trigger_signal'
 NO_TRIGGER_REASON_SAFETY_BLOCKED = 'safety_blocked'
@@ -169,14 +177,8 @@ class MemoryTriggerPolicy:
                 reason=TRIGGER_REASON_TOOL_SUCCESS,
             )
 
-        # 5. existing_memory 非空：续接上一轮 task memory
-        if agent_result.get('memory_context'):
-            return MemoryTriggerDecision(
-                should_extract=True,
-                reason=TRIGGER_REASON_EXISTING_MEMORY,
-            )
-
-        # 6. 全部未命中：纯 RAG 完成 / 完全空执行，不值得触发 Extractor
+        # 5. 全部未命中：纯 RAG 完成 / 完全空执行 / 仅 ACTIVE Memory 等
+        #    "非业务状态变化信号" 场景，不值得触发 Extractor
         return MemoryTriggerDecision(
             should_extract=False,
             reason=NO_TRIGGER_REASON_NO_SIGNAL,

@@ -320,7 +320,7 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 - Memory 写入受状态机白名单约束（无记录仅允许 ACTIVE；终态不可重新激活），非法转换返回 `409 MEMORY_STATE_CONFLICT` 且不落库。
 - Memory 终态由 Java 收口：PendingAction 状态变更（确认成功 → COMPLETED；取消 / 过期 / 处理失败 → ABANDONED）在同一事务内终结对应 ACTIVE memory；动作创建失败时不写入该次 Memory 提案。
 - 同一 `(user_id, conversationId)` 至多一个活动 PendingAction：`ai_task_memory` 以该复合 key 为唯一键、每条会话只有一条任务记忆，因此 Java 在 `createPending` 内（控制锁内）拒绝同会话第二个活动动作，返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；动作进入终态（确认 / 取消 / 过期 / 失败）后同会话才可再发起新申请。
-- Trigger 只允许业务 Proposal 链路（当前白名单 `leave_proposal_tool`）或已有 ACTIVE memory 进入 Extractor；普通 RAG、Evaluation、余额和历史查询不触发；Agent 失败终态（`route=error` 或 `provider_error` / `invalid_decision` / `step_budget_exhausted`）直接短路，不进入 Extractor。
+- Trigger 只允许业务状态变化信号进入 Extractor：`action_proposal` 或 Memory-eligible Tool 成功调用（白名单由 `MemoryTaskTypePolicy` / `MemoryCapabilityRegistry` 提供）。普通 RAG、Evaluation、余额和历史查询以及 Read Path 注入的 `memory_context` 都不触发；Agent 失败终态（`route=error` 或 `provider_error` / `invalid_decision` / `step_budget_exhausted`）直接短路，不进入 Extractor。历史 ACTIVE Memory 仍由 Java Read Path 注入 Planner（不受 Trigger 收敛影响）；Trigger 与 Planner Context 的关注点解耦。
 
 **应用过载响应**（HTTP 429，包含 `Retry-After: 1`）
 ```json

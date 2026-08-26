@@ -5,7 +5,12 @@
 Pipeline 不触发路径：
   1. 完全空执行 → triggered=False；proposal=None；command=None
   2. tool_history 全 blocked → triggered=False
-  3. existing_memory 空 → triggered=False
+  3. 仅 ACTIVE memory（无 action_proposal / tool_success）
+     → triggered=False（Trigger 收敛：memory_context 不再是触发信号）
+  4. **Pipeline 级关键回归（Case A）**：ACTIVE Memory + 普通 RAG 查询，
+     rag_answer_tool success，不存在任何业务信号 → 真实 Pipeline.process()
+     走完后 Extractor LLM 调用 0 次，Dispatcher 调用 0 次，
+     triggered=False，trigger_reason=='no_trigger_signal'。
 
 Pipeline 触发 + Extractor 显式可预期失败（fail-safe noop）：
   4. 未注入 llm_callable → NotImplementedError 降级（triggered=True, proposal=None）
@@ -83,11 +88,99 @@ class TestNoTrigger:
         assert result.command is None
         assert result.error is None
 
-    def test_existing_memory_empty_no_trigger(self):
+    def test_existing_memory_only_does_not_trigger(self):
+        """Trigger 收敛后：仅凭 ACTIVE memory（无业务信号）不触发 Pipeline。
+
+        历史 ACTIVE Memory 是 Read Path / Planner 的输入，不属于 Trigger 关心
+        的"业务状态变化信号"。
+        """
         pipeline = MemoryPipeline()
-        result = pipeline.process({'memory_context': {}})
+        result = pipeline.process({
+            'memory_context': {'taskType': 'LEAVE_REQUEST', 'status': 'ACTIVE'},
+        })
         assert result.triggered is False
         assert result.error is None
+        assert result.trigger_reason == 'no_trigger_signal'
+
+    def test_active_memory_with_rag_skips_extractor_and_dispatcher(self):
+        """Case A 关键回归：ACTIVE Memory + 普通 RAG 完整走真实 Pipeline.process()，
+        Extractor LLM 调用 0 次，Dispatcher 写入 0 次。
+
+        Given:
+          - agent_result 含 ACTIVE memory_context（Phase2 Read Path 注入）；
+          - 本轮是普通 RAG 查询，rag_answer_tool success；
+          - 无 action_proposal；
+          - rag_answer_tool 不属于 Memory-eligible tool。
+        When:
+          - MemoryPipeline.process(...) 真实执行（注入会抛 AssertionError 的 llm）。
+        Then:
+          - result.triggered == False；
+          - trigger_reason == 'no_trigger_signal'；
+          - Extractor 调用 llm_callable 0 次；
+          - Dispatcher writer 被调用 0 次。
+        """
+        llm_invocations: list[tuple[str, str]] = []
+
+        def must_not_call_llm(system: str, user: str) -> str:
+            llm_invocations.append((system, user))
+            raise AssertionError(
+                'ACTIVE Memory + 普通 RAG 不应触发 Memory Extractor LLM'
+            )
+
+        written: list[object] = []
+
+        # Hook 是真实 actor：串联 Pipeline.process → Dispatcher.dispatch → writer。
+        # 它在 Pipeline.triggered == False 时不调用 Dispatcher，正好用来验证
+        # "dispatcher invocation count == 0"。
+        from app.memory.memory_runtime_hook import MemoryRuntimeHook
+        from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
+
+        pipeline = MemoryPipeline(llm_callable=must_not_call_llm)
+        hook = MemoryRuntimeHook(
+            pipeline=pipeline,
+            dispatcher=MemoryWriteDispatcher(writer=lambda cmd: written.append(cmd)),
+        )
+
+        agent_result = {
+            'question': '公司的春节假期安排是什么？',
+            'answer': '...',
+            'route': 'agent',
+            'stop_reason': 'task_complete',
+            'safe': True,
+            'tool_history': [
+                {
+                    'tool_name': 'rag_answer_tool',
+                    'status': 'success',
+                    'arguments': {'query': '春节假期'},
+                    'observation': '春节假期安排如下...',
+                },
+            ],
+            'action_proposal': None,
+            'memory_context': {
+                'taskType': 'LEAVE_REQUEST',
+                'status': 'ACTIVE',
+                'taskStateJson': '{"waiting_for": "date"}',
+                'summary': '等待用户补充请假日期',
+            },
+        }
+
+        result = hook.after_agent_response(agent_result, 'conv-rag-with-active-memory')
+
+        assert result.triggered is False
+        assert result.written is False
+        assert result.error is None
+        assert result.pipeline_result is not None
+        assert result.pipeline_result.triggered is False
+        assert result.pipeline_result.trigger_reason == 'no_trigger_signal'
+        # Pipeline 与 Hook 共同保证：
+        assert llm_invocations == [], (
+            'Extractor 必须在 ACTIVE Memory + 普通 RAG 场景下 0 调用 LLM，'
+            f'实际调用次数={len(llm_invocations)}'
+        )
+        assert written == [], (
+            'Dispatcher 必须在 triggered=False 时 0 调用 writer，'
+            f'实际写入次数={len(written)}'
+        )
 
 
 # ---------- Pipeline 触发 + Extractor 显式可预期失败（fail-safe noop）----------
@@ -253,7 +346,7 @@ class TestTriggeredFullPath:
         assert result.error is None
 
     def test_plain_flow_complete_is_also_blocked(self):
-        """仅 existing_memory 触发时，Python 也不能生成终态命令。"""
+        """Tool-success 触发后，Python 也不能生成终态命令（与 trigger 路径无关）。"""
         def fake_llm(system, user):
             return json.dumps({
                 'action': 'COMPLETE',
@@ -263,7 +356,10 @@ class TestTriggeredFullPath:
 
         pipeline = MemoryPipeline(llm_callable=fake_llm)
         result = pipeline.process({
-            'memory_context': {'task_type': 'GENERIC', 'status': 'ACTIVE'},
+            'tool_history': [
+                {'tool_name': 'leave_proposal_tool', 'status': 'success',
+                 'arguments': {}, 'observation': 'ok'},
+            ],
         })
         assert result.triggered is True
         assert result.proposal.action == 'COMPLETE'
@@ -283,7 +379,7 @@ class TestTriggeredFullPath:
 
         pipeline = MemoryPipeline(llm_callable=fake_llm)
         result = pipeline.process({
-            'memory_context': {'task_type': 'GENERIC', 'status': 'ACTIVE'},
+            'action_proposal': {'action_type': 'GENERIC'},
         })
         assert result.proposal.action == 'UPSERT'
         assert result.proposal.status == 'COMPLETED'
@@ -459,9 +555,12 @@ class TestPipelineBehavior:
     def test_trigger_reason_propagates(self):
         pipeline = MemoryPipeline()
         result = pipeline.process({
-            'memory_context': {'taskType': 'GENERIC', 'status': 'ACTIVE'}
+            'tool_history': [
+                {'tool_name': 'leave_proposal_tool', 'status': 'success',
+                 'arguments': {}, 'observation': 'ok'},
+            ],
         })
-        assert result.trigger_reason == 'existing_memory_present'
+        assert result.trigger_reason == 'tool_history_has_success'
 
     def test_idempotent_same_input(self):
         pipeline = MemoryPipeline()

@@ -1,33 +1,43 @@
 """test_memory_trigger_policy.py —— Memory Trigger Policy 测试
 
-覆盖：
+Trigger 语义收敛后覆盖：
 
 正常 / 触发：
   1. action_proposal 存在 → 触发（reason=action_proposal_present）
-  2. tool_history 含至少一条 success Tool → 触发（reason=tool_history_has_success）
-  3. existing_memory 非空 → 触发（reason=existing_memory_present）
-  4. 多重信号同时存在 → 触发（按优先级 action_proposal > tool_success > existing_memory）
-  5. action_proposal 含 Clarification kind → 仍然触发
+  2. tool_history 含至少一条 success Memory-eligible Tool → 触发
+     （reason=tool_history_has_success）
+  3. action_proposal 含 Clarification kind → 仍然触发
+  4. 多重信号同时存在 → 触发（优先级 action_proposal > tool_success；
+     Read Path 注入的 memory_context 不参与触发优先级）
 
-不触发：
-  6. 完全空执行（question 空 + 无 tool + 无 action_proposal + 无 existing_memory）
-  7. tool_history 全是 blocked / error → 不触发
-  8. existing_memory 空 dict → 不触发
+不触发（Case A / Case B）：
+  5. 完全空执行：question 空 + 无 tool + 无 action_proposal
+  6. tool_history 全是 blocked / error → 不触发
+  7. ACTIVE Memory + RAG（Case A）：memory_context 仅做 Read Path 上下文，
+     不再当作 Trigger 信号 → 不触发
+  8. ACTIVE Memory + 无关查询（Case B）：同上 → 不触发
 
-Safety 短路：
+Safety 短路（Case E）：
   9. safe=False → 直接不触发（reason=safety_blocked）
 
-Agent 失败终态短路：
+Agent 失败终态短路（Case F）：
  10. route=error / stop_reason 失败集合（provider_error / invalid_decision /
      step_budget_exhausted）→ 不触发（reason=agent_failure_terminal），
-     即使已有 ACTIVE memory / action_proposal / tool success
+     即使已有 action_proposal / tool success
 
 边界 / 契约：
  11. 非 dict 输入抛 TypeError
  12. MemoryTriggerDecision extra='forbid'
  13. MemoryTriggerDecision should_extract 是 bool
  14. 评估是 pure-function（多次调用结果一致，无副作用）
+ 15. Default Task Type Policy 透传：leave_proposal_tool 仍为 eligible
+
+扩展入口红线：business_state_signal 等尚未接线的信号源当前不在 Trigger 关心
+范围内，触发必须由现有 Task Type Policy / Capability Registry 提供的白名单
+决定，不接受任何新增"半成品 signal"。
 """
+
+from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
@@ -37,11 +47,11 @@ from app.memory.memory_trigger_policy import (
     NO_TRIGGER_REASON_NO_SIGNAL,
     NO_TRIGGER_REASON_SAFETY_BLOCKED,
     TRIGGER_REASON_ACTION_PROPOSAL,
-    TRIGGER_REASON_EXISTING_MEMORY,
     TRIGGER_REASON_TOOL_SUCCESS,
     MemoryTriggerDecision,
     MemoryTriggerPolicy,
 )
+from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 
 
 @pytest.fixture
@@ -78,6 +88,7 @@ class TestTriggerFire:
         assert decision.reason == TRIGGER_REASON_ACTION_PROPOSAL
 
     def test_leave_proposal_success_triggers(self, policy):
+        """Memory-eligible Tool（leave_proposal_tool）成功触发。"""
         result = {
             'question': '年假制度是什么',
             'answer': '入职满1年5天',
@@ -106,20 +117,6 @@ class TestTriggerFire:
         assert decision.should_extract is True
         assert decision.reason == TRIGGER_REASON_TOOL_SUCCESS
 
-    def test_existing_memory_present_triggers(self, policy):
-        result = {
-            'question': '继续上次的任务',
-            'memory_context': {
-                'taskType': 'LEAVE_REQUEST',
-                'status': 'ACTIVE',
-                'taskStateJson': '{"waiting_for": "date"}',
-                'summary': '等待用户补充请假日期',
-            },
-        }
-        decision = policy.evaluate(result)
-        assert decision.should_extract is True
-        assert decision.reason == TRIGGER_REASON_EXISTING_MEMORY
-
     def test_priority_action_proposal_wins_over_tool_success(self, policy):
         """action_proposal 优先级高于 tool_history。"""
         result = {
@@ -130,16 +127,6 @@ class TestTriggerFire:
         }
         decision = policy.evaluate(result)
         assert decision.reason == TRIGGER_REASON_ACTION_PROPOSAL
-
-    def test_priority_tool_success_wins_over_existing_memory(self, policy):
-        """业务 tool_history 优先级高于 existing_memory。"""
-        result = {
-            'tool_history': [{'tool_name': 'leave_proposal_tool', 'status': 'success',
-                              'arguments': {}, 'observation': 'x'}],
-            'memory_context': {'taskType': 'GENERIC', 'status': 'ACTIVE'},
-        }
-        decision = policy.evaluate(result)
-        assert decision.reason == TRIGGER_REASON_TOOL_SUCCESS
 
 
 # ---------- 不触发 ----------
@@ -175,13 +162,54 @@ class TestNoTrigger:
         assert decision.should_extract is False
         assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
 
-    def test_existing_memory_empty_dict_no_trigger(self, policy):
-        """空 dict 视为 None 等价：不触发。"""
+    # ---- Read Path 注入不再触发（Case A / Case B） ----
+
+    def test_active_memory_with_rag_does_not_trigger(self, policy):
+        """Case A：ACTIVE Memory + RAG（Memory-eligible 之外 Tool 成功）→ 不触发。
+
+        历史 ACTIVE Memory 只是 Planner 的不可信上下文，不再是 Trigger 的触发信号。
+        """
+        result = {
+            'question': '公司的春节假期安排是什么？',
+            'answer': '...',
+            'tool_history': [
+                {'tool_name': 'rag_answer_tool', 'status': 'success',
+                 'arguments': {}, 'observation': 'ok'},
+            ],
+            'memory_context': {
+                'taskType': 'LEAVE_REQUEST',
+                'status': 'ACTIVE',
+                'taskStateJson': '{"waiting_for": "date"}',
+                'summary': '等待用户补充请假日期',
+            },
+        }
+        decision = policy.evaluate(result)
+        assert decision.should_extract is False
+        assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
+
+    def test_active_memory_with_unrelated_query_does_not_trigger(self, policy):
+        """Case B：ACTIVE Memory + 无关查询（无任何业务信号）→ 不触发。"""
+        result = {
+            'question': '顺便问一下，公司食堂几点开？',
+            'answer': '...',
+            'memory_context': {
+                'taskType': 'LEAVE_REQUEST',
+                'status': 'ACTIVE',
+                'taskStateJson': '{"waiting_for": "date"}',
+                'summary': '等待用户补充请假日期',
+            },
+        }
+        decision = policy.evaluate(result)
+        assert decision.should_extract is False
+        assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
+
+    def test_active_memory_empty_dict_does_not_trigger(self, policy):
+        """memory_context 空 dict 视为 None 等价：不触发。"""
         decision = policy.evaluate({'memory_context': {}})
         assert decision.should_extract is False
         assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
 
-    def test_existing_memory_null_no_trigger(self, policy):
+    def test_active_memory_null_does_not_trigger(self, policy):
         decision = policy.evaluate({'memory_context': None})
         assert decision.should_extract is False
         assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
@@ -210,6 +238,7 @@ class TestNoTrigger:
 
 class TestSafetyShortCircuit:
     def test_safe_false_blocks_trigger(self, policy):
+        """Case E：safe=False + 同时存在 action_proposal / eligible tool → safety_blocked。"""
         result = {
             'safe': False,
             'reason': 'prompt_override',
@@ -226,13 +255,16 @@ class TestSafetyShortCircuit:
 # ---------- Agent 失败终态短路 ----------
 
 class TestAgentFailureShortCircuit:
-    def test_route_error_with_existing_memory_blocks_trigger(self, policy):
-        """审计反例：已有 ACTIVE memory + route=error，不得触发 Extractor。"""
+    def test_route_error_with_business_signals_blocks_trigger(self, policy):
+        """Case F：失败终态（route=error）+ 多个正向信号并存 → agent_failure_terminal。"""
         result = {
             'question': '继续上次的任务',
             'route': 'error',
             'stop_reason': 'provider_error',
             'answer': '服务暂时不可用，请稍后重试。',
+            'tool_history': [{'tool_name': 'leave_proposal_tool', 'status': 'success',
+                              'arguments': {}, 'observation': 'x'}],
+            'action_proposal': {'action_type': 'ANNUAL_LEAVE_REQUEST'},
             'memory_context': {
                 'taskType': 'LEAVE_REQUEST',
                 'status': 'ACTIVE',
@@ -281,16 +313,27 @@ class TestAgentFailureShortCircuit:
         assert decision.should_extract is False
         assert decision.reason == NO_TRIGGER_REASON_AGENT_FAILURE
 
-    def test_normal_termination_still_triggers(self, policy):
-        """正常终态（task_complete）不受影响：existing_memory 仍然触发。"""
+    def test_normal_termination_does_not_trigger_without_business_signals(self, policy):
+        """正常终态（task_complete）+ memory_context 不再触发（Case A/B 已覆盖语义）。"""
         result = {
             'route': 'agent',
             'stop_reason': 'task_complete',
             'memory_context': {'taskType': 'GENERIC', 'status': 'ACTIVE'},
         }
         decision = policy.evaluate(result)
+        assert decision.should_extract is False
+        assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
+
+    def test_normal_termination_with_action_proposal_still_triggers(self, policy):
+        """正常终态 + action_proposal：触发优先级不受 normal_termination 影响。"""
+        result = {
+            'route': 'agent',
+            'stop_reason': 'task_complete',
+            'action_proposal': {'action_type': 'ANNUAL_LEAVE_REQUEST'},
+        }
+        decision = policy.evaluate(result)
         assert decision.should_extract is True
-        assert decision.reason == TRIGGER_REASON_EXISTING_MEMORY
+        assert decision.reason == TRIGGER_REASON_ACTION_PROPOSAL
 
     def test_safety_blocked_takes_priority_over_failure(self, policy):
         """safe=False 与失败终态并存时，仍按 Safety 短路（保持原语义）。"""
@@ -350,3 +393,29 @@ class TestPolicyContract:
         }
         decision = policy.evaluate(result)
         assert decision.should_extract is True
+
+
+# ---------- 生产 Capability Registry 校验 ----------
+
+class TestProductionCapabilityRegistryContract:
+    """确认 Trigger 继续依赖现有 Task Type Policy / Capability Registry：
+
+    - ``rag_answer_tool`` 不能是 Memory-eligible tool（普通 RAG 不触发）；
+    - ``leave_proposal_tool`` 必须是 Memory-eligible tool（业务动作链路触发）。
+
+    Trigger 层不维护第二份工具白名单；以下断言直接读取当前默认 policy
+    的 ``eligible_tool_names``，与 ``memory_task_type_policy`` / 业务注册点
+    保持一致。
+    """
+
+    def test_default_policy_does_not_include_rag_answer_tool(self, policy):
+        assert 'rag_answer_tool' not in policy.eligible_tool_names
+
+    def test_default_policy_includes_leave_proposal_tool(self, policy):
+        assert 'leave_proposal_tool' in policy.eligible_tool_names
+
+    def test_default_policy_matches_memory_task_type_policy(self):
+        """Trigger 透传的 eligible_tool_names 必须与 Task Type Policy 完全一致。"""
+        trigger_policy = MemoryTriggerPolicy()
+        task_type_policy = MemoryTaskTypePolicy.default()
+        assert trigger_policy.eligible_tool_names == task_type_policy.eligible_tool_names()

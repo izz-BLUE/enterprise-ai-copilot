@@ -89,7 +89,7 @@ run_langgraph_agent result
 
 | 侧 | 模块 | 职责 |
 | --- | --- | --- |
-| Python | `memory_trigger_policy.py` | 确定性判断是否值得提取 |
+| Python | `memory_trigger_policy.py` | 确定性判断本次 Agent Execution 是否产生业务状态变化信号（`action_proposal` 或 Memory-eligible Tool 成功调用，白名单由 `MemoryTaskTypePolicy` / `MemoryCapabilityRegistry` 提供）。`memory_context` 不再作为 Trigger 触发信号 |
 | Python | `memory_extractor.py` | 将白名单输入解析为 `MemoryProposal` |
 | Python | `memory_write_policy.py` | trusted-key 清洗、脱敏、大小和 ACTIVE-only 约束 |
 | Python | `memory_pipeline.py` | Trigger → Extractor → Policy 编排 |
