@@ -23,9 +23,12 @@ from app.core.observability import (
     shutdown_observability,
     trace_ai_request,
 )
+from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
+from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
 from app.memory.memory_llm_adapter import MemoryLLMAdapter
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
+from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
@@ -82,7 +85,13 @@ def _build_memory_runtime_hook(
     if _memory_execution_policy.mode == 'DISABLED':
         return None
 
-    pipeline = MemoryPipeline(llm_callable=MemoryLLMAdapter(call_llm))
+    # P2-A (V2 §二十六): Capability Registry 是业务 eligibility 唯一真理来源。
+    # 用 DEFAULT_P0_CAPABILITIES（含 EXPENSE_MEMORY_CAPABILITY）+ create_from_registry
+    # 构造 policy；不修改 DEFAULT_TOOL_TO_TASK_TYPE（避免双重 hardcode）。
+    policy = MemoryTaskTypePolicy.create_from_registry(
+        MemoryCapabilityRegistry.of(DEFAULT_P0_CAPABILITIES))
+    pipeline = MemoryPipeline(task_type_policy=policy,
+                              llm_callable=MemoryLLMAdapter(call_llm))
     writer = _ResponseMemoryWriter()
     dispatcher = MemoryWriteDispatcher(writer=writer)
     hook = MemoryRuntimeHook(

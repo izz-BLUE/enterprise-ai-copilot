@@ -20,6 +20,7 @@ P0 行为（GENERIC / LEAVE_REQUEST / BUSINESS_ACTION + leave_proposal_tool）
 
 from __future__ import annotations
 
+from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
 from app.capabilities.memory_capability import MemoryCapability
 
 # ---------------------------------------------------------------------------
@@ -50,17 +51,21 @@ BUSINESS_ACTION_MEMORY_CAPABILITY = MemoryCapability(
 )
 
 
-# 默认 P0 capability 集合（供 MemoryTaskTypePolicy.create_from_registry / 默认兼容使用）
+# 默认 P0 capability 集合（供 MemoryTaskTypePolicy.create_from_registry / 默认兼容使用）。
+# P2-A: 加入 EXPENSE_MEMORY_CAPABILITY（V2 §二十六）—— Capability Registry 是业务
+# eligibility 唯一真理来源；不在此处为 DEFAULT_TOOL_TO_TASK_TYPE 双重 hardcode。
 DEFAULT_P0_CAPABILITIES: tuple[MemoryCapability, ...] = (
     GENERIC_MEMORY_CAPABILITY,
     LEAVE_MEMORY_CAPABILITY,
     BUSINESS_ACTION_MEMORY_CAPABILITY,
+    EXPENSE_MEMORY_CAPABILITY,
 )
 
 
 __all__ = [
     'BUSINESS_ACTION_MEMORY_CAPABILITY',
     'DEFAULT_P0_CAPABILITIES',
+    'EXPENSE_MEMORY_CAPABILITY',
     'GENERIC_MEMORY_CAPABILITY',
     'LEAVE_MEMORY_CAPABILITY',
 ]
