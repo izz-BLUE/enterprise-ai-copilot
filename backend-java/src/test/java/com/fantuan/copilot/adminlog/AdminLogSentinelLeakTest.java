@@ -187,7 +187,8 @@ class AdminLogSentinelLeakTest {
                 new BigDecimal("9.0"),
                 new byte[32],
                 FIXED_CLOCK.instant(),
-                FIXED_CLOCK.instant().plusSeconds(3600));
+                FIXED_CLOCK.instant().plusSeconds(3600),
+                null); // action_payload_json: P2-A V6 新增
         audit.invoke(service, "trace-audit", action,
                 ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
                 "ACTION_SUCCEEDED", "REQ-x", FIXED_CLOCK.instant());

@@ -24,7 +24,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
             action_id, action_type, origin_trace_id, owner_user_id, conversation_id,
             employee_id, display_name, start_date, end_date, half_day, reason, days,
             balance_before, balance_after, confirmation_nonce_digest, status, idempotency_key,
-            request_id, execution_message, failure_code, created_at, expires_at, completed_at
+            request_id, execution_message, failure_code, created_at, expires_at, completed_at,
+            action_payload_json
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -48,10 +49,11 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                     action_id, action_type, origin_trace_id, owner_user_id, conversation_id,
                     employee_id, display_name, start_date, end_date, half_day, reason, days,
                     balance_before, balance_after, confirmation_nonce_digest, status,
-                    created_at, expires_at)
+                    created_at, expires_at, action_payload_json)
                 VALUES (:actionId, :actionType, :originTraceId, :ownerUserId, :conversationId,
                     :employeeId, :displayName, :startDate, :endDate, :halfDay, :reason, :days,
-                    :balanceBefore, :balanceAfter, :nonceDigest, :status, :createdAt, :expiresAt)
+                    :balanceBefore, :balanceAfter, :nonceDigest, :status, :createdAt, :expiresAt,
+                    CAST(:actionPayloadJson AS jsonb))
                 """, p);
     }
 
@@ -177,7 +179,7 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 .addValue("displayName", action.displayName())
                 .addValue("startDate", action.startDate())
                 .addValue("endDate", action.endDate())
-                .addValue("halfDay", action.halfDay().name())
+                .addValue("halfDay", action.halfDay() == null ? null : action.halfDay().name())
                 .addValue("reason", action.reason())
                 .addValue("days", action.days())
                 .addValue("balanceBefore", action.balanceBefore())
@@ -185,7 +187,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 .addValue("nonceDigest", action.confirmationNonceDigest())
                 .addValue("status", action.status().name())
                 .addValue("createdAt", Timestamp.from(action.createdAt()))
-                .addValue("expiresAt", Timestamp.from(action.expiresAt()));
+                .addValue("expiresAt", Timestamp.from(action.expiresAt()))
+                .addValue("actionPayloadJson", action.actionPayloadJson());
     }
 
     private PendingAction map(ResultSet rs, int rowNum) throws SQLException {
@@ -195,13 +198,15 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 rs.getString("conversation_id"), rs.getString("employee_id"),
                 rs.getString("display_name"), rs.getObject("start_date", java.time.LocalDate.class),
                 rs.getObject("end_date", java.time.LocalDate.class),
-                HalfDay.valueOf(rs.getString("half_day")), rs.getString("reason"),
+                rs.getString("half_day") == null ? null : HalfDay.valueOf(rs.getString("half_day")),
+                rs.getString("reason"),
                 rs.getBigDecimal("days"), rs.getBigDecimal("balance_before"),
                 rs.getBigDecimal("balance_after"), rs.getBytes("confirmation_nonce_digest"),
                 ActionStatus.valueOf(rs.getString("status")),
                 rs.getObject("idempotency_key", UUID.class), rs.getString("request_id"),
                 rs.getString("execution_message"), rs.getString("failure_code"),
-                instant(rs, "created_at"), instant(rs, "expires_at"), instant(rs, "completed_at"));
+                instant(rs, "created_at"), instant(rs, "expires_at"), instant(rs, "completed_at"),
+                rs.getString("action_payload_json"));
     }
 
     private Instant instant(ResultSet rs, String column) throws SQLException {

@@ -46,7 +46,8 @@ class ActionAuditLoggingTest {
                 new BigDecimal("4.0"),
                 new byte[32],
                 now,
-                now.plusSeconds(600));
+                now.plusSeconds(600),
+                null); // action_payload_json: P2-A V6 新增，测试直接构造不填充
         BusinessActionService service = new BusinessActionService(
                 new BusinessActionProperties(),
                 mock(com.fantuan.copilot.service.AdminAccessService.class),

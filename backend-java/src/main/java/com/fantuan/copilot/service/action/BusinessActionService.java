@@ -4,12 +4,14 @@ import com.fantuan.copilot.adminlog.AdminLogBuffer;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.AnnualLeaveSummary;
+import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionGateway;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionResult;
 import com.fantuan.copilot.gateway.leave.LeaveSubmission;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
+import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
@@ -74,27 +76,49 @@ public class BusinessActionService {
     }
 
     /**
-     * 创建待确认动作。conversationId 来自 Java 侧服务端解析的会话 ID（与 Memory
-     * 复合 key 对齐）；ownerUserId 取自 trusted DemoIdentity.userId()。二者用于
-     * 动作终态时收口 ACTIVE Memory，允许为 null（历史数据 / 无 Memory 关联）。
+     * 创建待确认动作。
+     *
+     * V2 §十六：参数类型改为 BusinessActionProposal；Controller 不做 subtype 分发，
+     * 由本方法按 proposal.actionType() 路由到具体业务逻辑（Phase 4 仅 ANNUAL_LEAVE_REQUEST
+     * 路径实现，EXPENSE_CLAIM 暂时抛 INVALID_REQUEST；Phase 5 引入 HandlerRegistry
+     * 后替换此处分发）。
+     *
+     * conversationId 来自 Java 侧服务端解析的会话 ID（与 Memory 复合 key 对齐）；
+     * ownerUserId 取自 trusted DemoIdentity.userId()。二者用于动作终态时收口
+     * ACTIVE Memory，允许为 null（历史数据 / 无 Memory 关联）。
      */
     @Transactional
-    public PendingActionView createPending(AnnualLeaveActionProposal proposal,
+    public PendingActionView createPending(BusinessActionProposal proposal,
                                            String originTraceId,
                                            String presentedToken,
                                            DemoIdentity identity,
                                            String conversationId) {
+        if (proposal == null) {
+            throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
+                    "缺少 action_proposal。", null, null);
+        }
+        // Phase 4 阶段：只有 AnnualLeaveActionProposal 是受支持的 subtype。
+        // Phase 5 引入 BusinessActionHandlerRegistry 后，此处改为
+        // proposal.actionType() → handlerRegistry.get(actionType) → handler.validate(...)。
+        if (!(proposal instanceof AnnualLeaveActionProposal annualLeave)) {
+            // ExpenseActionProposal 在 Phase 6 才真正允许；当前阶段显式拒绝，
+            // 避免误开 Expense 业务写入。
+            throw new ActionException(HttpStatus.BAD_REQUEST,
+                    "INVALID_REQUEST",
+                    "暂不支持的 action subtype: " + proposal.getClass().getSimpleName(),
+                    null, null);
+        }
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
         AnnualLeaveProposalValidator.ValidatedLeave validated =
-                AnnualLeaveProposalValidator.validate(proposal, businessDate());
+                AnnualLeaveProposalValidator.validate(annualLeave, businessDate());
         Instant now = clock.instant();
 
         // 账户和冲突校验先按员工行锁并行执行，缩短全局容量锁的持有时间。
         BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
                 .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
         if (leaveExecutionGateway.hasConflict(identity.employeeId(),
-                proposal.startDate(), proposal.endDate())) {
+                annualLeave.startDate(), annualLeave.endDate())) {
             throw rule("日期范围与已提交的模拟申请冲突。");
         }
         if (balanceBefore.compareTo(validated.days()) < 0) {
@@ -125,13 +149,16 @@ public class BusinessActionService {
 
         BigDecimal balanceAfter = balanceBefore.subtract(validated.days());
         ActionNonceService.Nonce nonce = nonceService.create();
+        String payloadJson = annualLeavePayloadJson(
+                annualLeave.startDate(), annualLeave.endDate(), annualLeave.halfDay(),
+                validated.reason(), validated.days(), balanceBefore, balanceAfter);
         PendingAction action = PendingAction.pending(randomActionId(),
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, originTraceId,
                 identity.userId(), conversationId,
                 identity.employeeId(), identity.displayName(),
-                proposal.startDate(), proposal.endDate(), proposal.halfDay(), validated.reason(),
+                annualLeave.startDate(), annualLeave.endDate(), annualLeave.halfDay(), validated.reason(),
                 validated.days(), balanceBefore, balanceAfter, nonce.digest(), now,
-                now.plusSeconds(properties.getTtlSeconds()));
+                now.plusSeconds(properties.getTtlSeconds()), payloadJson);
         actions.saveNew(action);
         if (actions.size() > properties.getMaxPending() + properties.getMaxCompleted()) {
             actions.maintainBounds(properties.getMaxCompleted());
@@ -287,6 +314,38 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.FORBIDDEN,
                     "ADMIN_REQUIRED", "需要管理员权限。", null, null);
         }
+    }
+
+    /**
+     * 生成 ANNUAL_LEAVE_REQUEST 的 action_payload_json（V2 §十八）。
+     *
+     * 字段命名与 Python 侧 ExpenseActionProposal 的 @JsonAlias 一致使用
+     * camelCase（startDate / endDate / halfDay / reason / days / balanceBefore /
+     * balanceAfter）；都是简单值，手写 JSON 足够。
+     */
+    static String annualLeavePayloadJson(LocalDate startDate, LocalDate endDate,
+                                         HalfDay halfDay, String reason,
+                                         BigDecimal days, BigDecimal balanceBefore,
+                                         BigDecimal balanceAfter) {
+        return "{\"startDate\":\"" + startDate + "\","
+                + "\"endDate\":\"" + endDate + "\","
+                + "\"halfDay\":\"" + halfDay.name() + "\","
+                + "\"reason\":\"" + escapeJson(reason) + "\","
+                + "\"days\":" + days.toPlainString() + ","
+                + "\"balanceBefore\":" + balanceBefore.toPlainString() + ","
+                + "\"balanceAfter\":" + balanceAfter.toPlainString() + ","
+                + "\"schemaVersion\":1}";
+    }
+
+    static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     private PendingAction findForUpdate(String actionId) {
