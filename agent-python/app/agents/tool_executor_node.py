@@ -23,17 +23,21 @@ from pydantic import ValidationError
 from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
 )
 from app.tools.enterprise_tools import (
+    invoice_verify_tool,
     leave_balance_tool,
     leave_proposal_tool,
     leave_request_tool,
+    travel_record_tool,
 )
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool
 
@@ -172,6 +176,33 @@ def _inject_leave_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     return merged
 
 
+# ── P2-A Expense Workflow V1: 共享 MCP read pre-inject 钩子 ─────────────
+# travel_record_tool 与 invoice_verify_tool 都要求 identity_required=true
+# 且 executor 注入 employee_id / trace_id；LLM 不得传 employee_id（V2 §十一）。
+# limit 不属于 LLM 必填字段，Executor 注入默认值。
+_OAMCP_READ_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
+
+
+def _inject_oamcp_read(args: dict, ctx: _ExecutorContext) -> dict:
+    """Enterprise OA MCP 只读 Tool 的 pre-inject 钩子。
+
+    - 注入 employee_id / trace_id（trusted system field）
+    - 拒绝 LLM 在 arguments 中夹带 employee_id / trace_id
+    - 对 travel_record_tool：注入默认 limit=10
+    """
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_OAMCP_READ_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['employee_id'] = ctx.employee_id
+    merged['trace_id'] = ctx.trace_id
+    if _calling_tool_name_for_log() == TRAVEL_RECORD_TOOL_NAME and 'limit' not in merged:
+        merged['limit'] = 10
+    return merged
+
+
 # Module-level mutable so _inject_leave_read / _inject_leave_proposal can
 # reference the calling tool name for error messages. Set per-call by
 # tool_executor_node.
@@ -246,6 +277,24 @@ def _build_registry() -> dict[str, ToolSpec]:
             pre_inject=_inject_leave_proposal,
             proposal_post=_leave_proposal_post,
         ),
+        # P2-A Expense Workflow V1：Phase 3 注册 travel/invoice read Tool
+        TRAVEL_RECORD_TOOL_NAME: ToolSpec(
+            name=TRAVEL_RECORD_TOOL_NAME,
+            executable_ref='travel_record_tool',
+            identity_required=True,
+            system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
+        INVOICE_VERIFY_TOOL_NAME: ToolSpec(
+            name=INVOICE_VERIFY_TOOL_NAME,
+            executable_ref='invoice_verify_tool',
+            identity_required=True,
+            system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
+        # expense_proposal_tool / expense_status_tool 在 Phase 7 / Phase 8 加入。
     }
 
 

@@ -7,19 +7,26 @@ planner_node.py —— Planner 节点
 """
 
 import json
+import os
 from time import monotonic
 
 from pydantic import ValidationError
 
 from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
+
+ENTERPRISE_OA_MCP_URL_CONFIG = os.environ.get('ENTERPRISE_OA_MCP_URL', '')
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_MAX_LIMIT,
     LEAVE_REQUEST_MIN_LIMIT,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
 )
@@ -46,6 +53,26 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
         '进入受控年假申请草稿链路:程序层基于用户原始问题确定性解析'
         '日期 / 原因 / 半天等信息,生成待用户确认的申请草稿(Proposal),'
         '不会真正提交任何写操作。无参数。'
+    ),
+    # P2-A Expense Workflow V1: 4 个新 Tool 描述
+    TRAVEL_RECORD_TOOL_NAME: (
+        '查询当前登录用户自己的出差记录。返回每条 trip 及其关联的 '
+        'expense_documents(invoice reference,需 invoice_verify_tool 验真)。'
+        '无 LLM 入参,身份与 limit 由程序层注入。'
+    ),
+    INVOICE_VERIFY_TOOL_NAME: (
+        '校验发票 / 费用凭证。LLM 仅允许传 invoice_id;employee_id 由程序层'
+        '注入并在端内做 ownership check,跨员工调用被拒绝。返回 valid / amount / '
+        'category / duplicate 等字段。'
+    ),
+    EXPENSE_PROPOSAL_TOOL_NAME: (
+        '进入受控报销草稿链路:程序层基于 tool_history 中已成功完成的 '
+        'travel / invoice / RAG 事实抽取 ExpenseProposalContext,生成待用户确认的'
+        '报销申请草稿(ExpenseActionProposal),不会提交任何写操作。无 LLM 入参。'
+    ),
+    EXPENSE_STATUS_TOOL_NAME: (
+        '查询当前登录用户自己的报销状态。LLM 可选传 expense_id;身份由程序层'
+        '注入;跨员工调用被拒绝。返回 status / 金额 / submitted_at 等。'
     ),
 }
 
@@ -126,6 +153,19 @@ TOOL_ARGUMENT_CONTRACTS: dict[str, str] = {
     LEAVE_PROPOSAL_TOOL_NAME: (
         '必须为空对象 {}；日期 / 原因 / 半天等业务参数由程序层基于用户原始问题解析。'
     ),
+    # P2-A Expense Workflow V1: 4 个新 Tool 参数契约
+    TRAVEL_RECORD_TOOL_NAME: (
+        '必须为空对象 {}；employee_id / limit 由程序层注入（V2 §十一）。'
+    ),
+    INVOICE_VERIFY_TOOL_NAME: (
+        '只允许 {"invoice_id": "..."}；employee_id 不得由 LLM 提供（V2 §十一）。'
+    ),
+    EXPENSE_PROPOSAL_TOOL_NAME: (
+        '必须为空对象 {}；业务事实由程序层从 tool_history 注入。'
+    ),
+    EXPENSE_STATUS_TOOL_NAME: (
+        '可空或 {"expense_id": "..."}；employee_id 由程序层注入。'
+    ),
 }
 
 TOOL_REASON_CODES: dict[str, str] = {
@@ -134,6 +174,11 @@ TOOL_REASON_CODES: dict[str, str] = {
     LEAVE_BALANCE_TOOL_NAME: 'need_balance',
     LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
     LEAVE_PROPOSAL_TOOL_NAME: 'need_proposal',
+    # P2-A Expense Workflow V1
+    TRAVEL_RECORD_TOOL_NAME: 'need_travel_history',
+    INVOICE_VERIFY_TOOL_NAME: 'need_invoice_verify',
+    EXPENSE_PROPOSAL_TOOL_NAME: 'need_expense_proposal',
+    EXPENSE_STATUS_TOOL_NAME: 'need_expense_status',
 }
 
 TOOL_EXAMPLES: dict[str, dict] = {
@@ -166,6 +211,31 @@ TOOL_EXAMPLES: dict[str, dict] = {
         'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_proposal',
+    },
+    # P2-A Expense Workflow V1
+    TRAVEL_RECORD_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': TRAVEL_RECORD_TOOL_NAME,
+        'arguments': {},
+        'reason_code': 'need_travel_history',
+    },
+    INVOICE_VERIFY_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': INVOICE_VERIFY_TOOL_NAME,
+        'arguments': {'invoice_id': 'INV-001'},
+        'reason_code': 'need_invoice_verify',
+    },
+    EXPENSE_PROPOSAL_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'arguments': {},
+        'reason_code': 'need_expense_proposal',
+    },
+    EXPENSE_STATUS_TOOL_NAME: {
+        'action': 'tool',
+        'tool_name': EXPENSE_STATUS_TOOL_NAME,
+        'arguments': {},
+        'reason_code': 'need_expense_status',
     },
 }
 
@@ -236,11 +306,19 @@ def visible_tools(
     allow_business_actions: bool,
     java_base_url: str,
     java_internal_token: str,
+    enterprise_oa_mcp_url: str = '',
 ) -> list[str]:
     """根据可信 AgentState 和 Python 服务配置计算当前可见 Tool。
 
-    Capability Gate 只决定 Planner 应看到什么；Executor、Tool、Java 仍保留
-    各自的确定性执行校验。business_date 不属于本次 Gate 条件。
+    Capability Gate 只决定 Planner 应看到什么；Executor、Tool、Java / MCP
+    仍保留各自的确定性执行校验。business_date 不属于本次 Gate 条件。
+
+    P2-A Expense Workflow V1（V2 §三、§十一）：
+    - travel_record_tool：按 OA MCP 配置 + employee_id 可见
+    - invoice_verify_tool：按 OA MCP 配置 + employee_id 可见（ownership
+      check 由 MCP 端做；身份仍由 Executor 注入）
+    - expense_proposal_tool：allow_business_actions + employee_id 可见
+    - expense_status_tool：按 Java config + employee_id 可见
     """
     has_employee_id = _has_value(employee_id)
     has_java_read_config = (
@@ -248,13 +326,23 @@ def visible_tools(
         and _has_value(java_base_url)
         and _has_value(java_internal_token)
     )
+    has_oamcp_config = _has_value(enterprise_oa_mcp_url)
     tools = [RAG_TOOL_NAME]
     if has_java_read_config:
         tools.extend([LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME])
+    if has_oamcp_config and has_employee_id:
+        tools.extend([TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
     if allow_eval:
         tools.append(EVAL_TOOL_NAME)
     if allow_business_actions and has_employee_id:
         tools.append(LEAVE_PROPOSAL_TOOL_NAME)
+        # expense_proposal_tool 与 leave_proposal_tool 共享同一个授权条件：
+        # 受控业务动作 + 员工身份。Phase 7 时由 registry 兜底（Tool 未注册则
+        # Planner 不会见到对应名称）。
+        tools.append(EXPENSE_PROPOSAL_TOOL_NAME)
+    if has_java_read_config:
+        # expense_status_tool 走 Java /api/internal/expense/status（Phase 8）。
+        tools.append(EXPENSE_STATUS_TOOL_NAME)
     return tools
 
 
@@ -398,6 +486,7 @@ def planner_node(state: dict) -> dict:
         allow_business_actions=allow_business_actions,
         java_base_url=JAVA_BASE_URL,
         java_internal_token=JAVA_INTERNAL_TOKEN,
+        enterprise_oa_mcp_url=ENTERPRISE_OA_MCP_URL_CONFIG,
     )
 
     user_prompt = build_planner_prompt(

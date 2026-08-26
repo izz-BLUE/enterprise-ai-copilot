@@ -16,6 +16,10 @@ from typing import Any
 from langchain_core.tools import tool
 
 from app.clients.java_client import JavaClientError, get_java_client
+from app.integrations.mcp.enterprise_oa_client import (
+    OaMcpClientError,
+    get_enterprise_oa_client,
+)
 
 
 def _json_default(obj: Any) -> Any:
@@ -191,4 +195,121 @@ def leave_proposal_tool(
         None,
         result.error_code,
         '暂时无法生成申请草稿，请检查信息后重试。',
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# P2-A Expense Workflow V1: travel_record_tool / invoice_verify_tool
+# （Phase 3；Phase 7 加 expense_proposal_tool；Phase 8 加 expense_status_tool）
+# ──────────────────────────────────────────────────────────────────────
+#
+# 这两个 Tool 都通过 Enterprise OA MCP Client Adapter 调用：
+# - Planner 看到的是 Tool 业务接口（employee_id / invoice_id），看不到
+#   transport / session / JSON-RPC / method names（V2 §八 / §二十二）。
+# - identity_required=true：employee_id / trace_id 由 Executor 从 AgentState
+#   注入；模型在 arguments 中**禁止**提供 employee_id（V2 §十一）。
+# - travel_record_tool：LLM 无入参；employee_id 由 Executor 注入。
+# - invoice_verify_tool：LLM 仅允许传 invoice_id；employee_id 由 Executor
+#   注入；MCP 端再做 ownership check（V2 §七 + §十一）。
+# ──────────────────────────────────────────────────────────────────────
+
+
+@tool
+def travel_record_tool(
+    employee_id: str = '',
+    trace_id: str = '',
+    limit: int = 10,
+) -> str:
+    """查询当前登录用户自己的出差记录。
+
+    该 Tool 无 LLM 入参；employee_id / trace_id / limit 全部由 Tool Executor
+    从 AgentState 注入（V2 §十一）。模型不得在 arguments 中提供这些字段。
+
+    返回 JSON 字符串：success 时携带 items（trip 列表，每条带关联
+    expense_documents = invoice reference，仅作参考、需 invoice_verify 验真）。
+    """
+    eid = _require_identity(employee_id)
+    if eid is None:
+        return _identity_error()
+
+    try:
+        data = get_enterprise_oa_client().travel_record_get(
+            employee_id=eid,
+            limit=limit,
+        )
+    except OaMcpClientError as exc:
+        return _payload(False, None, exc.code, str(exc))
+
+    if not data.get('success', False):
+        return _payload(
+            False,
+            None,
+            data.get('error_code', 'OA_MCP_TOOL_ERROR'),
+            data.get('message', 'MCP Tool 返回错误'),
+        )
+    items = data.get('items', [])
+    return _payload(
+        True,
+        {
+            'total': len(items),
+            'items': items,
+            'source': 'mcp:enterprise_oa',
+        },
+        None,
+        None,
+    )
+
+
+@tool
+def invoice_verify_tool(
+    invoice_id: str = '',
+    employee_id: str = '',
+    trace_id: str = '',
+) -> str:
+    """校验发票 / 费用凭证。
+
+    LLM 入参：invoice_id（V2 §十一：强制 identity_required=true，employee_id
+    不得由 LLM 提供）。
+    系统字段（由 Executor 注入）：employee_id / trace_id。
+
+    返回 JSON 字符串：success 时携带 valid / amount / category / duplicate 等；
+    跨员工调用由 MCP 端 ownership check 拒绝（OA_MCP_INVOICE_OWNERSHIP）。
+    """
+    eid = _require_identity(employee_id)
+    if eid is None:
+        return _identity_error()
+    if not invoice_id or not invoice_id.strip():
+        return _payload(
+            False, None, 'INVOICE_ID_REQUIRED', '缺少 invoice_id 参数，无法验真。'
+        )
+
+    try:
+        data = get_enterprise_oa_client().invoice_verify(
+            invoice_id=invoice_id.strip(),
+            employee_id=eid,
+        )
+    except OaMcpClientError as exc:
+        return _payload(False, None, exc.code, str(exc))
+
+    if not data.get('success', False):
+        return _payload(
+            False,
+            None,
+            data.get('error_code', 'OA_MCP_TOOL_ERROR'),
+            data.get('message', 'MCP Tool 返回错误'),
+        )
+    return _payload(
+        True,
+        {
+            'invoice_id': data.get('invoice_id'),
+            'valid': data.get('valid'),
+            'amount': data.get('amount'),
+            'category': data.get('category'),
+            'duplicate': data.get('duplicate'),
+            'issued_at': data.get('issued_at'),
+            'vendor': data.get('vendor'),
+            'source': 'mcp:enterprise_oa',
+        },
+        None,
+        None,
     )

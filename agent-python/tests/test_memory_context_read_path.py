@@ -31,6 +31,8 @@ from app.main import _memory_context_to_dict
 from app.schemas.chat_schema import ChatRequest, MemoryContext
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
@@ -185,13 +187,17 @@ class TestPlannerPromptMemoryContext:
         tools_without = visible_tools(**common)
         tools_with = visible_tools(**common)  # 同样的输入，输出必然相同
         assert tools_without == tools_with
-        # 显式断言 5 个 Tool 都被 visibility 覆盖
+        # P2-A: 显式断言当前可见 Tool 集合。
+        # OA MCP URL 为空 → travel/invoice 不可见；java config 齐全 →
+        # expense_status_tool 可见；allow_business_actions → proposal 两个。
         assert set(tools_with) == {
             RAG_TOOL_NAME,
             EVAL_TOOL_NAME,
             LEAVE_BALANCE_TOOL_NAME,
             LEAVE_REQUEST_TOOL_NAME,
             LEAVE_PROPOSAL_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
         }
 
 

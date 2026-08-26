@@ -18,6 +18,11 @@ ToolName = Literal[
     'leave_balance_tool',
     'leave_request_tool',
     'leave_proposal_tool',
+    # P2-A Expense Workflow V1: 4 个新 Tool
+    'travel_record_tool',
+    'invoice_verify_tool',
+    'expense_proposal_tool',
+    'expense_status_tool',
 ]
 ReasonCode = Literal[
     'need_knowledge',
@@ -25,6 +30,10 @@ ReasonCode = Literal[
     'need_balance',
     'need_leave_history',
     'need_proposal',
+    'need_travel_history',
+    'need_invoice_verify',
+    'need_expense_proposal',
+    'need_expense_status',
     'task_complete',
     'not_allowed',
     'cannot_complete',
@@ -35,6 +44,11 @@ EVAL_TOOL_NAME = 'eval_report_tool'
 LEAVE_BALANCE_TOOL_NAME = 'leave_balance_tool'
 LEAVE_REQUEST_TOOL_NAME = 'leave_request_tool'
 LEAVE_PROPOSAL_TOOL_NAME = 'leave_proposal_tool'
+# P2-A Expense Workflow V1: 4 个新 Tool
+TRAVEL_RECORD_TOOL_NAME = 'travel_record_tool'
+INVOICE_VERIFY_TOOL_NAME = 'invoice_verify_tool'
+EXPENSE_PROPOSAL_TOOL_NAME = 'expense_proposal_tool'
+EXPENSE_STATUS_TOOL_NAME = 'expense_status_tool'
 VALID_REPORT_TYPES = ('retrieval', 'generation', 'all')
 LEAVE_REQUEST_MIN_LIMIT = 1
 LEAVE_REQUEST_MAX_LIMIT = 50
@@ -47,6 +61,12 @@ _EVAL_TOOL_ARG_KEYS = frozenset({'report_type'})
 _LEAVE_BALANCE_ARG_KEYS = frozenset()  # 无 LLM 入参;身份全部由 Executor 注入
 _LEAVE_REQUEST_ARG_KEYS = frozenset({'limit'})
 _LEAVE_PROPOSAL_ARG_KEYS = frozenset()  # 不接受 LLM 入参;由 Executor 从原始问题解析
+# P2-A: travel_record_tool 与 expense_status_tool 都不接受 LLM 入参;
+# invoice_verify_tool 强制 identity_required=true，LLM 仅能传 invoice_id。
+_TRAVEL_RECORD_ARG_KEYS = frozenset()
+_INVOICE_VERIFY_ARG_KEYS = frozenset({'invoice_id'})
+_EXPENSE_PROPOSAL_ARG_KEYS = frozenset()  # Phase 7: 不接受 LLM 入参
+_EXPENSE_STATUS_ARG_KEYS = frozenset({'expense_id'})  # 可选 LLM 入参（按 expense_id 查询）
 
 
 class PlannerDecisionError(ValueError):
@@ -85,6 +105,14 @@ class PlannerDecision(BaseModel):
                 self._validate_leave_request()
             elif self.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
                 self._validate_leave_proposal()
+            elif self.tool_name == TRAVEL_RECORD_TOOL_NAME:
+                self._validate_travel_record()
+            elif self.tool_name == INVOICE_VERIFY_TOOL_NAME:
+                self._validate_invoice_verify()
+            elif self.tool_name == EXPENSE_PROPOSAL_TOOL_NAME:
+                self._validate_expense_proposal()
+            elif self.tool_name == EXPENSE_STATUS_TOOL_NAME:
+                self._validate_expense_status()
             else:
                 raise PlannerDecisionError(f'未知 tool_name: {self.tool_name}')
         else:
@@ -184,4 +212,83 @@ class PlannerDecision(BaseModel):
         if self.reason_code != 'need_proposal':
             raise PlannerDecisionError(
                 'leave_proposal_tool 的 reason_code 必须是 need_proposal'
+            )
+
+    # ── P2-A Expense Workflow V1: 4 新 Tool 校验 ──────────────────
+
+    def _validate_travel_record(self) -> None:
+        # travel_record_tool 不接受 LLM 入参:employee_id / limit 等均由
+        # Executor 从 AgentState 注入。
+        if not isinstance(self.arguments, dict):
+            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
+        if self.answer is not None:
+            raise PlannerDecisionError('action=tool 不得携带 answer')
+        if set(self.arguments) != _TRAVEL_RECORD_ARG_KEYS:
+            raise PlannerDecisionError(
+                'travel_record_tool 不接受任何 LLM 参数；employee_id / limit 由程序层注入'
+            )
+        if self.reason_code != 'need_travel_history':
+            raise PlannerDecisionError(
+                'travel_record_tool 的 reason_code 必须是 need_travel_history'
+            )
+
+    def _validate_invoice_verify(self) -> None:
+        # invoice_verify_tool 强制 identity_required=true（V2 §十一）：
+        # LLM 只能传 invoice_id；employee_id / trace_id 由 Executor 注入。
+        if not isinstance(self.arguments, dict):
+            raise PlannerDecisionError('action=tool 必须提供 arguments')
+        if self.answer is not None:
+            raise PlannerDecisionError('action=tool 不得携带 answer')
+        if set(self.arguments) != _INVOICE_VERIFY_ARG_KEYS:
+            raise PlannerDecisionError(
+                f'invoice_verify_tool 的 arguments 只允许字段 '
+                f'{sorted(_INVOICE_VERIFY_ARG_KEYS)}；employee_id 不得由 LLM 提供'
+            )
+        invoice_id = self.arguments.get('invoice_id')
+        if not isinstance(invoice_id, str) or not invoice_id.strip():
+            raise PlannerDecisionError('invoice_verify_tool 必须提供非空 invoice_id 参数')
+        if self.reason_code != 'need_invoice_verify':
+            raise PlannerDecisionError(
+                'invoice_verify_tool 的 reason_code 必须是 need_invoice_verify'
+            )
+
+    def _validate_expense_proposal(self) -> None:
+        # expense_proposal_tool 不接受 LLM 入参：trip_id / 费用明细 / cost_center
+        # 等由 Executor 注入的 ExpenseProposalContext 携带（tool_history 中已成功
+        # 完成的 travel/invoice/rag observation 抽取）。
+        if not isinstance(self.arguments, dict):
+            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
+        if self.answer is not None:
+            raise PlannerDecisionError('action=tool 不得携带 answer')
+        if set(self.arguments) != _EXPENSE_PROPOSAL_ARG_KEYS:
+            raise PlannerDecisionError(
+                'expense_proposal_tool 不接受任何 LLM 参数；'
+                '业务事实由 Executor 从 tool_history 注入'
+            )
+        if self.reason_code != 'need_expense_proposal':
+            raise PlannerDecisionError(
+                'expense_proposal_tool 的 reason_code 必须是 need_expense_proposal'
+            )
+
+    def _validate_expense_status(self) -> None:
+        # expense_status_tool：employee_id 由 Executor 注入，LLM 可选传 expense_id。
+        if not isinstance(self.arguments, dict):
+            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
+        if self.answer is not None:
+            raise PlannerDecisionError('action=tool 不得携带 answer')
+        arg_keys = set(self.arguments)
+        if not arg_keys.issubset(_EXPENSE_STATUS_ARG_KEYS):
+            raise PlannerDecisionError(
+                f'expense_status_tool 的 arguments 只允许字段 '
+                f'{sorted(_EXPENSE_STATUS_ARG_KEYS)}'
+            )
+        if 'expense_id' in self.arguments:
+            eid = self.arguments['expense_id']
+            if not isinstance(eid, str) or not eid.strip():
+                raise PlannerDecisionError(
+                    'expense_status_tool 的 expense_id 必须是非空字符串'
+                )
+        if self.reason_code != 'need_expense_status':
+            raise PlannerDecisionError(
+                'expense_status_tool 的 reason_code 必须是 need_expense_status'
             )
