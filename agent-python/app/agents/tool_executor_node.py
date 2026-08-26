@@ -24,6 +24,7 @@ from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
@@ -35,6 +36,7 @@ from app.schemas.planner_schema import (
 )
 from app.tools.enterprise_tools import (
     expense_proposal_tool,
+    expense_status_tool,
     invoice_verify_tool,
     leave_balance_tool,
     leave_proposal_tool,
@@ -394,7 +396,15 @@ def _build_registry() -> dict[str, ToolSpec]:
             no_employee_blocked_category='business_action',
             pre_inject=_inject_expense_proposal,
         ),
-        # expense_status_tool 在 Phase 8 加入。
+        # P2-A Phase 8: expense_status_tool —— Java 权威状态查询（source=Java）
+        EXPENSE_STATUS_TOOL_NAME: ToolSpec(
+            name=EXPENSE_STATUS_TOOL_NAME,
+            executable_ref='expense_status_tool',
+            identity_required=True,
+            system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
     }
 
 

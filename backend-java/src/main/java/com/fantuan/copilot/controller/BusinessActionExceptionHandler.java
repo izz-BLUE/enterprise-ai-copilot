@@ -17,7 +17,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice(assignableTypes = {
         BusinessActionController.class,
         DemoIdentityController.class,
-        LeaveReadController.class
+        LeaveReadController.class,
+        ExpenseReadController.class
 })
 public class BusinessActionExceptionHandler {
 

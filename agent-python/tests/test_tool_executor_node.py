@@ -381,12 +381,13 @@ class TestToolRegistryBudget:
         from app.agents.tool_executor_node import _TOOL_REGISTRY
         from app.schemas.planner_schema import (
             EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
             INVOICE_VERIFY_TOOL_NAME,
             TRAVEL_RECORD_TOOL_NAME,
         )
         names = set(_TOOL_REGISTRY.keys())
         # P2-A: travel/invoice 在 Phase 3；expense_proposal 在 Phase 7；
-        # expense_status 在 Phase 8 加入（此时还未注册）。
+        # expense_status 在 Phase 8 加入 —— 4 个新 Tool 全部注册。
         assert names == {
             RAG_TOOL_NAME,
             EVAL_TOOL_NAME,
@@ -396,6 +397,7 @@ class TestToolRegistryBudget:
             TRAVEL_RECORD_TOOL_NAME,
             INVOICE_VERIFY_TOOL_NAME,
             EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
         }
 
     def test_max_tool_calls_is_five(self):

@@ -1,7 +1,7 @@
 """java_client.py —— Python → Java 内部 HTTP 客户端（只读企业 Tool 使用）
 
 约束：
-- 仅支持 leave_balance / leave_request 两个 GET；
+- 支持 leave_balance / leave_request / expense_status / expense_recent GET；
 - 不做 retry / fallback / gateway 抽象；
 - 鉴权靠 JAVA_INTERNAL_TOKEN，身份通过 employee_id 入参（已由 Java 注入到 header 后转发）；
 - 任何异常都向上抛，由 Tool 转成稳定 Observation，不在客户端做熔断 / 重试。
@@ -33,6 +33,35 @@ class JavaReadClient:
         self._base_url = base_url.rstrip('/')
         self._internal_token = internal_token
         self._timeout = httpx.Timeout(timeout_seconds, connect=timeout_seconds)
+
+    def get_expense_status(
+        self,
+        employee_id: str,
+        trace_id: str,
+        expense_id: str,
+    ) -> dict[str, Any]:
+        return self._get(
+            '/api/internal/expense/status',
+            employee_id=employee_id,
+            trace_id=trace_id,
+            params={'expenseId': expense_id},
+        )
+
+    def list_expense_recent(
+        self,
+        employee_id: str,
+        trace_id: str,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {}
+        if limit is not None:
+            params['limit'] = str(limit)
+        return self._get(
+            '/api/internal/expense/recent',
+            employee_id=employee_id,
+            trace_id=trace_id,
+            params=params or None,
+        )
 
     def get_leave_balance(
         self,

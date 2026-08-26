@@ -460,3 +460,62 @@ def expense_proposal_tool(
         None,
         None,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# P2-A Expense Workflow V1: expense_status_tool（Phase 8）
+# ──────────────────────────────────────────────────────────────────────
+# 来源：Java /api/internal/expense/status（V2 §二十四），不是 MCP。
+# 身份由 Java 权威决定：employee_id 由 Executor 注入；LLM 可选提供 expense_id；
+# Java 侧做 ownership check（跨员工读取被拒绝）。
+# Planner / Memory 中即使存在不同状态，Java Expense Domain 仍是最终 Source of Truth。
+
+
+@tool
+def expense_status_tool(
+    expense_id: str = '',
+    employee_id: str = '',
+    trace_id: str = '',
+) -> str:
+    """查询当前登录用户自己的报销单状态（Java 权威）。
+
+    LLM 可选入参：expense_id（指定报销单号）。
+    系统字段（由 Executor 注入）：employee_id / trace_id；
+    Java 侧做 ownership check（expense.employeeId == 可信 employeeId）。
+
+    返回 JSON：success 时携带 status / claimed_amount / reimbursable_amount /
+    submitted_at；未命中或跨员工返回 error_code（EXPENSE_NOT_FOUND）。
+    """
+    eid = _require_identity(employee_id)
+    if eid is None:
+        return _identity_error()
+    if not expense_id or not expense_id.strip():
+        return _payload(
+            False, None, 'EXPENSE_ID_REQUIRED', '缺少 expense_id 参数，无法查询报销状态。'
+        )
+
+    try:
+        # Java 端点成功时返回 ExpenseStatusResponse（camelCase，无 success 字段）；
+        # 失败（4xx/5xx）时 JavaClientError 抛出，由上面 except 捕获归一化。
+        data = get_java_client().get_expense_status(
+            employee_id=eid,
+            trace_id=trace_id,
+            expense_id=expense_id.strip(),
+        )
+    except JavaClientError as exc:
+        return _payload(False, None, exc.code, str(exc))
+
+    return _payload(
+        True,
+        {
+            'expense_id': data.get('expenseId'),
+            'status': data.get('status'),
+            'claimed_amount': data.get('claimedAmount'),
+            'reimbursable_amount': data.get('reimbursableAmount'),
+            'trip_id': data.get('tripId'),
+            'submitted_at': data.get('submittedAt'),
+            'source': 'java',
+        },
+        None,
+        None,
+    )

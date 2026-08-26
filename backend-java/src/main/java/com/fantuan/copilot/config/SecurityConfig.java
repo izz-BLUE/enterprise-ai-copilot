@@ -101,6 +101,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/demo/identities").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
+                        .requestMatchers("/api/internal/expense/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/agent/**").authenticated()
                         .anyRequest().authenticated())
@@ -117,7 +118,8 @@ public class SecurityConfig {
         DefaultBearerTokenResolver delegate = new DefaultBearerTokenResolver();
         return request -> {
             String path = request.getRequestURI().substring(request.getContextPath().length());
-            if (path.startsWith("/api/internal/leave/")) {
+            if (path.startsWith("/api/internal/leave/")
+                    || path.startsWith("/api/internal/expense/")) {
                 return null;
             }
             String bearer = delegate.resolve(request);
