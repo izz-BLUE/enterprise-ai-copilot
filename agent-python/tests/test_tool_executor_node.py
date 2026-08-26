@@ -364,3 +364,77 @@ class TestLeaveToolSystemFieldInjection:
         assert result['stop_reason'] == 'invalid_decision'
         assert result['tool_call_count'] == 0
         tool.invoke.assert_not_called()
+
+
+# ---------- P2-A Expense Workflow V1：Tool Registry + Budget 5/6 ----------
+
+
+class TestToolRegistryBudget:
+    """ToolSpec 注册表 + MAX_TOOL_CALLS=5 / MAX_PLANNER_STEPS=6 行为不变。
+
+    - 5 个已知 Tool 全部注册。
+    - 第 6 次 Tool 调用触发 budget_exhausted，不消耗调用预算。
+    - success signature 重复阻断仍按 dedup 语义工作。
+    """
+
+    def test_registry_contains_all_known_tools(self):
+        from app.agents.tool_executor_node import _TOOL_REGISTRY
+        names = set(_TOOL_REGISTRY.keys())
+        assert names == {
+            RAG_TOOL_NAME,
+            EVAL_TOOL_NAME,
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+        }
+
+    def test_max_tool_calls_is_five(self):
+        from app.agents.tool_executor_node import MAX_TOOL_CALLS
+        assert MAX_TOOL_CALLS == 5
+
+    def test_max_planner_steps_is_six(self):
+        from app.agents.planner_node import MAX_PLANNER_STEPS
+        assert MAX_PLANNER_STEPS == 6
+
+    def test_tool_call_count_remains_below_max_at_fifth_call(self):
+        """第 5 次 Tool 调用应正常 success 且 tool_call_count=5。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            for i in range(5):
+                result = tool_executor_node(state(
+                    tool_call_count=i,
+                    planner_decision=_tool_decision(
+                        RAG_TOOL_NAME, {'question': f'q{i}'}, reason_code='need_knowledge',
+                    ),
+                ))
+                assert result['stop_reason'] == 'tool_executed', i
+        assert rag.invoke.call_count == 5
+
+    def test_sixth_call_blocked_with_budget_exhausted(self):
+        """第 6 次 Tool 调用（tool_call_count=5 时进入）应被 budget 阻断，不计数。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            result = tool_executor_node(state(
+                tool_call_count=5,
+                planner_decision=_tool_decision(
+                    RAG_TOOL_NAME, {'question': 'q5'}, reason_code='need_knowledge',
+                ),
+            ))
+        assert result['stop_reason'] == 'tool_call_budget_exhausted'
+        assert result['tool_call_count'] == 5
+        rag.invoke.assert_not_called()
+
+    def test_repeated_signature_still_blocked_by_dedup(self):
+        """成功签名去重独立于 budget 计数。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            decision = _tool_decision(RAG_TOOL_NAME, {'question': 'same'})
+            first = tool_executor_node(state(planner_decision=decision))
+            second = tool_executor_node(state(
+                tool_call_count=first['tool_call_count'],
+                tool_history=first['tool_history'],
+                planner_decision=decision,
+            ))
+        assert first['stop_reason'] == 'tool_executed'
+        assert second['stop_reason'] == 'already_completed'
+        rag.invoke.assert_called_once()

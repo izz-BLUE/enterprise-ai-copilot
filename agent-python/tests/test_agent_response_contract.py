@@ -274,6 +274,7 @@ class TestTechnicalErrors:
     def test_step_budget_exhausted_yields_error_route(self):
         """步骤预算耗尽 → route=error, category=error。"""
         from app.agents.planner_node import MAX_PLANNER_STEPS
+        from app.agents.tool_executor_node import MAX_TOOL_CALLS
         decisions = [
             _tool_payload('rag_answer_tool', {'question': f'q{i}'}, 'need_knowledge')
             for i in range(MAX_PLANNER_STEPS + 1)
@@ -290,10 +291,9 @@ class TestTechnicalErrors:
         # 实际 Tool 真正走 success 路径（不是假绿 error 路径）：
         # rag_mock.invoke 被调用了 MAX_TOOL_CALLS 次且全部 status=success，
         # 后续预算拦截才会产生 blocked。
-        assert rag_mock.invoke.call_count == 3
-        assert result['tool_history'][0]['status'] == 'success'
-        assert result['tool_history'][1]['status'] == 'success'
-        assert result['tool_history'][2]['status'] == 'success'
+        assert rag_mock.invoke.call_count == MAX_TOOL_CALLS
+        for entry in result['tool_history'][:MAX_TOOL_CALLS]:
+            assert entry['status'] == 'success'
 
 
 # ---------- use_planner=False legacy Graph 不变 ----------

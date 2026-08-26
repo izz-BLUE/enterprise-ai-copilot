@@ -25,8 +25,10 @@ from app.schemas.planner_schema import (
 )
 from app.services.llm_service import LLMProviderError, call_llm
 
-# 单次任务允许的最大 Planner 决策次数（预算基于决策次数，而非 Tool 调用次数）
-MAX_PLANNER_STEPS = 5
+# 单次任务允许的最大 Planner 决策次数（预算基于决策次数，而非 Tool 调用次数）。
+# P2-A Expense Workflow V1: 提升到 6 以保留至少一次 Planner finish/refuse 决策空间，
+# 同时保持 MAX_TOOL_CALLS(5) < MAX_PLANNER_STEPS(6) 的 Tool 预算独立防线。
+MAX_PLANNER_STEPS = 6
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     RAG_TOOL_NAME: '回答企业制度、流程、IT/HR 文档等知识库问题。参数: question(用户问题)。',
