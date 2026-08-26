@@ -323,6 +323,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
 
     graph = None
     runtime_thread_id = None
+    execution_history: list[dict] = []
     if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES':
         checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
         if checkpoint_runtime is None:
@@ -341,19 +342,49 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             return _checkpoint_failure_response(trace_id, status_code=400)
 
     try:
-        agent_kwargs = {
-            'allow_eval': allow_eval,
-            'allow_business_actions': allow_business_actions,
-            'business_date': business_date,
-            'trace_id': trace_id,
-            'employee_id': employee_id,
-            'use_planner': AGENT_LOOP_ENABLED,
-            'memory_context': memory_context,
-        }
         if graph is not None:
-            agent_kwargs['graph'] = graph
-            agent_kwargs['runtime_thread_id'] = runtime_thread_id
-        result = run_langgraph_agent(request.message, **agent_kwargs)
+            # P3-2：同一个最终 thread_id 的 hydrate + invoke 必须处于同一进程内
+            # guard 中；并发请求立即返回 429，让客户端重新走完整 Java 链路。
+            if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
+                return _busy_response('/agent/langgraph/chat', trace_id)
+            try:
+                try:
+                    execution_history = checkpoint_runtime.load_execution_history(
+                        graph=graph,
+                        thread_id=runtime_thread_id,
+                        memory_context=memory_context,
+                    )
+                except Exception:
+                    logger.exception('[%s] LangGraph execution history 读取失败', trace_id)
+                    return _checkpoint_failure_response(trace_id, status_code=503)
+
+                agent_kwargs = {
+                    'allow_eval': allow_eval,
+                    'allow_business_actions': allow_business_actions,
+                    'business_date': business_date,
+                    'trace_id': trace_id,
+                    'employee_id': employee_id,
+                    'use_planner': AGENT_LOOP_ENABLED,
+                    'memory_context': memory_context,
+                    'execution_history': execution_history,
+                    'graph': graph,
+                    'runtime_thread_id': runtime_thread_id,
+                }
+                result = run_langgraph_agent(request.message, **agent_kwargs)
+            finally:
+                # Memory Pipeline 在 guard 外运行；它不是 Checkpoint 的写入步骤。
+                checkpoint_runtime.release_thread(runtime_thread_id)
+        else:
+            agent_kwargs = {
+                'allow_eval': allow_eval,
+                'allow_business_actions': allow_business_actions,
+                'business_date': business_date,
+                'trace_id': trace_id,
+                'employee_id': employee_id,
+                'use_planner': AGENT_LOOP_ENABLED,
+                'memory_context': memory_context,
+            }
+            result = run_langgraph_agent(request.message, **agent_kwargs)
 
         # Memory 提案是出口层旁路；任何 Pipeline 失败都不得阻断主响应。
         # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
