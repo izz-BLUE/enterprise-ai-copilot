@@ -20,8 +20,8 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.70",
     # P2-A: MCP Python SDK v2 stable line（与 enterprise_oa_mcp_server/ 共享同一 SDK 版本约束）
     "mcp>=2,<3",
-    "langgraph==1.2.9",
-    "langgraph-checkpoint-postgres==3.1.0",
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-postgres==3.1.2",
     "psycopg[binary,pool]==3.3.4",
 ]
 
