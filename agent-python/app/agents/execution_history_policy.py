@@ -201,8 +201,10 @@ def merge_execution_history(
 ) -> list[dict[str, Any]]:
     """校验、稳定去重并限制历史；相同 key 的新 entry 追加到末尾。"""
 
-    merged: list[ExecutionHistoryEntry] = validate_execution_history(previous_history)
-    for entry in normalize_successful_tool_history(current_tool_history):
+    merged: list[ExecutionHistoryEntry] = []
+    entries = validate_execution_history(previous_history)
+    entries.extend(normalize_successful_tool_history(current_tool_history))
+    for entry in entries:
         key = execution_history_key(entry)
         merged = [existing for existing in merged if execution_history_key(existing) != key]
         merged.append(entry)

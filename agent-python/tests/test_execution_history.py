@@ -122,6 +122,15 @@ class TestExecutionHistoryPolicy:
         assert second[1]['summary']['invoice_id'] == 'INV-001'
         assert second[1]['summary']['valid'] is False
 
+    def test_previous_duplicate_entries_are_deterministically_collapsed(self):
+        old = _invoice_entry(valid=True)
+        new = _invoice_entry(valid=False)
+
+        result = merge_execution_history([old, new], [])
+
+        assert len(result) == 1
+        assert result[0]['summary']['valid'] is False
+
     def test_travel_snapshot_is_single_key_and_history_is_bounded(self):
         old_travel = merge_execution_history([], [_travel_history(destination='旧上海')])
         current_travel = merge_execution_history(old_travel, [_travel_history(destination='新上海')])
