@@ -83,8 +83,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     void flywaySchemaAndPendingDigestArePersisted() {
         Integer migrations = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success", Integer.class);
-        // P2-A V6: action_payload_json 泛化迁移
-        assertEquals(6, migrations);
+        // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item
+        assertEquals(7, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());

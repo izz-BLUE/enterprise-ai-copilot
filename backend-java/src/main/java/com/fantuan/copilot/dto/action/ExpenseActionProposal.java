@@ -34,7 +34,8 @@ public record ExpenseActionProposal(
         @JsonAlias("reimbursable_amount") java.math.BigDecimal reimbursableAmount,
         @JsonAlias("cost_center") String costCenter,
         String reason,
-        @JsonAlias("invoice_ids") List<String> invoiceIds
+        @JsonAlias("invoice_ids") List<String> invoiceIds,
+        @JsonAlias("stay_nights") Integer stayNights
 ) implements BusinessActionProposal {
     /**
      * 注意：actionType() 由 record accessor 自动生成并返回字段原值。
