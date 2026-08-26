@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 from app.schemas.action_schema import AnnualLeaveActionProposal
 from app.schemas.chat_schema import AgentResponse
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 # ---------------------------------------------------------------------------
 # Tool 出口:date 在 Tool 内部 dict 中保持 Python date
@@ -137,7 +138,10 @@ class TestToolExecutorRestoresIsoDate:
 
         with patch('app.agents.tool_executor_node.leave_proposal_tool') as tool:
             tool.invoke.return_value = observation
-            result = tool_executor_node(self._state(observation))
+            state = self._state(observation)
+            result = tool_executor_node(
+                checkpoint_safe_state(state), runtime_for_state(state),
+            )
 
         assert result['action_proposal'] is not None
         ap = result['action_proposal']
@@ -166,7 +170,10 @@ class TestToolExecutorRestoresIsoDate:
 
         with patch('app.agents.tool_executor_node.leave_proposal_tool') as tool:
             tool.invoke.return_value = observation
-            result = tool_executor_node(self._state(observation))
+            state = self._state(observation)
+            result = tool_executor_node(
+                checkpoint_safe_state(state), runtime_for_state(state),
+            )
 
         ap = result['action_proposal']
         # 非合法 ISO 必须保留为 string,让 strict schema 拒绝。
@@ -188,7 +195,10 @@ class TestToolExecutorRestoresIsoDate:
 
         with patch('app.agents.tool_executor_node.leave_proposal_tool') as tool:
             tool.invoke.return_value = observation
-            result = tool_executor_node(self._state(observation))
+            state = self._state(observation)
+            result = tool_executor_node(
+                checkpoint_safe_state(state), runtime_for_state(state),
+            )
 
         assert result['action_proposal'] is None
         assert set(result['missing_fields']) == {'start_date', 'end_date', 'reason'}
@@ -252,7 +262,9 @@ class TestAgentResponseRoundtrip:
         }
         with patch('app.agents.tool_executor_node.leave_proposal_tool') as tool:
             tool.invoke.return_value = observation
-            result = tool_executor_node(state)
+            result = tool_executor_node(
+                checkpoint_safe_state(state), runtime_for_state(state),
+            )
 
         ap_dict = result['action_proposal']
         # 严格 schema 接受(关键:必须用回 restored date 对象,不是 ISO string)

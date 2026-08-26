@@ -7,7 +7,8 @@
 import json
 from unittest.mock import patch
 
-from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
+from app.agents.tool_executor_node import MAX_TOOL_CALLS
+from app.agents.tool_executor_node import tool_executor_node as _tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
@@ -16,6 +17,7 @@ from app.schemas.planner_schema import (
     RAG_TOOL_NAME,
 )
 from app.tools.enterprise_tools import leave_balance_tool as real_leave_balance_tool
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 
 def state(**changes):
@@ -50,6 +52,13 @@ def state(**changes):
     }
     value.update(changes)
     return value
+
+
+def tool_executor_node(value, runtime=None):
+    if runtime is None:
+        runtime = runtime_for_state(value)
+        value = checkpoint_safe_state(value)
+    return _tool_executor_node(value, runtime)
 
 
 def _tool_decision(tool_name, arguments, **changes):

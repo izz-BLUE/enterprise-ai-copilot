@@ -24,6 +24,14 @@ from app.agents.langgraph_agent import run_langgraph_agent
 def _enabled_oamcp_url(monkeypatch):
     """travel/invoice 可见性依赖 ENTERPRISE_OA_MCP_URL（V2 §三 visibility_gate）。"""
     monkeypatch.setenv("ENTERPRISE_OA_MCP_URL", "http://127.0.0.1:8100/mcp")
+    monkeypatch.setattr(
+        "app.agents.planner_node.JAVA_BASE_URL",
+        "http://127.0.0.1:8080",
+    )
+    monkeypatch.setattr(
+        "app.agents.planner_node.JAVA_INTERNAL_TOKEN",
+        "test-internal-token",
+    )
     yield
 
 TRAVEL_ANSWER = json.dumps({

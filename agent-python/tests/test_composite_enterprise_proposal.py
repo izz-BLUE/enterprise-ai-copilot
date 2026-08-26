@@ -14,13 +14,21 @@ from datetime import date
 from unittest.mock import Mock, patch
 
 from app.agents.langgraph_agent import run_langgraph_agent
-from app.agents.tool_executor_node import tool_executor_node
+from app.agents.tool_executor_node import tool_executor_node as _tool_executor_node
 from app.schemas.action_schema import (
     AnnualLeaveActionProposal,
     ProposalPlanningResult,
 )
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 BUSINESS_DATE = date(2026, 8, 18)
+
+
+def tool_executor_node(value, runtime=None):
+    if runtime is None:
+        runtime = runtime_for_state(value)
+        value = checkpoint_safe_state(value)
+    return _tool_executor_node(value, runtime)
 
 
 def _planner_payload(action, **kwargs):

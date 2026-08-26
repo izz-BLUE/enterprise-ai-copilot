@@ -8,9 +8,9 @@ from app.agents.planner_node import (
     PLANNER_SYSTEM_PROMPT,
     build_planner_prompt,
     build_planner_system_prompt,
-    planner_node,
     visible_tools,
 )
+from app.agents.planner_node import planner_node as _planner_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -22,6 +22,7 @@ from app.schemas.planner_schema import (
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
 )
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 
 def state(**changes):
@@ -50,6 +51,13 @@ def state(**changes):
     }
     value.update(changes)
     return value
+
+
+def planner_node(value, runtime=None):
+    if runtime is None:
+        runtime = runtime_for_state(value)
+        value = checkpoint_safe_state(value)
+    return _planner_node(value, runtime)
 
 
 RAG_RAW = (

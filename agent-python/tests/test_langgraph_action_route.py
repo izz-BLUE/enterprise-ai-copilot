@@ -1,13 +1,16 @@
 from datetime import date
 from unittest.mock import Mock, patch
 
-from app.agents.langgraph_agent import action_node, router_node, run_langgraph_agent
+from app.agents.langgraph_agent import action_node as _action_node
+from app.agents.langgraph_agent import router_node as _router_node
+from app.agents.langgraph_agent import run_langgraph_agent
 from app.schemas.action_schema import (
     AnnualLeaveActionProposal,
     AnnualLeaveClarification,
     ClarificationPlanningResult,
     ProposalPlanningResult,
 )
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 BUSINESS_DATE = date(2026, 7, 16)
 
@@ -31,6 +34,20 @@ def state(question, **changes):
     }
     value.update(changes)
     return value
+
+
+def router_node(value, runtime=None):
+    if runtime is None:
+        runtime = runtime_for_state(value)
+        value = checkpoint_safe_state(value)
+    return _router_node(value, runtime)
+
+
+def action_node(value, runtime=None):
+    if runtime is None:
+        runtime = runtime_for_state(value)
+        value = checkpoint_safe_state(value)
+    return _action_node(value, runtime)
 
 
 def test_router_order_preserves_safety_and_eval_permissions():

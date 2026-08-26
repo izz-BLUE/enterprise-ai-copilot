@@ -4,7 +4,7 @@ leave_balance_tool / leave_request_tool 为只读 Tool;leave_proposal_tool
 复用受控业务动作链路(plan_annual_leave_action)生成待确认的申请草稿,
 不会提交任何写操作。
 仅供 Tool Executor 调用。Planner 看到的 arguments 不允许携带 employee_id /
-trace_id 等系统字段,这些字段统一由 Executor 从 AgentState 注入。
+trace_id 等系统字段,这些字段统一由 Executor 从当前请求 Runtime Context 注入。
 所有结果都通过 json.dumps 返回结构化字符串,与 rag_answer_tool / eval_report_tool
 风格一致。
 """
@@ -67,7 +67,7 @@ def leave_balance_tool(
 ) -> str:
     """查询当前登录用户自己的年假余额。
 
-    该 Tool 无 LLM 入参;employee_id / trace_id 由 Tool Executor 从 AgentState 注入,
+    该 Tool 无 LLM 入参;employee_id / trace_id 由 Tool Executor 从 Runtime Context 注入,
     模型不得在 arguments 中提供这些字段。
     """
     eid = _require_identity(employee_id)
@@ -143,7 +143,7 @@ def leave_proposal_tool(
     """生成年假申请草稿(Proposal)供用户确认;不提交任何写操作。
 
     该 Tool 无 LLM 入参;question / business_date / trace_id 由 Tool Executor
-    从 AgentState 注入,模型不得在 arguments 中提供这些字段,也不得提供
+    从 Runtime Context 注入,模型不得在 arguments 中提供这些字段,也不得提供
     employee_id / start_date / end_date / reason / half_day 等业务参数。
     返回 JSON 字符串:proposal 时携带 action_proposal 与 missing_fields=[];
     clarification 时 action_proposal 为 null 并携带 missing_fields。
@@ -206,7 +206,7 @@ def leave_proposal_tool(
 # 这两个 Tool 都通过 Enterprise OA MCP Client Adapter 调用：
 # - Planner 看到的是 Tool 业务接口（employee_id / invoice_id），看不到
 #   transport / session / JSON-RPC / method names（V2 §八 / §二十二）。
-# - identity_required=true：employee_id / trace_id 由 Executor 从 AgentState
+# - identity_required=true：employee_id / trace_id 由 Executor 从 Runtime Context
 #   注入；模型在 arguments 中**禁止**提供 employee_id（V2 §十一）。
 # - travel_record_tool：LLM 无入参；employee_id 由 Executor 注入。
 # - invoice_verify_tool：LLM 仅允许传 invoice_id；employee_id 由 Executor
@@ -223,7 +223,7 @@ def travel_record_tool(
     """查询当前登录用户自己的出差记录。
 
     该 Tool 无 LLM 入参；employee_id / trace_id / limit 全部由 Tool Executor
-    从 AgentState 注入（V2 §十一）。模型不得在 arguments 中提供这些字段。
+    从 Runtime Context 注入（V2 §十一）。模型不得在 arguments 中提供这些字段。
 
     返回 JSON 字符串：success 时携带 items（trip 列表，每条带关联
     expense_documents = invoice reference，仅作参考、需 invoice_verify 验真）。
@@ -349,7 +349,7 @@ def expense_proposal_tool(
 
     该 Tool 无 LLM 入参：question / business_date / trace_id / context
     （ExpenseProposalContext，由 Executor 从 tool_history 构造）由 Tool
-    Executor 从 AgentState 注入；模型不得在 arguments 中提供这些字段，
+    Executor 从 Runtime Context 注入；模型不得在 arguments 中提供这些字段，
     也不得提供 trip_id / invoice_ids / cost_center / 金额等业务参数。
 
     返回 JSON：proposal 时 kind=proposal + action_proposal + missing_fields=[]；

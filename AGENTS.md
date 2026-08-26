@@ -18,7 +18,7 @@
   - `allow_eval=true` 时追加：`eval_report_tool`
   - `allow_business_actions=true` 且 `employee_id` 非空时追加：`leave_proposal_tool`
   legacy Router-first 仅暴露部分 Tool，不走 `leave_proposal_tool`。
-- **可信系统字段边界**：`employee_id` / `business_date` / `trace_id` 由程序层注入，不进入 LLM `arguments`；Planner 决策结构由 Pydantic 严格白名单校验；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验。
+- **可信系统字段边界**：`employee_id` / `business_date` / `trace_id` / 请求 deadline 由每次请求的 Runtime Context 注入，不属于可保存的 `AgentState`，也不进入 LLM `arguments`；Planner 决策结构由 Pydantic 严格白名单校验；Tool Executor 独立做权限 / Tool 预算 / 成功签名去重校验。
 - **`leave_proposal_tool` 定位**：Planner-first 下生成 `action_proposal` 或 `missing_fields`（Clarification），**不执行写操作**；`confirmationNonce` 与 `PendingAction` 持久化、状态机、TTL、幂等、权限和最终数据库写入全部在 Java 侧完成。`leave_proposal_tool` **不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 `leave_balance_tool` / `leave_request_tool` 的 Python → Java 内部只读链路。
 - **Safety Guard Lite 定位**（Python safety_node）：启发式纵深防御过滤器，不是 authorization / trust / tool permission / business validation 边界；原始用户输入始终原样传给下游。
 - **RAG / 数据权限边界**：数据分目录隔离（data/hr|bank|it 原始知识库 / data/processed 构建产物 / data/eval 评估用例）；Python 只做检索与生成，业务数据写操作只能走受控业务动作链路。
