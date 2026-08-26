@@ -38,7 +38,10 @@ def _bounded_text(value: Any, *, limit: int = MAX_HISTORY_TEXT_LENGTH) -> str:
 def _bounded_id(value: Any) -> str:
     if not isinstance(value, str):
         return ""
-    return value.strip()[:MAX_HISTORY_ID_LENGTH]
+    normalized = value.strip()
+    if not normalized or len(normalized) > MAX_HISTORY_ID_LENGTH:
+        return ""
+    return normalized
 
 
 def _observation_payload(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -115,16 +118,20 @@ def _invoice_entry(item: dict[str, Any]) -> ExecutionHistoryEntry | None:
         return None
 
     raw_arguments = item.get("arguments")
-    requested_invoice_id = (
-        raw_arguments.get("invoice_id")
-        if isinstance(raw_arguments, dict)
-        else None
+    requested_invoice_id = _bounded_id(
+        raw_arguments.get("invoice_id") if isinstance(raw_arguments, dict) else None
     )
-    invoice_id = _bounded_id(payload.get("invoice_id")) or _bounded_id(requested_invoice_id)
-    if not invoice_id or not isinstance(payload.get("valid"), bool) or not isinstance(
+    if not requested_invoice_id or not isinstance(payload.get("valid"), bool) or not isinstance(
         payload.get("duplicate"), bool
     ):
         return None
+    # arguments 定义了本次实际请求的 canonical invoice identity；响应只能回显它，
+    # 不能借响应中的另一个 invoice_id 改写历史 key。
+    if "invoice_id" in payload and payload.get("invoice_id") is not None:
+        response_invoice_id = _bounded_id(payload.get("invoice_id"))
+        if response_invoice_id != requested_invoice_id:
+            return None
+    invoice_id = requested_invoice_id
 
     amount = payload.get("amount")
     if amount is not None and (

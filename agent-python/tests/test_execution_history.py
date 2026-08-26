@@ -113,6 +113,25 @@ class TestExecutionHistoryPolicy:
         assert destination == long_destination[:256]
         assert len(destination) <= 256
 
+    def test_invoice_response_id_must_match_requested_id(self):
+        item = _invoice_history()
+        payload = json.loads(item['observation'])
+        payload['invoice_id'] = 'INV-999'
+        item['observation'] = json.dumps(payload)
+
+        assert merge_execution_history([], [item]) == []
+
+    def test_invoice_missing_response_id_uses_requested_id(self):
+        item = _invoice_history()
+        payload = json.loads(item['observation'])
+        del payload['invoice_id']
+        item['observation'] = json.dumps(payload)
+
+        result = merge_execution_history([], [item])
+
+        assert result[0]['arguments']['invoice_id'] == 'INV-001'
+        assert result[0]['summary']['invoice_id'] == 'INV-001'
+
     def test_invoice_update_replaces_old_entry_and_appends_new_entry(self):
         first = merge_execution_history([], [_travel_history(), _invoice_history(valid=True)])
         second = merge_execution_history(first, [_invoice_history(valid=False)])
