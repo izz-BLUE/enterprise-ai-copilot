@@ -16,6 +16,7 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.identity.IdentityContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
@@ -333,6 +334,23 @@ class LangGraphAgentMemoryReadBodyTest {
                 "公共 ChatRequest 序列化结果不应包含 memoryContext 字段（前端不可见）");
         assertTrue(parsed.has("message"));
         assertTrue(parsed.has("conversationId"));
+    }
+
+    @Test
+    void forgedClientThreadHeaderIsReplacedByServerComputedValue() {
+        when(memoryService.find(USER_A, CLIENT_CONV)).thenReturn(Optional.empty());
+        installJwt(USER_A);
+        HttpServletRequest request = mockRequest("trace-thread-id");
+        when(request.getHeader("X-Agent-Thread-Id")).thenReturn("rt_fake");
+
+        controller.langgraphChat(new ChatRequest("hi", CLIENT_CONV), request);
+
+        ArgumentCaptor<HttpEntity> entity = ArgumentCaptor.forClass(HttpEntity.class);
+        org.mockito.Mockito.verify(restTemplate).postForEntity(
+                anyString(), entity.capture(), eq(PythonAgentResponse.class));
+        String actual = entity.getValue().getHeaders().getFirst("X-Agent-Thread-Id");
+        assertEquals(new AgentRuntimeThreadIdService().generate(USER_A, CLIENT_CONV), actual);
+        assertFalse("rt_fake".equals(actual));
     }
 
     // ---------- helpers ----------

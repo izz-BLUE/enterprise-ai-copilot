@@ -111,9 +111,10 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认开启 ⇒ 请求具备 `allow_business_actions=true` 与受信任 `employee_id` 时可见；即使 Planner-first 启用，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
 | `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
 | Admin Token / Evaluation 权限 | Java 后端校验 `X-Admin-Token`，通过 `X-Allow-Eval` 内部 header 告知 Python | compose `:?` 强制 `ADMIN_TOKEN` 非空 ⇒ 生产必填 | 仓库无证据 |
+| LangGraph PostgreSQL 执行快照 | Java 用可信 `userId + conversationId` 计算 `X-Agent-Thread-Id`；Python 启动时创建 Pool / `PostgresSaver` / 两套持久化图，节点以 `sync` 落盘 | compose 默认 `LANGGRAPH_CHECKPOINT_MODE=POSTGRES`，并以 `:?` 强制运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`；Python 等待 PostgreSQL health 后启动 | 仓库无证据 |
 | Phoenix/OpenTelemetry | Python 两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；BatchSpanProcessor、采样、默认正文脱敏、fail-open | `PHOENIX_TRACING=false` 且 Phoenix 服务位于可选 `observability` profile，不随默认 Compose 启动 | 仓库无证据 |
 
-**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署会让 Planner-first 默认开启，但受控业务动作、只读企业 Tool 与 Scoped Conversation Memory 写入仍默认关闭。对外宣称的“Planner-first + 受控业务动作公网演示”需要服务器 `.env` 显式打开 `BUSINESS_ACTIONS_ENABLED=true` 与 `DEMO_IDENTITY_ENABLED=true`；若演示包含只读企业 Tool，还需额外设置 `JAVA_INTERNAL_TOKEN` 与 `JAVA_BASE_URL`。Memory 真实写入还需显式设置 `MEMORY_WRITE_MODE=ENABLED`，但不依赖 Java URL、内部 Token 或 write scope；Java 在当前认证请求中落库。这些 Java read 配置不是整个 Agent Loop 或 Proposal 的启动前置条件；显式设置 `AGENT_LOOP_ENABLED=false` 保留 legacy 回退能力。**且这些事实仓库不掌握**。
+**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署会让 Planner-first 与 PostgreSQL 执行快照开启；后者要求运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`，连接、`setup()` 或图编译失败会阻止 Python 启动，绝不退回无快照模式。受控业务动作、只读企业 Tool 与 Scoped Conversation Memory 写入仍默认关闭。对外宣称的“Planner-first + 受控业务动作公网演示”需要服务器 `.env` 显式打开 `BUSINESS_ACTIONS_ENABLED=true` 与 `DEMO_IDENTITY_ENABLED=true`；若演示包含只读企业 Tool，还需额外设置 `JAVA_INTERNAL_TOKEN` 与 `JAVA_BASE_URL`。Memory 真实写入还需显式设置 `MEMORY_WRITE_MODE=ENABLED`，但不依赖 Java URL、内部 Token 或 write scope；Java 在当前认证请求中落库。这些 Java read 配置不是整个 Agent Loop 或 Proposal 的启动前置条件；显式设置 `AGENT_LOOP_ENABLED=false` 保留 legacy 回退能力。**且这些事实仓库不掌握**。
 
 ### 域名和证书
 
@@ -257,6 +258,9 @@ graph LR
 | AGENT_REQUEST_TIMEOUT_SECONDS | ${AGENT_REQUEST_TIMEOUT_SECONDS:-40}（秒） |
 | AI_MAX_CONCURRENT_REQUESTS | ${AI_MAX_CONCURRENT_REQUESTS:-3} |
 | AI_QUEUE_TIMEOUT_MS | ${AI_QUEUE_TIMEOUT_MS:-500} |
+| LANGGRAPH_CHECKPOINT_MODE | `${LANGGRAPH_CHECKPOINT_MODE:-POSTGRES}`；只允许 `DISABLED` / `POSTGRES` |
+| LANGGRAPH_CHECKPOINT_DSN | `:?` 必填；独立于 `SPRING_DATASOURCE_URL`，不得在 compose 内拼接用户名或密码 |
+| LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS | `${LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS:-3}`；用于 Pool 建连与 wait |
 | PYTHON_AGENT_CONNECT_TIMEOUT | ${PYTHON_AGENT_CONNECT_TIMEOUT:-3000}（毫秒） |
 | PYTHON_AGENT_READ_TIMEOUT | ${PYTHON_AGENT_READ_TIMEOUT:-50000}（毫秒） |
 | PYTHON_AGENT_HTTP_MAX_CONNECTIONS | ${PYTHON_AGENT_HTTP_MAX_CONNECTIONS:-6} |
@@ -287,7 +291,7 @@ graph LR
 | PHOENIX_CAPTURE_CONTENT | `${PHOENIX_CAPTURE_CONTENT:-false}`；默认隐藏 Prompt、输入和输出正文 |
 | PHOENIX_DEFAULT_RETENTION_POLICY_DAYS | `${PHOENIX_DEFAULT_RETENTION_POLICY_DAYS:-7}` |
 
-PostgreSQL 是 Java 受控业务动作的生产强依赖：Java 等待数据库健康后启动，Flyway 自动迁移；数据库不可用时启动或健康检查失败，不会降级为内存存储。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
+PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
 本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true` 与 `DEMO_AUTH_DEFAULT_PASSWORD`；受控请假兼容演示还需 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。当前 OA 目标仍是同数据库 PostgreSQL Sandbox；真实 OA 需要 Outbox、异步投递、外部幂等、回调/轮询、重试、对账和补偿。
 

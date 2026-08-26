@@ -117,6 +117,25 @@ if AI_MAX_CONCURRENT_REQUESTS < 1:
 if AI_QUEUE_TIMEOUT_MS < 1:
     raise ValueError('AI_QUEUE_TIMEOUT_MS 必须大于等于 1')
 
+# LangGraph 执行快照：默认关闭，避免本地开发与常规单元测试依赖 PostgreSQL。
+# POSTGRES 模式在服务启动阶段创建连接池、执行官方 setup() 并编译持久化 Graph；
+# 任何配置或连接失败均 fail-closed，绝不回退到无 Checkpoint 模式。
+LANGGRAPH_CHECKPOINT_MODE = os.getenv('LANGGRAPH_CHECKPOINT_MODE', 'DISABLED').strip().upper()
+if LANGGRAPH_CHECKPOINT_MODE not in {'DISABLED', 'POSTGRES'}:
+    raise ValueError('LANGGRAPH_CHECKPOINT_MODE 只允许 DISABLED 或 POSTGRES')
+
+LANGGRAPH_CHECKPOINT_DSN = os.getenv('LANGGRAPH_CHECKPOINT_DSN', '').strip()
+try:
+    LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS = int(
+        os.getenv('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS', '3')
+    )
+except ValueError as exc:
+    raise ValueError('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS 必须是整数') from exc
+if not 1 <= LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS <= 60:
+    raise ValueError('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS 必须处于 [1, 60]')
+if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES' and not LANGGRAPH_CHECKPOINT_DSN:
+    raise ValueError('LANGGRAPH_CHECKPOINT_MODE=POSTGRES 时 LANGGRAPH_CHECKPOINT_DSN 不能为空')
+
 # Agent Loop 开关（默认开启）：/agent/langgraph/chat 使用 Planner ⇄ Tool Executor
 # Loop；关闭时回退旧确定性 Graph（safety → router → rag|eval|action|refuse）。
 AGENT_LOOP_ENABLED = os.getenv('AGENT_LOOP_ENABLED', 'true').strip().lower() == 'true'

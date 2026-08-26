@@ -79,7 +79,7 @@ START → safety_node → router_node → rag_node → END
 - **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
 
 ```
-START → safety_node → planner_node ⇄ tool_executor_node → END
+START → safety_node → planner_node ⇄ tool_executor_node → finalize_node → END
 ```
 
 Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
@@ -90,6 +90,13 @@ Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限�
 - `allow_business_actions=true` 且受信任 `employee_id` 非空时追加：`leave_proposal_tool`
 
 Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终授权边界；Executor、Tool 与 Java 仍保留各自的身份、权限、参数、预算和业务授权校验。`business_date` 不属于 Capability Gate。Planner 拥有规划权但没有最终业务执行授权；可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`。`leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作。
+
+### LangGraph PostgreSQL 执行快照
+
+- Java 仅用已认证 `VerifiedIdentity.userId()` 和已解析 `conversationId` 计算稳定 `X-Agent-Thread-Id`；客户端 header 不可信。
+- Python `LANGGRAPH_CHECKPOINT_MODE=POSTGRES` 时在 FastAPI 启动阶段创建 Pool、执行 `PostgresSaver.setup()`、编译两套持久化图；任一步失败即启动失败，不降级。
+- Planner 与 legacy 分别使用 `:planner-v1` / `:deterministic-v1` 后缀；每个节点 `durability="sync"` 写入。新请求始终提供完整初始 AgentState 从 START 执行，P3-1 不实现 resume、interrupt 或跨请求 Tool 历史。
+- Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）

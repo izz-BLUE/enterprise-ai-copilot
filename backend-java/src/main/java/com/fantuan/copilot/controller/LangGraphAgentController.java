@@ -17,6 +17,7 @@ import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
 import com.fantuan.copilot.service.agent.AgentMemoryCoordinator;
 import com.fantuan.copilot.service.agent.AgentResponseFactory;
+import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 
@@ -91,6 +92,7 @@ public class LangGraphAgentController {
     private final IdentityContext identityContext;
     private final AgentMemoryCoordinator memoryCoordinator;
     private final AgentEventRecorder eventRecorder;
+    private final AgentRuntimeThreadIdService runtimeThreadIdService;
 
     @Autowired
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
@@ -98,13 +100,28 @@ public class LangGraphAgentController {
                                     BusinessActionService businessActionService,
                                     IdentityContext identityContext,
                                     AiTaskMemoryService memoryService,
-                                    AdminLogBuffer adminLogBuffer) {
+                                    AdminLogBuffer adminLogBuffer,
+                                    AgentRuntimeThreadIdService runtimeThreadIdService) {
         this.pythonAgentGateway = pythonAgentGateway;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
         this.identityContext = identityContext;
         this.memoryCoordinator = new AgentMemoryCoordinator(memoryService);
         this.eventRecorder = new AgentEventRecorder(adminLogBuffer);
+        this.runtimeThreadIdService = runtimeThreadIdService;
+    }
+
+    /**
+     * 供既有无 Spring 上下文的 Controller 单元测试使用；生产路径一律走注入构造器。
+     */
+    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
+                                    AdminAccessService adminAccessService,
+                                    BusinessActionService businessActionService,
+                                    IdentityContext identityContext,
+                                    AiTaskMemoryService memoryService,
+                                    AdminLogBuffer adminLogBuffer) {
+        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
+                memoryService, adminLogBuffer, new AgentRuntimeThreadIdService());
     }
 
     /**
@@ -138,6 +155,9 @@ public class LangGraphAgentController {
         // 客户端提供 conversationId 时仅作为分组 hint；缺失时服务端生成纯 UUID v4。
         // 数据库安全作用域仍由 (trusted user_id, conversation_id) 复合 key 保证。
         String conversationId = resolveConversationId(request.conversationId());
+        // 仅由已验证 identity.userId() 与已解析 conversationId 计算；绝不读取或透传
+        // 客户端 X-Agent-Thread-Id。该值只定位 LangGraph 执行快照，不承载业务权威。
+        String runtimeThreadId = runtimeThreadIdService.generate(identity.userId(), conversationId);
 
         // Memory Read Path：服务端按 (userId, conversationId) 复合 key 读取 ai_task_memory，
         // 仅在 status=ACTIVE 时填充内部请求体的 memoryContext 字段。
@@ -168,6 +188,7 @@ public class LangGraphAgentController {
             }
             // P0：透传服务端权威解析后的 conversationId 给 Python。
             headers.set("X-Conversation-Id", conversationId);
+            headers.set("X-Agent-Thread-Id", runtimeThreadId);
             pythonResponse = pythonAgentGateway.post(
                     "/agent/langgraph/chat", internalBody, headers,
                     PythonAgentResponse.class, traceId);

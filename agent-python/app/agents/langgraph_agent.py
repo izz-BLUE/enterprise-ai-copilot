@@ -4,7 +4,7 @@ langgraph_agent.py —— LangGraph Agent 核心模块
 提供两条状态图：
   1. 确定性路由图（use_planner=False）：safety → router → rag | eval | action | refuse，
      集成 Safety Guard + LangChain Tools + RAG Chain。
-  2. Agent Loop 图（use_planner=True）：safety → planner ⇄ tool_executor，
+  2. Agent Loop 图（use_planner=True）：safety → planner ⇄ tool_executor → finalize，
      Planner 决策工具调用，Tool Executor 校验权限/预算/重复并执行；
      业务动作统一由 Planner 调用 leave_proposal_tool 走受控链路生成待确认草稿。
 """
@@ -13,7 +13,7 @@ import json
 from datetime import date
 from functools import lru_cache
 from time import monotonic
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -239,8 +239,8 @@ def refuse_node(state: AgentState) -> dict:
     return {"answer": answer}
 
 
-@lru_cache(maxsize=1)
-def build_agent_graph():
+def compile_agent_graph(checkpointer: Any | None = None):
+    """编译确定性 Graph；调用方可注入进程级 LangGraph Checkpointer。"""
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     graph.add_node("safety_node", safety_node)
@@ -269,35 +269,41 @@ def build_agent_graph():
     graph.add_edge("action_node", END)
     graph.add_edge("refuse_node", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 @lru_cache(maxsize=1)
-def build_agent_loop_graph():
-    """最小有限 Agent Loop：safety → planner ⇄ tool_executor。
+def build_agent_graph():
+    """无 Checkpointer 的兼容 Graph，供普通单元测试与 DISABLED 模式复用。"""
+    return compile_agent_graph()
+
+
+def compile_agent_loop_graph(checkpointer: Any | None = None):
+    """最小有限 Agent Loop：safety → planner ⇄ tool_executor → finalize。
 
     Planner-first 拓扑。Safety 保留 pre-Planner 拦截边界：
-    - safe=true → planner_node；safe=false → END（unsafe 输入不得调用 Planner LLM）
+    - safe=true → planner_node；safe=false → finalize_node（unsafe 输入不得调用 Planner LLM）
     - 不再经 router_node，也没有 action_node 特殊出口（业务动作统一由
       Planner 决策调用 leave_proposal_tool，经 Tool Executor 走受控链路）：
       stop_reason=continue → tool_executor → planner
       其他终止（task_complete / refused / not_allowed / provider_error /
-      invalid_decision / step_budget_exhausted）→ END
+      invalid_decision / step_budget_exhausted）→ finalize_node → END
     """
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     graph.add_node("safety_node", safety_node)
     graph.add_node("planner_node", planner_node)
     graph.add_node("tool_executor_node", tool_executor_node)
+    graph.add_node("finalize_node", finalize_node)
 
     graph.add_edge(START, "safety_node")
 
     graph.add_conditional_edges(
         "safety_node",
-        lambda state: "planner_node" if state.get("safe", True) else END,
+        lambda state: "planner_node" if state.get("safe", True) else "finalize_node",
         {
             "planner_node": "planner_node",
-            END: END,
+            "finalize_node": "finalize_node",
         },
     )
 
@@ -305,17 +311,24 @@ def build_agent_loop_graph():
         "planner_node",
         lambda state: (
             "tool_executor_node" if state.get("stop_reason") == "continue"
-            else END
+            else "finalize_node"
         ),
         {
             "tool_executor_node": "tool_executor_node",
-            END: END,
+            "finalize_node": "finalize_node",
         },
     )
 
     graph.add_edge("tool_executor_node", "planner_node")
+    graph.add_edge("finalize_node", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+@lru_cache(maxsize=1)
+def build_agent_loop_graph():
+    """无 Checkpointer 的兼容 Planner-first Graph。"""
+    return compile_agent_loop_graph()
 
 
 # P2-A: proposal 风格 Tool 集合（leave / expense）。
@@ -445,6 +458,16 @@ def _finalize_response_contract(state: dict) -> dict:
     return state
 
 
+def finalize_node(state: AgentState) -> dict:
+    """Planner-first Graph 的唯一最终化节点。
+
+    两个现有确定性 finalizer 在 Checkpoint 写入前执行，确保 Graph 返回值与
+    最后一个节点保存的状态完全一致。函数本身保持幂等，便于兼容性测试复用。
+    """
+    state = _finalize_action_proposal(state)
+    return _finalize_response_contract(state)
+
+
 def run_langgraph_agent(
     question: str,
     allow_eval: bool = False,
@@ -454,24 +477,28 @@ def run_langgraph_agent(
     use_planner: bool = False,
     employee_id: str = '',
     memory_context: dict | None = None,
+    graph: Any | None = None,
+    runtime_thread_id: str | None = None,
 ) -> dict:
     """运行 LangGraph Agent。
 
     use_planner=False 时使用确定性路由（safety → router → rag|eval|action|refuse）。
-    use_planner=True 时启用 Agent Loop：safety → planner ⇄ tool_executor，
+    use_planner=True 时启用 Agent Loop：safety → planner ⇄ tool_executor → finalize，
     Planner 自行决定工具调用与完成；业务动作通过 leave_proposal_tool
     走受控链路生成待确认草稿，不再使用 router_node 与 action_node；
-    返回前应用两层 finalization（仅 Agent Loop 路径，
-    deterministic graph 保持原行为不变）：
-      1. _finalize_action_proposal  — action_proposal / missing_fields 合法收口
-      2. _finalize_response_contract — route / category / reason 公共响应契约收敛
+    Planner-first 的两层 finalization 在 Graph 内的 finalize_node 执行，且在
+    PostgreSQL Checkpoint 写入前完成；deterministic graph 保持原行为不变。
     employee_id 由 Java 侧身份校验后注入，仅供只读企业 Tool 使用；Planner 不可见。
 
     memory_context 为可选的 Phase 2 内存上下文：仅在 Java 侧 (userId, conversationId)
     命中 ACTIVE 记录时由调用方通过内部请求 body 注入；缺省 None 等价于历史行为
    （Planner 不渲染 memory block）。
+    runtime_thread_id 是已追加拓扑后缀的 LangGraph thread_id，只在 POSTGRES
+    Checkpoint 模式传入；新请求仍传入完整 initial AgentState 并从 START 执行，
+    不使用 Command(resume)、graph.invoke(None) 或 checkpoint resume。
     """
-    graph = build_agent_loop_graph() if use_planner else build_agent_graph()
+    if graph is None:
+        graph = build_agent_loop_graph() if use_planner else build_agent_graph()
     initial: AgentState = {
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
@@ -496,9 +523,14 @@ def run_langgraph_agent(
     }
     # Observability metadata：业务 trace_id 仅用于关联定位，不覆盖 OTel Trace ID；
     # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
-    config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
-    result = dict(graph.invoke(initial, config=config, context=runtime_context))
-    if use_planner:
-        result = _finalize_action_proposal(result)
-        result = _finalize_response_contract(result)
+    config: dict = {}
+    if trace_id:
+        config['metadata'] = {'business_trace_id': trace_id}
+    if runtime_thread_id:
+        config['configurable'] = {'thread_id': runtime_thread_id}
+        result = dict(
+            graph.invoke(initial, config=config, context=runtime_context, durability='sync')
+        )
+    else:
+        result = dict(graph.invoke(initial, config=config, context=runtime_context))
     return result

@@ -38,6 +38,20 @@ jobs:
   python-eval:
     name: Python RAG Evaluation
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: enterprise_ai_checkpoint_ci
+          POSTGRES_USER: checkpoint_ci
+          POSTGRES_PASSWORD: checkpoint_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U checkpoint_ci -d enterprise_ai_checkpoint_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -65,7 +79,16 @@ jobs:
           DEEPSEEK_API_KEY: ""
           DEEPSEEK_BASE_URL: ""
           DEEPSEEK_MODEL: ""
+          LANGGRAPH_CHECKPOINT_MODE: DISABLED
         run: uv run python -m pytest -q
+
+      - name: Run PostgreSQL checkpoint integration tests
+        working-directory: agent-python
+        env:
+          LANGGRAPH_CHECKPOINT_MODE: POSTGRES
+          LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_ci:checkpoint_ci_password@localhost:5432/enterprise_ai_checkpoint_ci
+          LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS: "3"
+        run: uv run python -m pytest -q tests/integration/test_langgraph_postgres_checkpoint.py
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python
