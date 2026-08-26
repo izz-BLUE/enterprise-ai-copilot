@@ -29,6 +29,9 @@ public final class PendingAction {
     private final Instant createdAt;
     private final Instant expiresAt;
     private final Instant completedAt;
+    // V2 §十八: action_payload_json 是业务 payload 的 canonical 边界。
+    // 该字段为 JSON 文本（String），nullable（历史数据可能缺失）。
+    private final String actionPayloadJson;
 
     public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
                          String ownerUserId, String conversationId,
@@ -39,6 +42,22 @@ public final class PendingAction {
                          UUID idempotencyKey, String requestId, String executionMessage,
                          String failureCode, Instant createdAt, Instant expiresAt,
                          Instant completedAt) {
+        this(actionId, actionType, originTraceId, ownerUserId, conversationId,
+                employeeId, displayName, startDate, endDate, halfDay, reason, days,
+                balanceBefore, balanceAfter, confirmationNonceDigest, status,
+                idempotencyKey, requestId, executionMessage, failureCode,
+                createdAt, expiresAt, completedAt, null);
+    }
+
+    public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
+                         String ownerUserId, String conversationId,
+                         String employeeId, String displayName, LocalDate startDate,
+                         LocalDate endDate, HalfDay halfDay, String reason, BigDecimal days,
+                         BigDecimal balanceBefore, BigDecimal balanceAfter,
+                         byte[] confirmationNonceDigest, ActionStatus status,
+                         UUID idempotencyKey, String requestId, String executionMessage,
+                         String failureCode, Instant createdAt, Instant expiresAt,
+                         Instant completedAt, String actionPayloadJson) {
         this.actionId = actionId;
         this.actionType = actionType;
         this.originTraceId = originTraceId;
@@ -62,12 +81,16 @@ public final class PendingAction {
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
         this.completedAt = completedAt;
+        this.actionPayloadJson = actionPayloadJson;
     }
 
     /**
      * 新动作工厂。ownerUserId / conversationId 是 Memory 生命周期收口的关联 key
      * （对应 ai_task_memory 的 user_id / conversation_id），允许为 null 表示
      * 历史数据或无 Memory 关联（收口时跳过）。
+     * actionPayloadJson 为业务 payload 的 JSON 文本（V2 §十八）；年假由
+     * BusinessActionService 生成 startDate/endDate/halfDay/reason/days/balances 的
+     * JSON 对象，EXPENSE_CLAIM 由 Phase 6 ExpenseClaimActionHandler 生成。
      */
     public static PendingAction pending(String actionId, BusinessActionType actionType,
                                         String originTraceId, String ownerUserId,
@@ -76,11 +99,12 @@ public final class PendingAction {
                                         LocalDate endDate, HalfDay halfDay, String reason,
                                         BigDecimal days, BigDecimal balanceBefore,
                                         BigDecimal balanceAfter, byte[] nonceDigest,
-                                        Instant createdAt, Instant expiresAt) {
+                                        Instant createdAt, Instant expiresAt,
+                                        String actionPayloadJson) {
         return new PendingAction(actionId, actionType, originTraceId, ownerUserId, conversationId,
                 employeeId, displayName, startDate, endDate, halfDay, reason, days, balanceBefore,
                 balanceAfter, nonceDigest, ActionStatus.PENDING_CONFIRMATION, null, null, null, null,
-                createdAt, expiresAt, null);
+                createdAt, expiresAt, null, actionPayloadJson);
     }
 
     public String actionId() { return actionId; }
@@ -108,4 +132,6 @@ public final class PendingAction {
     public Instant createdAt() { return createdAt; }
     public Instant expiresAt() { return expiresAt; }
     public Instant completedAt() { return completedAt; }
+    /** 业务 payload JSON 文本（V2 §十八），可为 null（历史数据）。 */
+    public String actionPayloadJson() { return actionPayloadJson; }
 }

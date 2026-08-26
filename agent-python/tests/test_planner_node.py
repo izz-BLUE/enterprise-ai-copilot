@@ -13,10 +13,14 @@ from app.agents.planner_node import (
 )
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
 )
 
 
@@ -250,12 +254,20 @@ class TestPromptInputs:
             java_base_url='http://java.test',
             java_internal_token='internal-secret',
         )
+        # P2-A: java config 齐全 + employee_id 已注入 → expense_status_tool 也可见。
+        # OA MCP URL 为空 → travel / invoice 不可见（V2 §三 visibility_gate）。
         assert visible_tools(**full) == [
-            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
+            RAG_TOOL_NAME,
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
         ]
         assert visible_tools(**{**full, 'allow_eval': True}) == [
-            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
+            RAG_TOOL_NAME,
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
             EVAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
         ]
         assert LEAVE_PROPOSAL_TOOL_NAME not in visible_tools(**full)
         assert LEAVE_PROPOSAL_TOOL_NAME in visible_tools(
@@ -264,9 +276,19 @@ class TestPromptInputs:
         assert visible_tools(**{
             **full, 'allow_eval': True, 'allow_business_actions': True,
         }) == [
-            RAG_TOOL_NAME, LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME,
-            EVAL_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME,
+            RAG_TOOL_NAME,
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
+            EVAL_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
         ]
+        # 配置 OA MCP 后，travel / invoice 可见
+        with_mcp = {**full, 'enterprise_oa_mcp_url': 'http://mcp.test'}
+        tools_with_mcp = visible_tools(**with_mcp)
+        assert TRAVEL_RECORD_TOOL_NAME in tools_with_mcp
+        assert INVOICE_VERIFY_TOOL_NAME in tools_with_mcp
 
     def test_capability_gate_hides_employee_tools_without_employee_id(self):
         tools = visible_tools(
@@ -276,6 +298,8 @@ class TestPromptInputs:
             java_base_url='http://java.test',
             java_internal_token='internal-secret',
         )
+        # 无 employee_id 时所有 employee-bound Tool 都不可见；expense_status_tool
+        # 也需要 employee_id（与 leave_balance 一致）。
         assert tools == [RAG_TOOL_NAME, EVAL_TOOL_NAME]
 
     def test_capability_gate_hides_employee_tools_without_java_base_url(self):
@@ -286,7 +310,13 @@ class TestPromptInputs:
             java_base_url='',
             java_internal_token='internal-secret',
         )
-        assert tools == [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME]
+        # 无 java_base_url：leave_* / expense_status 都不可见；
+        # 但 allow_business_actions + employee_id 已满足，proposal 类仍可见。
+        assert tools == [
+            RAG_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ]
 
     def test_capability_gate_hides_employee_tools_without_java_internal_token(self):
         tools = visible_tools(
@@ -296,7 +326,11 @@ class TestPromptInputs:
             java_base_url='http://java.test',
             java_internal_token='',
         )
-        assert tools == [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME]
+        assert tools == [
+            RAG_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ]
 
     def test_prompt_contains_question_tools_observation_history_budget(self):
         prompt = build_planner_prompt(

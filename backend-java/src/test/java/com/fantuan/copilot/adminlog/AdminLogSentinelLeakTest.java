@@ -16,6 +16,7 @@ import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionNonceService;
+import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.action.BusinessActionProperties;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
@@ -187,7 +188,8 @@ class AdminLogSentinelLeakTest {
                 new BigDecimal("9.0"),
                 new byte[32],
                 FIXED_CLOCK.instant(),
-                FIXED_CLOCK.instant().plusSeconds(3600));
+                FIXED_CLOCK.instant().plusSeconds(3600),
+                null); // action_payload_json: P2-A V6 新增
         audit.invoke(service, "trace-audit", action,
                 ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
                 "ACTION_SUCCEEDED", "REQ-x", FIXED_CLOCK.instant());
@@ -272,10 +274,14 @@ class AdminLogSentinelLeakTest {
         when(gateway.hasConflict(anyString(), any(), any())).thenReturn(false);
         when(gateway.submit(any(LeaveSubmission.class)))
                 .thenReturn(new LeaveExecutionResult("REQ-x", Instant.now()));
+        // V2 §十七: Service 依赖 HandlerRegistry；业务 handler 在其它测试验证。
+        BusinessActionHandlerRegistry registry = new BusinessActionHandlerRegistry(
+                List.of(new com.fantuan.copilot.service.action.handler.AnnualLeaveActionHandler(
+                        accounts, gateway)));
         return new BusinessActionService(
                 props,
                 new AdminAccessService(""),
-                actions, accounts, gateway,
+                actions, registry,
                 new ActionNonceService(), memoryService,
                 buffer,
                 FIXED_CLOCK);

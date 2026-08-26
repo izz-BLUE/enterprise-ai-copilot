@@ -6,53 +6,49 @@ tool_executor_node.py —— Tool 执行节点
 真正发起 Tool 执行前 tool_call_count += 1（成功、超时、异常都消耗
 一次调用预算）。Tool 结果与异常均转为结构化 Observation 交回 Planner
 决定下一步，不让整个 Agent 崩溃。
+
+P2-A Expense Workflow V1：
+Tool 注册表（ToolSpec + _TOOL_REGISTRY）替换原 _get_tool if/elif。
+新增 Tool 时只需在 _TOOL_REGISTRY 添加 ToolSpec，不再扩展 executor 分支。
 """
 
 import json
+from dataclasses import dataclass, field
 from datetime import date
 from time import monotonic
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
 from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
     PlannerDecisionError,
 )
 from app.tools.enterprise_tools import (
-    leave_balance_tool,
-    leave_proposal_tool,
-    leave_request_tool,
+    expense_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
+    expense_status_tool,  # noqa: F401 - registry resolves tools through globals().
+    invoice_verify_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_balance_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_request_tool,  # noqa: F401 - registry resolves tools through globals().
+    travel_record_tool,  # noqa: F401 - registry resolves tools through globals().
 )
-from app.tools.rag_tools import eval_report_tool, rag_answer_tool
-
-# 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key
-_LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
-
-# leave_proposal_tool 的系统字段与业务字段:全部由 Executor 从 AgentState 注入,
-# 模型 arguments 中不得夹带任何一项(业务参数由受控链路基于原始问题解析)
-_PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
-    'employee_id', 'trace_id', 'business_date',
-    'start_date', 'end_date', 'reason', 'half_day',
-})
-
-# 这三个 Tool 都必须绑定 Java 已认证请求中的员工身份；缺失时在真正调用
-# Tool 之前阻断。只读 Tool 的 Java URL / internal token 仍由下游 Tool / Client 校验。
-_EMPLOYEE_REQUIRED_TOOLS = frozenset({
-    LEAVE_BALANCE_TOOL_NAME,
-    LEAVE_REQUEST_TOOL_NAME,
-    LEAVE_PROPOSAL_TOOL_NAME,
-})
+from app.tools.rag_tools import eval_report_tool, rag_answer_tool  # noqa: F401 - see registry lookup above.
 
 # 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
-# 小于 MAX_PLANNER_STEPS(5)，使 Tool 预算成为独立防线：连续请求 Tool 时
-# 由 Executor 先拦截，而不是永远被 Planner 步骤预算遮蔽。
-MAX_TOOL_CALLS = 3
+# P2-A Expense Workflow V1: 提升到 5 以容纳 travel/rag/invoice/proposal/status
+# 五步目标链；仍小于 MAX_PLANNER_STEPS(6)，Tool 预算保持独立防线。
+MAX_TOOL_CALLS = 5
 
 # 异常转 Observation 的稳定错误结构：完整异常只进内部日志，不给 Planner
 _ERROR_MESSAGES = {
@@ -95,19 +91,352 @@ def _error_code(exc: Exception) -> str:
     return 'tool_execution_failed'
 
 
+# ---------------------------------------------------------------------------
+# Tool Registry
+# ---------------------------------------------------------------------------
+# ToolSpec 把"身份要求 / 系统字段集 / 执行前注入 / Proposal 解析"从 executor
+# 主流程里抽出来，每加一个 Tool 只在 _TOOL_REGISTRY 注册一行，executor
+# 主流程（结构/权限/budget/dedup/history/observation）保持不变。
+#
+# 字段语义：
+#   name                       - Tool 字符串名，与 planner_schema.ToolName Literal
+#                                同源；用于 _TOOL_REGISTRY 索引与日志。
+#   executable_ref             - 模块全局变量名（字符串），executor 每次执行时
+#                                通过 globals()[ref] 解析，使测试 patch
+#                                'app.agents.tool_executor_node.rag_answer_tool'
+#                                等模块 attr 后立即生效。
+#   identity_required          - True 表示必须在 executor 调用前由 AgentState
+#                                注入 employee_id；缺失则 executor 阻断。
+#   system_arg_keys            - 模型在 arguments 中**禁止**夹带的系统/业务字段
+#                                集合；命中即抛 PlannerDecisionError 阻断。
+#                                LLM 业务参数由对应工具的 arg_contract 单独约束。
+#   no_employee_blocked_category - 缺 employee_id 时归类 category（business_action
+#                                | access_control），仅在 identity_required=True
+#                                时使用。
+#   pre_inject                 - 可选钩子：executor 在 .invoke 前调用，签名
+#                                (decision_args, ctx) -> dict；返回合并到调用参数。
+#                                不需要注入则 None。
+#   proposal_post              - 可选钩子：executor 解析 observation 后调用，
+#                                返回要写回 AgentState 的字段 dict（如
+#                                action_proposal / missing_fields）。不是
+#                                proposal 风格 Tool 则 None。
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class _ExecutorContext:
+    employee_id: str
+    trace_id: str
+    question: str
+    business_date: Any  # date | None
+    tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    executable_ref: str  # module-global name; resolved via globals() at call time
+    identity_required: bool = False
+    system_arg_keys: frozenset = field(default_factory=frozenset)
+    no_employee_blocked_category: str = 'access_control'
+    pre_inject: Callable[[dict, _ExecutorContext], dict] | None = None
+    proposal_post: Callable[[dict, str], dict] | None = None
+
+
+# --- Pre-inject hooks ------------------------------------------------------
+
+def _inject_rag(args: dict, ctx: _ExecutorContext) -> dict:
+    # 系统字段由 Executor 注入，不经过模型
+    merged = dict(args)
+    merged['original_question'] = ctx.question
+    merged['trace_id'] = ctx.trace_id
+    return merged
+
+
+def _inject_leave_read(args: dict, ctx: _ExecutorContext) -> dict:
+    # 企业 Tool P0：身份由 Java 注入到 AgentState.employee_id，
+    # Executor 转发给 Tool；模型不得在 arguments 中夹带这些字段。
+    merged = dict(args)
+    leaked = set(args or {}).intersection(_LEAVE_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['employee_id'] = ctx.employee_id
+    merged['trace_id'] = ctx.trace_id
+    return merged
+
+
+def _inject_leave_proposal(args: dict, ctx: _ExecutorContext) -> dict:
+    # Composite Enterprise Task P0：原始问题 / business_date / trace_id
+    # 由 Executor 注入；模型不得夹带任何系统或业务字段（日期 / 原因等
+    # 由受控链路基于原始问题确定性解析）。
+    merged = dict(args)
+    leaked = set(args or {}).intersection(_PROPOSAL_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['question'] = ctx.question
+    merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
+    merged['trace_id'] = ctx.trace_id
+    return merged
+
+
+# ── P2-A Expense Workflow V1: 共享 MCP read pre-inject 钩子 ─────────────
+# travel_record_tool 与 invoice_verify_tool 都要求 identity_required=true
+# 且 executor 注入 employee_id / trace_id；LLM 不得传 employee_id（V2 §十一）。
+# limit 不属于 LLM 必填字段，Executor 注入默认值。
+_OAMCP_READ_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
+
+
+def _inject_oamcp_read(args: dict, ctx: _ExecutorContext) -> dict:
+    """Enterprise OA MCP 只读 Tool 的 pre-inject 钩子。
+
+    - 注入 employee_id / trace_id（trusted system field）
+    - 拒绝 LLM 在 arguments 中夹带 employee_id / trace_id
+    - 对 travel_record_tool：注入默认 limit=10
+    """
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_OAMCP_READ_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['employee_id'] = ctx.employee_id
+    merged['trace_id'] = ctx.trace_id
+    if _calling_tool_name_for_log() == TRAVEL_RECORD_TOOL_NAME and 'limit' not in merged:
+        merged['limit'] = 10
+    return merged
+
+
+# ── P2-A Expense Workflow V1: expense_proposal_tool 的 context 注入 ───────
+# 追加约束 §1/§2：ExpenseProposalContext 必须由程序层从当前请求成功
+# tool_history 确定性构造（不允许把 raw tool_history 交给 LLM 解析）。
+# 从 tool_history 中抽取：
+#   - travel_record_tool success → travel_record 列表（trip 记录）
+#   - invoice_verify_tool success → invoices 列表（验真结果）
+#   - rag_answer_tool success    → policy_context（政策知识解释）
+# Tool 内部（在 Python 侧）禁止重新调用 MCP / Java / RAG（V2 §十三）。
+_EXPENSE_CTCX_SYSTEM_ARG_KEYS = frozenset({
+    'employee_id', 'trace_id', 'business_date', 'context',
+})
+
+
+def _success_observations(tool_history: list[dict], tool_name: str) -> list[dict]:
+    """从 tool_history 抽取指定 Tool 的 success observation（JSON dict）。"""
+    result = []
+    for item in tool_history:
+        if item.get('tool_name') != tool_name or item.get('status') != 'success':
+            continue
+        observation = item.get('observation')
+        try:
+            payload = json.loads(observation)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and payload.get('success', False):
+            result.append(payload)
+    return result
+
+
+def _build_expense_proposal_context(tool_history: list[dict]) -> dict:
+    """程序层确定性构造 ExpenseProposalContext。
+
+    只允许从当前请求成功 tool_history 中抽取已成功的结构化 facts；
+    travel_record / invoices / policy_context 都是程序层筛选结果。
+    """
+    travel_payloads = _success_observations(
+        tool_history, TRAVEL_RECORD_TOOL_NAME)
+    invoice_payloads = _success_observations(
+        tool_history, INVOICE_VERIFY_TOOL_NAME)
+    rag_payloads = _success_observations(
+        tool_history, RAG_TOOL_NAME)
+
+    travel_items = []
+    for payload in travel_payloads:
+        items = payload.get('items', [])
+        if isinstance(items, list):
+            travel_items.extend(items)
+
+    invoice_items = []
+    for payload in invoice_payloads:
+        if payload.get('success') is True and 'invoice_id' in payload:
+            invoice_items.append(payload)
+        elif payload.get('success') is True and 'items' in payload:
+            invoice_items.extend(payload.get('items', []))
+
+    policy_context = ''
+    for payload in rag_payloads:
+        answer = payload.get('answer')
+        if isinstance(answer, str) and answer:
+            policy_context = answer
+            break
+
+    return {
+        'travel_record': travel_items,
+        'invoices': invoice_items,
+        'policy_context': policy_context,
+    }
+
+
+def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
+    """expense_proposal_tool 的 pre-inject 钩子。
+
+    - 注入 question / business_date / trace_id / context（ExpenseProposalContext）
+    - 拒绝 LLM 在 arguments 中夹带任何系统字段（V2 §十五：禁止 trusted identity）
+    """
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_EXPENSE_CTCX_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['question'] = ctx.question
+    merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
+    merged['trace_id'] = ctx.trace_id
+    merged['context'] = _build_expense_proposal_context(ctx.tool_history)
+    return merged
+
+
+# Module-level mutable so _inject_leave_read / _inject_leave_proposal can
+# reference the calling tool name for error messages. Set per-call by
+# tool_executor_node.
+_current_tool_name: str = ''
+
+
+def _calling_tool_name_for_log() -> str:
+    return _current_tool_name
+
+
+# --- Proposal post-hooks ---------------------------------------------------
+
+def _leave_proposal_post(parsed: dict, tool_name: str) -> dict:
+    # ISO -> date 还原(详见 _restore_iso_date_fields 注释)。
+    # 仅针对 action_proposal 这一个嵌套 dict;不修改 outer observation。
+    return {
+        'action_proposal': _restore_iso_date_fields(parsed.get('action_proposal')),
+        'missing_fields': parsed.get('missing_fields', []),
+    }
+
+
+def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
+    """把 expense proposal Tool 的结构化结果回写到 AgentState。"""
+    return {
+        'action_proposal': parsed.get('action_proposal'),
+        'missing_fields': parsed.get('missing_fields', []),
+    }
+
+
+# --- 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key ---------
+_LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
+
+# leave_proposal_tool 的系统字段与业务字段:全部由 Executor 从 AgentState 注入,
+# 模型 arguments 中不得夹带任何一项(业务参数由受控链路基于原始问题解析)
+_PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
+    'employee_id', 'trace_id', 'business_date',
+    'start_date', 'end_date', 'reason', 'half_day',
+})
+
+
+# --- Registry --------------------------------------------------------------
+
+def _build_registry() -> dict[str, ToolSpec]:
+    return {
+        RAG_TOOL_NAME: ToolSpec(
+            name=RAG_TOOL_NAME,
+            executable_ref='rag_answer_tool',
+            identity_required=False,
+            system_arg_keys=frozenset(),
+            pre_inject=_inject_rag,
+        ),
+        EVAL_TOOL_NAME: ToolSpec(
+            name=EVAL_TOOL_NAME,
+            executable_ref='eval_report_tool',
+            identity_required=False,
+            system_arg_keys=frozenset(),
+        ),
+        LEAVE_BALANCE_TOOL_NAME: ToolSpec(
+            name=LEAVE_BALANCE_TOOL_NAME,
+            executable_ref='leave_balance_tool',
+            identity_required=True,
+            system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_leave_read,
+        ),
+        LEAVE_REQUEST_TOOL_NAME: ToolSpec(
+            name=LEAVE_REQUEST_TOOL_NAME,
+            executable_ref='leave_request_tool',
+            identity_required=True,
+            system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_leave_read,
+        ),
+        LEAVE_PROPOSAL_TOOL_NAME: ToolSpec(
+            name=LEAVE_PROPOSAL_TOOL_NAME,
+            executable_ref='leave_proposal_tool',
+            identity_required=True,
+            system_arg_keys=_PROPOSAL_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_leave_proposal,
+            proposal_post=_leave_proposal_post,
+        ),
+        # P2-A Expense Workflow V1：Phase 3 注册 travel/invoice read Tool
+        TRAVEL_RECORD_TOOL_NAME: ToolSpec(
+            name=TRAVEL_RECORD_TOOL_NAME,
+            executable_ref='travel_record_tool',
+            identity_required=True,
+            system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
+        INVOICE_VERIFY_TOOL_NAME: ToolSpec(
+            name=INVOICE_VERIFY_TOOL_NAME,
+            executable_ref='invoice_verify_tool',
+            identity_required=True,
+            system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
+        # P2-A Phase 7: expense_proposal_tool —— 受控业务动作生成 Proposal
+        EXPENSE_PROPOSAL_TOOL_NAME: ToolSpec(
+            name=EXPENSE_PROPOSAL_TOOL_NAME,
+            executable_ref='expense_proposal_tool',
+            identity_required=True,
+            system_arg_keys=_EXPENSE_CTCX_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_expense_proposal,
+            proposal_post=_expense_proposal_post,
+        ),
+        # P2-A Phase 8: expense_status_tool —— Java 权威状态查询（source=Java）
+        EXPENSE_STATUS_TOOL_NAME: ToolSpec(
+            name=EXPENSE_STATUS_TOOL_NAME,
+            executable_ref='expense_status_tool',
+            identity_required=True,
+            system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='access_control',
+            pre_inject=_inject_oamcp_read,
+        ),
+    }
+
+
+_TOOL_REGISTRY: dict[str, ToolSpec] = _build_registry()
+
+
 def _get_tool(tool_name: str):
-    """每次执行时从模块命名空间解析工具(不缓存快照,保证测试 patch 生效)。"""
-    if tool_name == RAG_TOOL_NAME:
-        return rag_answer_tool
-    if tool_name == EVAL_TOOL_NAME:
-        return eval_report_tool
-    if tool_name == LEAVE_BALANCE_TOOL_NAME:
-        return leave_balance_tool
-    if tool_name == LEAVE_REQUEST_TOOL_NAME:
-        return leave_request_tool
-    if tool_name == LEAVE_PROPOSAL_TOOL_NAME:
-        return leave_proposal_tool
-    raise ValueError(f'Unknown tool: {tool_name}')
+    """每次执行时通过模块 globals() 解析工具(不缓存快照,保证测试 patch 生效)。
+
+    可执行对象本身仍由 _TOOL_REGISTRY 中的 executable_ref 决定（决定哪个名字
+    在本模块下被调用），但每次 invoke 都重新走 globals()，使得
+    patch('app.agents.tool_executor_node.rag_answer_tool', ...) 等模块 attr
+    patch 立即生效。
+    """
+    spec = _TOOL_REGISTRY.get(tool_name)
+    if spec is None:
+        raise ValueError(f'Unknown tool: {tool_name}')
+    try:
+        return globals()[spec.executable_ref]
+    except KeyError as exc:
+        raise ValueError(
+            f'Tool {tool_name} 引用了未注册的模块属性 {spec.executable_ref}'
+        ) from exc
 
 
 def _blocked(state: dict, stop_reason: str, message: str,
@@ -192,14 +521,16 @@ def tool_executor_node(state: dict) -> dict:
     if decision.action != 'tool':
         return _blocked(state, 'invalid_decision', 'Tool Executor 仅处理 action=tool 的决策。')
 
+    # 解析 ToolSpec（registry 驱动）。未知 Tool 在 Planner schema 已拒绝，
+    # 这里仍是防御性兜底：保证后续 _get_tool 不会抛 KeyError。
+    spec = _TOOL_REGISTRY.get(decision.tool_name)
+    if spec is None:
+        return _blocked(state, 'invalid_decision',
+                        f'当前 Tool 不在注册表中：{decision.tool_name}')
+
     # 2. 身份前置校验（即使 Capability Gate / Planner 已校验，Executor 独立确认）
     employee_id = (state.get('employee_id') or '').strip()
-    if decision.tool_name in _EMPLOYEE_REQUIRED_TOOLS and not employee_id:
-        category = (
-            'business_action'
-            if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME
-            else 'access_control'
-        )
+    if spec.identity_required and not employee_id:
         logger.warning(
             '[%s] tool_executor 拒绝无 employee_id 的 Tool=%s',
             trace_id, decision.tool_name,
@@ -210,7 +541,7 @@ def tool_executor_node(state: dict) -> dict:
             '当前请求缺少员工身份，已拒绝执行。',
             tool_name=decision.tool_name,
             arguments=decision.arguments,
-            category=category,
+            category=spec.no_employee_blocked_category,
         )
 
     # 3. 权限再校验（即使 Planner 已校验，Executor 独立确认）
@@ -219,15 +550,18 @@ def tool_executor_node(state: dict) -> dict:
         return _blocked(state, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
-    if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+    # 受控业务动作统一权限（LEAVE_PROPOSAL / EXPENSE_PROPOSAL，V2 §十二 HITL）
+    if decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME):
         if not state.get('allow_business_actions', False):
-            logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
+                           trace_id, decision.tool_name)
             return _blocked(state, 'not_allowed',
                             '业务动作功能未启用，或当前请求无执行权限。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
         if state.get('business_date') is None:
-            logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期',
+                           trace_id, decision.tool_name)
             return _blocked(state, 'not_allowed', '当前业务日期不可用。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
@@ -248,34 +582,19 @@ def tool_executor_node(state: dict) -> dict:
     # 6. 执行前计数：真正发起执行即消耗一次调用预算（成功/超时/异常都计数）
     tool_call_count += 1
     try:
-        args = dict(decision.arguments)
-        if decision.tool_name == RAG_TOOL_NAME:
-            # 系统字段由 Executor 注入，不经过模型
-            args['original_question'] = state.get('question', '')
-            args['trace_id'] = trace_id
-        elif decision.tool_name in (LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME):
-            # 企业 Tool P0：身份由 Java 注入到 AgentState.employee_id，
-            # Executor 转发给 Tool；模型不得在 arguments 中夹带这些字段。
-            leaked = set(decision.arguments or {}).intersection(_LEAVE_SYSTEM_ARG_KEYS)
-            if leaked:
-                raise PlannerDecisionError(
-                    f'{decision.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
-                )
-            args['employee_id'] = employee_id
-            args['trace_id'] = trace_id
-        elif decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
-            # Composite Enterprise Task P0：原始问题 / business_date / trace_id
-            # 由 Executor 注入；模型不得夹带任何系统或业务字段（日期 / 原因等
-            # 由受控链路基于原始问题确定性解析）。
-            leaked = set(decision.arguments or {}).intersection(_PROPOSAL_SYSTEM_ARG_KEYS)
-            if leaked:
-                raise PlannerDecisionError(
-                    f'{decision.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
-                )
-            business_date = state.get('business_date')
-            args['question'] = state.get('question', '')
-            args['business_date'] = business_date.isoformat() if business_date else ''
-            args['trace_id'] = trace_id
+        global _current_tool_name
+        _current_tool_name = decision.tool_name
+        ctx = _ExecutorContext(
+            employee_id=employee_id,
+            trace_id=trace_id,
+            question=state.get('question', ''),
+            business_date=state.get('business_date'),
+            tool_history=tool_history,
+        )
+        if spec.pre_inject is not None:
+            args = spec.pre_inject(decision.arguments or {}, ctx)
+        else:
+            args = dict(decision.arguments or {})
         result = _get_tool(decision.tool_name).invoke(args)
         observation = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         status = 'success'
@@ -306,15 +625,12 @@ def tool_executor_node(state: dict) -> dict:
         'observation': observation,
         'stop_reason': 'tool_executed',
     }
-    # Composite Enterprise Task P0：leave_proposal_tool 的 proposal / clarification
-    # 结果同步回 AgentState，供最终响应与后续链路使用。
-    if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+    # ToolSpec.proposal_post 钩子：proposal 风格 Tool 把结果同步回 AgentState，
+    # 供最终响应与后续链路使用。
+    if spec.proposal_post is not None:
         try:
             parsed = json.loads(observation) if isinstance(observation, str) else {}
         except json.JSONDecodeError:
             parsed = {}
-        # ISO -> date 还原(详见 _restore_iso_date_fields 注释)。
-        # 仅针对 action_proposal 这一个嵌套 dict;不修改 outer observation。
-        updates['action_proposal'] = _restore_iso_date_fields(parsed.get('action_proposal'))
-        updates['missing_fields'] = parsed.get('missing_fields', [])
+        updates.update(spec.proposal_post(parsed, decision.tool_name))
     return updates

@@ -12,7 +12,8 @@ import {
 } from '../domain/actionState'
 
 export function isSupportedPendingAction(action) {
-  return action?.type === 'ANNUAL_LEAVE_REQUEST'
+  // V2 §二十五：受控业务动作白名单（年假 + 报销）
+  return ['ANNUAL_LEAVE_REQUEST', 'EXPENSE_CLAIM'].includes(action?.type)
     && action?.confirmationRequired === true
 }
 

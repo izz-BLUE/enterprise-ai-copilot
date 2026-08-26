@@ -50,7 +50,9 @@ BUSINESS_ACTION_MEMORY_CAPABILITY = MemoryCapability(
 )
 
 
-# 默认 P0 capability 集合（供 MemoryTaskTypePolicy.create_from_registry / 默认兼容使用）
+# 默认 P0 capability 集合（供 MemoryTaskTypePolicy.create_from_registry / 默认兼容使用）。
+# Expense 是应用层新增业务 capability，由应用 bootstrap 显式加入 runtime registry，
+# 不混入 P0 默认能力，也不在此处为 DEFAULT_TOOL_TO_TASK_TYPE 双重 hardcode。
 DEFAULT_P0_CAPABILITIES: tuple[MemoryCapability, ...] = (
     GENERIC_MEMORY_CAPABILITY,
     LEAVE_MEMORY_CAPABILITY,

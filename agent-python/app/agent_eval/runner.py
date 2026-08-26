@@ -27,6 +27,11 @@ _ALL_TOOL_NAMES = (
     'leave_balance_tool',
     'leave_request_tool',
     'leave_proposal_tool',
+    # P2-A Expense Workflow V1
+    'travel_record_tool',
+    'invoice_verify_tool',
+    'expense_proposal_tool',
+    'expense_status_tool',
 )
 
 

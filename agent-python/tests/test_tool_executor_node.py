@@ -364,3 +364,272 @@ class TestLeaveToolSystemFieldInjection:
         assert result['stop_reason'] == 'invalid_decision'
         assert result['tool_call_count'] == 0
         tool.invoke.assert_not_called()
+
+
+# ---------- P2-A Expense Workflow V1：Tool Registry + Budget 5/6 ----------
+
+
+class TestToolRegistryBudget:
+    """ToolSpec 注册表 + MAX_TOOL_CALLS=5 / MAX_PLANNER_STEPS=6 行为不变。
+
+    - 5 个已知 Tool 全部注册。
+    - 第 6 次 Tool 调用触发 budget_exhausted，不消耗调用预算。
+    - success signature 重复阻断仍按 dedup 语义工作。
+    """
+
+    def test_registry_contains_all_known_tools(self):
+        from app.agents.tool_executor_node import _TOOL_REGISTRY
+        from app.schemas.planner_schema import (
+            EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            TRAVEL_RECORD_TOOL_NAME,
+        )
+        names = set(_TOOL_REGISTRY.keys())
+        # P2-A: travel/invoice 在 Phase 3；expense_proposal 在 Phase 7；
+        # expense_status 在 Phase 8 加入 —— 4 个新 Tool 全部注册。
+        assert names == {
+            RAG_TOOL_NAME,
+            EVAL_TOOL_NAME,
+            LEAVE_BALANCE_TOOL_NAME,
+            LEAVE_REQUEST_TOOL_NAME,
+            LEAVE_PROPOSAL_TOOL_NAME,
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+            EXPENSE_STATUS_TOOL_NAME,
+        }
+
+    def test_max_tool_calls_is_five(self):
+        from app.agents.tool_executor_node import MAX_TOOL_CALLS
+        assert MAX_TOOL_CALLS == 5
+
+    def test_max_planner_steps_is_six(self):
+        from app.agents.planner_node import MAX_PLANNER_STEPS
+        assert MAX_PLANNER_STEPS == 6
+
+    def test_tool_call_count_remains_below_max_at_fifth_call(self):
+        """第 5 次 Tool 调用应正常 success 且 tool_call_count=5。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            for i in range(5):
+                result = tool_executor_node(state(
+                    tool_call_count=i,
+                    planner_decision=_tool_decision(
+                        RAG_TOOL_NAME, {'question': f'q{i}'}, reason_code='need_knowledge',
+                    ),
+                ))
+                assert result['stop_reason'] == 'tool_executed', i
+        assert rag.invoke.call_count == 5
+
+    def test_sixth_call_blocked_with_budget_exhausted(self):
+        """第 6 次 Tool 调用（tool_call_count=5 时进入）应被 budget 阻断，不计数。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            result = tool_executor_node(state(
+                tool_call_count=5,
+                planner_decision=_tool_decision(
+                    RAG_TOOL_NAME, {'question': 'q5'}, reason_code='need_knowledge',
+                ),
+            ))
+        assert result['stop_reason'] == 'tool_call_budget_exhausted'
+        assert result['tool_call_count'] == 5
+        rag.invoke.assert_not_called()
+
+    def test_repeated_signature_still_blocked_by_dedup(self):
+        """成功签名去重独立于 budget 计数。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = '{"answer":"x","success":true,"sources":[]}'
+            decision = _tool_decision(RAG_TOOL_NAME, {'question': 'same'})
+            first = tool_executor_node(state(planner_decision=decision))
+            second = tool_executor_node(state(
+                tool_call_count=first['tool_call_count'],
+                tool_history=first['tool_history'],
+                planner_decision=decision,
+            ))
+        assert first['stop_reason'] == 'tool_executed'
+        assert second['stop_reason'] == 'already_completed'
+        rag.invoke.assert_called_once()
+
+
+# ---------- P2-A Expense Workflow V1: travel_record / invoice_verify Tool 执行链 ----------
+
+
+class TestEnterpriseOaToolExecution:
+    """Tool Executor + travel_record_tool / invoice_verify_tool 端到端 fake client。"""
+
+    def _patch_fake_client(self, travel_response, invoice_response):
+        from app.integrations.mcp import enterprise_oa_client as cli
+
+        class _Fake:
+            def __init__(self):
+                self.travel_response = travel_response
+                self.invoice_response = invoice_response
+                self.travel_calls = []
+                self.invoice_calls = []
+
+            def travel_record_get(self, *, employee_id, limit=10):
+                self.travel_calls.append({'employee_id': employee_id, 'limit': limit})
+                return self.travel_response
+
+            def invoice_verify(self, *, invoice_id, employee_id):
+                self.invoice_calls.append({'invoice_id': invoice_id, 'employee_id': employee_id})
+                return self.invoice_response
+
+        fake = _Fake()
+        cli.reset_enterprise_oa_client()
+        cli._client_singleton = fake
+        return fake
+
+    def teardown_method(self):
+        from app.integrations.mcp import enterprise_oa_client as cli
+        cli.reset_enterprise_oa_client()
+
+    def test_travel_record_tool_success(self):
+        fake = self._patch_fake_client(
+            travel_response={
+                'success': True,
+                'items': [
+                    {
+                        'trip_id': 'TRIP-1', 'employee_id': 'E10001',
+                        'destination': '上海', 'start_date': '2026-08-18',
+                        'end_date': '2026-08-20', 'purpose': '客户拜访',
+                        'status': 'APPROVED', 'expense_documents': [
+                            {'invoice_id': 'INV-001', 'category': 'HOTEL',
+                             'declared_amount': 1600, 'description': '酒店'},
+                        ],
+                    },
+                ],
+            },
+            invoice_response={'success': True, 'valid': True},
+        )
+        decision = _tool_decision(
+            'travel_record_tool', {}, reason_code='need_travel_history'
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'tool_executed'
+        # executor 注入了 employee_id / trace_id / limit=10 默认
+        assert fake.travel_calls == [{'employee_id': 'E10001', 'limit': 10}]
+        observation = json.loads(result['observation'])
+        assert observation['success'] is True
+        assert observation['items'][0]['trip_id'] == 'TRIP-1'
+
+    def test_travel_record_tool_rejects_employee_id_in_arguments(self):
+        """V2 §十一：LLM 不得在 arguments 中夹带 employee_id。"""
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'valid': True},
+        )
+        # PlannerDecision validator 已先拒绝 employee_id 字段；但 Executor
+        # 仍要做 system_arg_keys 校验作为兜底（防止 validator 被绕过）。
+        decision = _tool_decision(
+            'travel_record_tool', {'employee_id': 'attacker'}, reason_code='need_travel_history'
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        # PlannerDecision.validate_decision 阶段就会拒绝 employee_id 进入 arguments。
+        assert result['stop_reason'] == 'invalid_decision'
+        assert fake.travel_calls == []
+
+    def test_travel_record_tool_requires_employee_id(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'valid': True},
+        )
+        decision = _tool_decision(
+            'travel_record_tool', {}, reason_code='need_travel_history'
+        )
+        result = tool_executor_node(state(
+            employee_id='',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['category'] == 'access_control'
+
+    def test_invoice_verify_tool_success(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={
+                'success': True, 'invoice_id': 'INV-001', 'valid': True,
+                'amount': 1600, 'category': 'HOTEL', 'duplicate': False,
+            },
+        )
+        decision = _tool_decision(
+            'invoice_verify_tool',
+            {'invoice_id': 'INV-001'},
+            reason_code='need_invoice_verify',
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'tool_executed'
+        assert fake.invoice_calls == [{'invoice_id': 'INV-001', 'employee_id': 'E10001'}]
+        observation = json.loads(result['observation'])
+        assert observation['success'] is True
+        assert observation['amount'] == 1600
+
+    def test_invoice_verify_tool_cross_employee_ownership_reject(self):
+        """Stress G 端到端：跨员工 invoice 验真 → MCP ownership reject 透传。"""
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={
+                'success': False,
+                'error_code': 'OA_MCP_INVOICE_OWNERSHIP',
+                'message': 'invoice INV-005 不属于 employee E10001',
+            },
+        )
+        decision = _tool_decision(
+            'invoice_verify_tool',
+            {'invoice_id': 'INV-005'},
+            reason_code='need_invoice_verify',
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'tool_executed'
+        observation = json.loads(result['observation'])
+        assert observation['success'] is False
+        assert observation['error_code'] == 'OA_MCP_INVOICE_OWNERSHIP'
+
+    def test_invoice_verify_tool_rejects_employee_id_in_arguments(self):
+        """V2 §十一：invoice_verify 强制 identity_required=true；Planner arguments
+        中不允许 employee_id。validate_decision 阶段拒绝。"""
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'valid': True},
+        )
+        decision = _tool_decision(
+            'invoice_verify_tool',
+            {'invoice_id': 'INV-001', 'employee_id': 'attacker'},
+            reason_code='need_invoice_verify',
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'invalid_decision'
+        assert fake.invoice_calls == []
+
+    def test_invoice_verify_tool_empty_invoice_id_rejected(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'valid': True},
+        )
+        decision = _tool_decision(
+            'invoice_verify_tool',
+            {'invoice_id': ''},
+            reason_code='need_invoice_verify',
+        )
+        result = tool_executor_node(state(
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+        assert result['stop_reason'] == 'invalid_decision'
+        assert fake.invoice_calls == []

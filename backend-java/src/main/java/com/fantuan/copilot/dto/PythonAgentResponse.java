@@ -2,11 +2,18 @@ package com.fantuan.copilot.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
+import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 
 import java.util.List;
 
+/**
+ * Python → Java Agent 响应。
+ *
+ * V2 §十六：actionProposal 由 Jackson 按 action_type 自动分到具体 subtype
+ * （AnnualLeaveActionProposal / ExpenseActionProposal），由 BusinessActionService
+ * 按 proposal.actionType() → handlerRegistry 调度（不在 Controller 分发）。
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record PythonAgentResponse(
         String answer,
@@ -17,7 +24,7 @@ public record PythonAgentResponse(
         List<String> sources,
         Boolean success,
         @JsonAlias("trace_id") String traceId,
-        @JsonAlias("action_proposal") AnnualLeaveActionProposal actionProposal,
+        @JsonAlias("action_proposal") BusinessActionProposal actionProposal,
         @JsonAlias("missing_fields") List<String> missingFields,
         @JsonAlias("memory_proposal") AgentMemoryProposal memoryProposal) {
 }

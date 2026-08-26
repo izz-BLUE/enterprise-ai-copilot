@@ -83,6 +83,30 @@ async function openDraft(page, response = pendingResponse()) {
   await expect(page.getByRole('region', { name: '年假申请确认卡' })).toBeVisible()
 }
 
+const expensePendingResponse = (overrides = {}) => pendingResponse({
+  type: 'EXPENSE_CLAIM',
+  title: '提交模拟差旅报销申请',
+  summary: {
+    tripId: 'TRIP-20260818-001',
+    claimedAmount: '1830.00',
+    reimbursableAmount: '1730.00',
+    costCenter: 'COST-IT',
+    reason: '上海出差酒店与交通',
+    itemCount: 2,
+    invoiceIds: ['INV-001', 'INV-002'],
+  },
+  ...overrides,
+})
+
+async function openExpenseDraft(page, response = expensePendingResponse()) {
+  await mockChat(page, response)
+  await page.goto('/')
+  const input = page.getByPlaceholder('输入问题... (Enter 发送，Shift+Enter 换行)')
+  await input.fill('帮我报销上周上海出差的酒店和打车费')
+  await input.press('Enter')
+  await expect(page.getByRole('region', { name: '报销申请确认卡' })).toBeVisible()
+}
+
 async function fillAdminToken(page, token = 'test-only') {
   await page.getByRole('button', { name: /管理员演示设置/ }).click()
   await page.getByPlaceholder('输入 Admin Token...').fill(token)
@@ -103,6 +127,26 @@ test('展示完整年假草稿且敏感确认数据不进入 DOM', async ({ page
   await expect(card).toContainText('2 天')
   await expect(card.getByRole('button', { name: '确认提交' })).toBeVisible()
   await expect(card.getByRole('button', { name: '取消草稿' })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(TEST_NONCE)
+  await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
+})
+
+test('EXPENSE_CLAIM PendingAction 显示报销摘要和确认操作，不渲染年假字段', async ({ page }) => {
+  await openExpenseDraft(page)
+
+  const card = page.getByRole('region', { name: '报销申请确认卡' })
+  await expect(card.getByRole('heading', { name: '提交模拟差旅报销申请' })).toBeVisible()
+  await expect(card).toContainText('TRIP-20260818-001')
+  await expect(card).toContainText('申报金额')
+  await expect(card).toContainText('1,830 元')
+  await expect(card).toContainText('报销金额')
+  await expect(card).toContainText('1,730 元')
+  await expect(card).toContainText('2 张')
+  await expect(card).toContainText('INV-001、INV-002')
+  await expect(card.getByRole('button', { name: '确认提交' })).toBeVisible()
+  await expect(card.getByRole('button', { name: '取消草稿' })).toBeVisible()
+  await expect(card).not.toContainText('开始日期')
+  await expect(card).not.toContainText('申请前余额')
   await expect(page.locator('body')).not.toContainText(TEST_NONCE)
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })

@@ -46,13 +46,14 @@ class ActionAuditLoggingTest {
                 new BigDecimal("4.0"),
                 new byte[32],
                 now,
-                now.plusSeconds(600));
+                now.plusSeconds(600),
+                null); // action_payload_json: P2-A V6 新增，测试直接构造不填充
+        // V2 §十七: Service 依赖 HandlerRegistry；业务 handler 在其它测试验证。
         BusinessActionService service = new BusinessActionService(
                 new BusinessActionProperties(),
                 mock(com.fantuan.copilot.service.AdminAccessService.class),
                 mock(com.fantuan.copilot.repository.action.PendingActionRepository.class),
-                mock(com.fantuan.copilot.repository.action.LeaveAccountRepository.class),
-                mock(com.fantuan.copilot.gateway.leave.LeaveExecutionGateway.class),
+                new BusinessActionHandlerRegistry(java.util.List.of()),
                 new ActionNonceService(),
                 mock(com.fantuan.copilot.service.memory.AiTaskMemoryService.class),
                 new AdminLogBuffer(),

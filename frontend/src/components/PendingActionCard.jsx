@@ -47,6 +47,46 @@ function SummaryItem({ label, value }) {
   )
 }
 
+function formatAmount(value) {
+  if (value == null) return null
+  return `${Number(value).toLocaleString('zh-CN')} 元`
+}
+
+/** 年假业务摘要（ANNUAL_LEAVE_REQUEST，V2 §二十五 按 type 分发）。 */
+function AnnualLeaveSummaryBlock({ summary, expiresAt, phase, status }) {
+  return (
+    <>
+      <SummaryItem label="员工" value={summary.employee} />
+      <SummaryItem label="开始日期" value={formatDate(summary.startDate)} />
+      <SummaryItem label="结束日期" value={formatDate(summary.endDate)} />
+      <SummaryItem label="时段" value={HALF_DAY_LABELS[summary.halfDay] || '未知'} />
+      <SummaryItem label="扣除天数" value={summary.days == null ? '未提供' : `${summary.days} 天`} />
+      <SummaryItem label="申请原因" value={summary.reason} />
+      <SummaryItem label="申请前余额" value={summary.remainingBalanceBefore == null ? '未提供' : `${summary.remainingBalanceBefore} 天`} />
+      <SummaryItem label="申请后余额" value={summary.remainingBalanceAfter == null ? '未提供' : `${summary.remainingBalanceAfter} 天`} />
+      <SummaryItem label="过期时间" value={formatInstant(expiresAt)} />
+      <SummaryItem label="当前状态" value={PHASE_LABELS[phase] || status} />
+    </>
+  )
+}
+
+/** 报销业务摘要（EXPENSE_CLAIM，V2 §二十五 按 type 分发）。 */
+function ExpenseClaimSummaryBlock({ summary, expiresAt, phase, status }) {
+  return (
+    <>
+      <SummaryItem label="出差记录" value={summary.tripId} />
+      <SummaryItem label="申报金额" value={formatAmount(summary.claimedAmount)} />
+      <SummaryItem label="报销金额" value={formatAmount(summary.reimbursableAmount)} />
+      <SummaryItem label="成本中心" value={summary.costCenter} />
+      <SummaryItem label="报销原因" value={summary.reason} />
+      <SummaryItem label="发票张数" value={summary.itemCount == null ? '未提供' : `${summary.itemCount} 张`} />
+      <SummaryItem label="发票编号" value={Array.isArray(summary.invoiceIds) ? summary.invoiceIds.join('、') : '未提供'} />
+      <SummaryItem label="过期时间" value={formatInstant(expiresAt)} />
+      <SummaryItem label="当前状态" value={PHASE_LABELS[phase] || status} />
+    </>
+  )
+}
+
 export default function PendingActionCard({ action, actionUi, onConfirm, onCancel, onExpire }) {
   const onExpireRef = useRef(onExpire)
 
@@ -78,32 +118,40 @@ export default function PendingActionCard({ action, actionUi, onConfirm, onCance
   const showPendingActions = phase === 'pending'
   const showRetry = phase === 'error' && actionUi.retryDecision
   const execution = actionUi.execution
+  const isExpense = action.type === 'EXPENSE_CLAIM'
 
   return (
-    <section className={`pending-action-card phase-${phase}`} aria-label="年假申请确认卡">
+    <section className={`pending-action-card phase-${phase}`} aria-label={isExpense ? '报销申请确认卡' : '年假申请确认卡'}>
       <div className="action-card-header">
         <div>
           <p className="action-eyebrow">受控业务动作</p>
-          <h3>{action.title || '提交模拟年假申请'}</h3>
+          <h3>{action.title || (isExpense ? '提交模拟差旅报销申请' : '提交模拟年假申请')}</h3>
         </div>
         <span className="action-status" aria-live="polite">{PHASE_LABELS[phase] || '未知状态'}</span>
       </div>
 
       <p className="action-safety-note">
-        这是模拟年假申请草稿。只有点击“确认提交”后，才会写入本地 Leave Sandbox。
+        {isExpense
+          ? '这是模拟差旅报销申请草稿。只有点击“确认提交”后，才会写入本地 Expense Sandbox。'
+          : '这是模拟年假申请草稿。只有点击“确认提交”后，才会写入本地 Leave Sandbox。'}
       </p>
 
       <dl className="action-summary-grid">
-        <SummaryItem label="员工" value={summary.employee} />
-        <SummaryItem label="开始日期" value={formatDate(summary.startDate)} />
-        <SummaryItem label="结束日期" value={formatDate(summary.endDate)} />
-        <SummaryItem label="时段" value={HALF_DAY_LABELS[summary.halfDay] || '未知'} />
-        <SummaryItem label="扣除天数" value={summary.days == null ? '未提供' : `${summary.days} 天`} />
-        <SummaryItem label="申请原因" value={summary.reason} />
-        <SummaryItem label="申请前余额" value={summary.remainingBalanceBefore == null ? '未提供' : `${summary.remainingBalanceBefore} 天`} />
-        <SummaryItem label="申请后余额" value={summary.remainingBalanceAfter == null ? '未提供' : `${summary.remainingBalanceAfter} 天`} />
-        <SummaryItem label="过期时间" value={formatInstant(action.expiresAt)} />
-        <SummaryItem label="当前状态" value={PHASE_LABELS[phase] || action.status} />
+        {isExpense ? (
+          <ExpenseClaimSummaryBlock
+            summary={summary}
+            expiresAt={action.expiresAt}
+            phase={phase}
+            status={action.status}
+          />
+        ) : (
+          <AnnualLeaveSummaryBlock
+            summary={summary}
+            expiresAt={action.expiresAt}
+            phase={phase}
+            status={action.status}
+          />
+        )}
       </dl>
 
       {phase === 'succeeded' && (
@@ -120,7 +168,7 @@ export default function PendingActionCard({ action, actionUi, onConfirm, onCance
 
       {phase === 'expired' && (
         <div className="action-result action-result-warning" aria-live="polite">
-          草稿已过期，请重新发送年假申请生成新草稿。
+          草稿已过期，请重新发送{isExpense ? '报销' : '年假'}申请生成新草稿。
         </div>
       )}
 

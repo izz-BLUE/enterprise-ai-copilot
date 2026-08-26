@@ -7,6 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.agents.langgraph_agent import run_langgraph_agent
+from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
+from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
+from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import (
     AGENT_LOOP_ENABLED,
@@ -26,6 +29,7 @@ from app.core.observability import (
 from app.memory.memory_llm_adapter import MemoryLLMAdapter
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
+from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
@@ -75,6 +79,14 @@ class _ResponseMemoryWriter:
         self.command = command
 
 
+def _build_memory_capability_registry() -> MemoryCapabilityRegistry:
+    """构造当前 Agent runtime 使用的 Memory capability registry。"""
+    return MemoryCapabilityRegistry.of([
+        *DEFAULT_P0_CAPABILITIES,
+        EXPENSE_MEMORY_CAPABILITY,
+    ])
+
+
 def _build_memory_runtime_hook(
     *, trace_id: str,
 ) -> tuple[MemoryRuntimeHook, _ResponseMemoryWriter] | None:
@@ -82,7 +94,14 @@ def _build_memory_runtime_hook(
     if _memory_execution_policy.mode == 'DISABLED':
         return None
 
-    pipeline = MemoryPipeline(llm_callable=MemoryLLMAdapter(call_llm))
+    # P2-A (V2 §二十六): Capability Registry 是业务 eligibility 唯一真理来源。
+    # P0 默认能力与应用层 Expense capability 显式合并；不修改
+    # DEFAULT_TOOL_TO_TASK_TYPE（避免双重 hardcode）。
+    registry = _build_memory_capability_registry()
+    policy = MemoryTaskTypePolicy.create_from_registry(
+        registry)
+    pipeline = MemoryPipeline(task_type_policy=policy,
+                              llm_callable=MemoryLLMAdapter(call_llm))
     writer = _ResponseMemoryWriter()
     dispatcher = MemoryWriteDispatcher(writer=writer)
     hook = MemoryRuntimeHook(

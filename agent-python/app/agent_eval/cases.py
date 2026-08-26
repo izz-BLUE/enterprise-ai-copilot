@@ -271,14 +271,16 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         case_id='014-step-budget-exhausted',
         question='年假制度',
         expected_stop_reason='step_budget_exhausted',
-        expected_tool_sequence=('rag_answer_tool',) * 3,
-        max_step_count=5,
-        max_tool_call_count=3,
-        description='Planner 决策预算耗尽终止：Tool 调用先被 tool budget（3）约束，'
-                    '最终由步骤预算（5 次决策）终止回环，step_count 不越界',
+        # P2-A Expense Workflow V1：Tool budget=5、step budget=6；Tool 先到顶，
+        # 再由步骤预算终止回环。step_count 不越界。
+        expected_tool_sequence=('rag_answer_tool',) * 5,
+        max_step_count=6,
+        max_tool_call_count=5,
+        description='Planner 决策预算耗尽终止：Tool 调用先被 tool budget（5）约束，'
+                    '最终由步骤预算（6 次决策）终止回环，step_count 不越界',
         planner_responses=tuple(
             _tool('rag_answer_tool', {'question': f'问题{i}'}, 'need_knowledge')
-            for i in range(6)
+            for i in range(7)
         ),
         tool_stubs={'rag_answer_tool': RAG_ANSWER},
     ),
@@ -286,16 +288,18 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         case_id='015-tool-budget-exhausted',
         question='年假制度',
         expected_stop_reason='task_complete',
-        expected_tool_sequence=('rag_answer_tool',) * 3,
-        max_step_count=5,
-        max_tool_call_count=3,
-        description='Tool 调用预算（3 次）耗尽 → 第 4 次被 Executor 拦截 → Planner 转 Finish',
+        # P2-A Expense Workflow V1：Tool budget=5，第 6 次被 Executor 拦截 → Finish
+        expected_tool_sequence=('rag_answer_tool',) * 5,
+        max_step_count=6,
+        max_tool_call_count=5,
+        description='Tool 调用预算（5 次）耗尽 → 第 6 次被 Executor 拦截 → Planner 转 Finish',
         planner_responses=(
             _tool('rag_answer_tool', {'question': '问题0'}, 'need_knowledge'),
             _tool('rag_answer_tool', {'question': '问题1'}, 'need_knowledge'),
             _tool('rag_answer_tool', {'question': '问题2'}, 'need_knowledge'),
             _tool('rag_answer_tool', {'question': '问题3'}, 'need_knowledge'),
-            _finish('预算内已完成 3 次查询。'),
+            _tool('rag_answer_tool', {'question': '问题4'}, 'need_knowledge'),
+            _finish('预算内已完成 5 次查询。'),
         ),
         tool_stubs={'rag_answer_tool': RAG_ANSWER},
     ),

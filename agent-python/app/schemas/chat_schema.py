@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.action_schema import AnnualLeaveActionProposal
+from app.schemas.expense_schema import ExpenseActionProposal
 
 
 class MemoryContext(BaseModel):
@@ -65,6 +66,7 @@ class AgentResponse(BaseModel):
     sources: list = Field(default_factory=list)
     success: bool
     traceId: str = ""
-    action_proposal: AnnualLeaveActionProposal | None = None
+    # P2-A: 业务动作 Proposal 多态（V2 §十五）—— AnnualLeave | Expense
+    action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
     memory_proposal: AgentMemoryProposal | None = None
