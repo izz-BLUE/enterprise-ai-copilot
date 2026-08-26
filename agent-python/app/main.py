@@ -16,6 +16,7 @@ from app.core.config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
+    LANGGRAPH_CHECKPOINT_MODE,
     MAX_MESSAGE_LENGTH,
     MEMORY_WRITE_MODE,
     logger,
@@ -35,6 +36,7 @@ from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.retrieval.chunk_store import chunk_store_status
 from app.retrieval.faiss_retriever import faiss_status
+from app.runtime.checkpoint_runtime import CheckpointRuntime
 from app.schemas.chat_schema import (
     AgentMemoryProposal,
     AgentResponse,
@@ -49,9 +51,13 @@ from app.services.rag_service import process_chat
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     initialize_observability()
+    checkpoint_runtime = CheckpointRuntime.from_config()
     try:
+        checkpoint_runtime.start()
+        _app.state.checkpoint_runtime = checkpoint_runtime
         yield
     finally:
+        checkpoint_runtime.shutdown()
         shutdown_observability()
 
 
@@ -181,6 +187,7 @@ def health():
     return {
         'service': 'agent-python',
         'status': 'UP',
+        'checkpoint': {'mode': LANGGRAPH_CHECKPOINT_MODE},
         'concurrency': ai_request_limiter.snapshot(),
     }
 
@@ -190,12 +197,26 @@ def readiness() -> Response:
     provider_ready = bool(DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL and DEEPSEEK_MODEL)
     chunks = chunk_store_status()
     vector = faiss_status()
+    checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
+    if checkpoint_runtime is None:
+        checkpoint = {
+            'enabled': LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES',
+            'ready': LANGGRAPH_CHECKPOINT_MODE == 'DISABLED',
+        }
+    else:
+        checkpoint = checkpoint_runtime.readiness()
     checks = {
         'provider_config': {'ready': provider_ready},
         'chunks': chunks,
         'faiss': vector,
+        'checkpoint': checkpoint,
     }
-    ready = provider_ready and bool(chunks['ready']) and bool(vector['ready'])
+    ready = (
+        provider_ready
+        and bool(chunks['ready'])
+        and bool(vector['ready'])
+        and bool(checkpoint['ready'])
+    )
     payload = {
         'service': 'agent-python',
         'status': 'READY' if ready else 'NOT_READY',
@@ -300,17 +321,39 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     # 不进入 Safety Guard 二次扫描，不修改任何 trusted 系统字段。
     memory_context = _memory_context_to_dict(request.memoryContext)
 
+    graph = None
+    runtime_thread_id = None
+    if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES':
+        checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
+        if checkpoint_runtime is None:
+            logger.error('[%s] LangGraph checkpoint runtime 不可用', trace_id)
+            return _checkpoint_failure_response(trace_id, status_code=503)
+        try:
+            # X-Agent-Thread-Id 只由 Java 根据可信 identity + resolved conversationId
+            # 注入；缺失或格式不合法时 fail-closed，绝不自行生成或回退无快照模式。
+            runtime_thread_id = checkpoint_runtime.build_thread_id(
+                (req.headers.get('x-agent-thread-id') or '').strip(),
+                use_planner=AGENT_LOOP_ENABLED,
+            )
+            graph = checkpoint_runtime.get_graph(use_planner=AGENT_LOOP_ENABLED)
+        except (RuntimeError, ValueError):
+            logger.warning('[%s] LangGraph checkpoint 请求上下文无效', trace_id)
+            return _checkpoint_failure_response(trace_id, status_code=400)
+
     try:
-        result = run_langgraph_agent(
-            request.message,
-            allow_eval=allow_eval,
-            allow_business_actions=allow_business_actions,
-            business_date=business_date,
-            trace_id=trace_id,
-            employee_id=employee_id,
-            use_planner=AGENT_LOOP_ENABLED,
-            memory_context=memory_context,
-        )
+        agent_kwargs = {
+            'allow_eval': allow_eval,
+            'allow_business_actions': allow_business_actions,
+            'business_date': business_date,
+            'trace_id': trace_id,
+            'employee_id': employee_id,
+            'use_planner': AGENT_LOOP_ENABLED,
+            'memory_context': memory_context,
+        }
+        if graph is not None:
+            agent_kwargs['graph'] = graph
+            agent_kwargs['runtime_thread_id'] = runtime_thread_id
+        result = run_langgraph_agent(request.message, **agent_kwargs)
 
         # Memory 提案是出口层旁路；任何 Pipeline 失败都不得阻断主响应。
         # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
@@ -358,3 +401,18 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             traceId=trace_id,
         )
         return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+
+
+def _checkpoint_failure_response(trace_id: str, status_code: int) -> JSONResponse:
+    """Checkpoint POSTGRES 模式的内部契约失败响应，不泄漏连接或 DSN 信息。"""
+    response = AgentResponse(
+        answer='执行快照上下文不可用，请稍后重试。',
+        route='error',
+        safe=True,
+        category='error',
+        reason='',
+        sources=[],
+        success=False,
+        traceId=trace_id,
+    )
+    return JSONResponse(status_code=status_code, content=response.model_dump(mode='json'))

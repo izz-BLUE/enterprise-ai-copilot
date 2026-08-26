@@ -13,7 +13,7 @@ import json
 from datetime import date
 from functools import lru_cache
 from time import monotonic
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
@@ -239,8 +239,8 @@ def refuse_node(state: AgentState) -> dict:
     return {"answer": answer}
 
 
-@lru_cache(maxsize=1)
-def build_agent_graph():
+def compile_agent_graph(checkpointer: Any | None = None):
+    """编译确定性 Graph；调用方可注入进程级 LangGraph Checkpointer。"""
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     graph.add_node("safety_node", safety_node)
@@ -269,11 +269,16 @@ def build_agent_graph():
     graph.add_edge("action_node", END)
     graph.add_edge("refuse_node", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
 @lru_cache(maxsize=1)
-def build_agent_loop_graph():
+def build_agent_graph():
+    """无 Checkpointer 的兼容 Graph，供普通单元测试与 DISABLED 模式复用。"""
+    return compile_agent_graph()
+
+
+def compile_agent_loop_graph(checkpointer: Any | None = None):
     """最小有限 Agent Loop：safety → planner ⇄ tool_executor。
 
     Planner-first 拓扑。Safety 保留 pre-Planner 拦截边界：
@@ -315,7 +320,13 @@ def build_agent_loop_graph():
 
     graph.add_edge("tool_executor_node", "planner_node")
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+@lru_cache(maxsize=1)
+def build_agent_loop_graph():
+    """无 Checkpointer 的兼容 Planner-first Graph。"""
+    return compile_agent_loop_graph()
 
 
 # P2-A: proposal 风格 Tool 集合（leave / expense）。
@@ -454,6 +465,8 @@ def run_langgraph_agent(
     use_planner: bool = False,
     employee_id: str = '',
     memory_context: dict | None = None,
+    graph: Any | None = None,
+    runtime_thread_id: str | None = None,
 ) -> dict:
     """运行 LangGraph Agent。
 
@@ -470,8 +483,12 @@ def run_langgraph_agent(
     memory_context 为可选的 Phase 2 内存上下文：仅在 Java 侧 (userId, conversationId)
     命中 ACTIVE 记录时由调用方通过内部请求 body 注入；缺省 None 等价于历史行为
    （Planner 不渲染 memory block）。
+    runtime_thread_id 是已追加拓扑后缀的 LangGraph thread_id，只在 POSTGRES
+    Checkpoint 模式传入；新请求仍传入完整 initial AgentState 并从 START 执行，
+    不使用 Command(resume)、graph.invoke(None) 或 checkpoint resume。
     """
-    graph = build_agent_loop_graph() if use_planner else build_agent_graph()
+    if graph is None:
+        graph = build_agent_loop_graph() if use_planner else build_agent_graph()
     initial: AgentState = {
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
@@ -496,8 +513,16 @@ def run_langgraph_agent(
     }
     # Observability metadata：业务 trace_id 仅用于关联定位，不覆盖 OTel Trace ID；
     # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
-    config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
-    result = dict(graph.invoke(initial, config=config, context=runtime_context))
+    config: dict = {}
+    if trace_id:
+        config['metadata'] = {'business_trace_id': trace_id}
+    if runtime_thread_id:
+        config['configurable'] = {'thread_id': runtime_thread_id}
+        result = dict(
+            graph.invoke(initial, config=config, context=runtime_context, durability='sync')
+        )
+    else:
+        result = dict(graph.invoke(initial, config=config, context=runtime_context))
     if use_planner:
         result = _finalize_action_proposal(result)
         result = _finalize_response_contract(result)
