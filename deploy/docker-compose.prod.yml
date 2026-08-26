@@ -61,6 +61,9 @@ services:
       AGENT_REQUEST_TIMEOUT_SECONDS: ${AGENT_REQUEST_TIMEOUT_SECONDS:-40}
       AI_MAX_CONCURRENT_REQUESTS: ${AI_MAX_CONCURRENT_REQUESTS:-3}
       AI_QUEUE_TIMEOUT_MS: ${AI_QUEUE_TIMEOUT_MS:-500}
+      LANGGRAPH_CHECKPOINT_MODE: ${LANGGRAPH_CHECKPOINT_MODE:-POSTGRES}
+      LANGGRAPH_CHECKPOINT_DSN: "${LANGGRAPH_CHECKPOINT_DSN:?LANGGRAPH_CHECKPOINT_DSN is required in production}"
+      LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS: ${LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS:-3}
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
       DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL}"
@@ -75,6 +78,9 @@ services:
       - /opt/enterprise-ai-copilot/data/eval/reports:/data/eval/reports:ro
     expose:
       - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/agent/ready')"]
       interval: 30s
