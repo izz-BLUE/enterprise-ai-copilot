@@ -52,7 +52,7 @@ Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终
 
 ## `leave_proposal_tool` 的设计
 
-`leave_proposal_tool` 是 Planner-first 下的受控业务动作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、trace_id、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。Tool Executor 独立做权限 / Tool 预算（`MAX_TOOL_CALLS=3`） / 成功签名去重校验；可信系统字段（`question` / `business_date` / `trace_id`）由 Executor 从 AgentState 注入，模型在 `arguments` 中不得夹带这些字段。
+`leave_proposal_tool` 是 Planner-first 下的受控业务动作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、trace_id、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。Tool Executor 独立做权限 / Tool 预算（`MAX_TOOL_CALLS=3`） / 成功签名去重校验；原始问题来自当前 `AgentState`，`business_date` / `trace_id` 等可信系统字段由 Executor 从本次请求 Runtime Context 注入，模型在 `arguments` 中不得夹带这些字段。
 
 执行流程：
 

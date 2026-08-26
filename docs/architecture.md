@@ -176,6 +176,7 @@ flowchart TD
   - `use_planner=false`（显式回退 legacy）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
 - **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`；Capability Gate 同时收缩 system/user Prompt 中的 Tool contract，并在 Planner post-validation 阶段拒绝隐藏 Tool
 - **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / employee_id / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数；只读 Tool 的 Java URL / internal token 继续由下游 Tool / JavaClient 校验
+- **P3-0 状态边界**：`AgentState` 仅承载当前执行状态与不可信历史任务上下文；`employee_id` / 权限 / `business_date` / `trace_id` / 请求 deadline 由每次调用的 LangGraph `Runtime Context` 提供，不进入 `AgentState`，未来执行快照不能恢复并继续信任这些字段
 - **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重

@@ -10,9 +10,12 @@ import json
 import os
 from time import monotonic
 
+from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
+from app.agents.runtime_context import AgentRuntimeContext
 from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
+
 
 def _enterprise_oa_mcp_url_config() -> str:
     """延迟读取 ENTERPRISE_OA_MCP_URL（测试/运行时变更友好）。
@@ -314,7 +317,7 @@ def visible_tools(
     java_internal_token: str,
     enterprise_oa_mcp_url: str = '',
 ) -> list[str]:
-    """根据可信 AgentState 和 Python 服务配置计算当前可见 Tool。
+    """根据可信 Runtime Context 和 Python 服务配置计算当前可见 Tool。
 
     Capability Gate 只决定 Planner 应看到什么；Executor、Tool、Java / MCP
     仍保留各自的确定性执行校验。business_date 不属于本次 Gate 条件。
@@ -448,7 +451,7 @@ def _decision_result(state: dict, decision: dict, stop_reason: str, category: st
     return result
 
 
-def planner_node(state: dict) -> dict:
+def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     """Planner 节点：根据用户任务、可用工具与执行状态输出一个下一步决策。
 
     返回更新 state 的字段：
@@ -459,14 +462,14 @@ def planner_node(state: dict) -> dict:
                          预算耗尽终止时不增加，保持 MAX_PLANNER_STEPS
       answer           — finish/refuse 决策时同步的最终回答
     """
-    trace_id = state.get('trace_id', '')
+    trace_id = runtime.context['trace_id']
     question = state.get('question', '')
-    allow_eval = state.get('allow_eval', False)
-    allow_business_actions = state.get('allow_business_actions', False)
-    employee_id = state.get('employee_id', '')
+    allow_eval = runtime.context['allow_eval']
+    allow_business_actions = runtime.context['allow_business_actions']
+    employee_id = runtime.context['employee_id']
     step_count = state.get('step_count', 0)
 
-    deadline = state.get('deadline_monotonic')
+    deadline = runtime.context['deadline_monotonic']
     remaining_seconds = deadline - monotonic() if isinstance(deadline, (int, float)) else None
     if remaining_seconds is not None and remaining_seconds <= 0:
         decision = _refuse_decision(
@@ -591,7 +594,7 @@ def planner_node(state: dict) -> dict:
                 'not_allowed',
                 category='business_action',
             )
-        if state.get('business_date') is None:
+        if runtime.context['business_date'] is None:
             logger.warning('[%s] planner %s 在无业务日期时被拒绝',
                            trace_id, decision.tool_name)
             return _decision_result(

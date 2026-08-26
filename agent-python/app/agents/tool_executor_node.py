@@ -18,8 +18,10 @@ from datetime import date
 from time import monotonic
 from typing import Any, Callable
 
+from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
+from app.agents.runtime_context import AgentRuntimeContext
 from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
@@ -105,8 +107,8 @@ def _error_code(exc: Exception) -> str:
 #                                通过 globals()[ref] 解析，使测试 patch
 #                                'app.agents.tool_executor_node.rag_answer_tool'
 #                                等模块 attr 后立即生效。
-#   identity_required          - True 表示必须在 executor 调用前由 AgentState
-#                                注入 employee_id；缺失则 executor 阻断。
+#   identity_required          - True 表示必须在 executor 调用前由当前 Runtime
+#                                Context 注入 employee_id；缺失则 executor 阻断。
 #   system_arg_keys            - 模型在 arguments 中**禁止**夹带的系统/业务字段
 #                                集合；命中即抛 PlannerDecisionError 阻断。
 #                                LLM 业务参数由对应工具的 arg_contract 单独约束。
@@ -123,6 +125,7 @@ def _error_code(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class _ExecutorContext:
+    tool_name: str
     employee_id: str
     trace_id: str
     question: str
@@ -152,13 +155,13 @@ def _inject_rag(args: dict, ctx: _ExecutorContext) -> dict:
 
 
 def _inject_leave_read(args: dict, ctx: _ExecutorContext) -> dict:
-    # 企业 Tool P0：身份由 Java 注入到 AgentState.employee_id，
-    # Executor 转发给 Tool；模型不得在 arguments 中夹带这些字段。
+    # 企业 Tool P0：身份由 Java 注入当前 Runtime Context，Executor 转发给
+    # Tool；模型不得在 arguments 中夹带这些字段。
     merged = dict(args)
     leaked = set(args or {}).intersection(_LEAVE_SYSTEM_ARG_KEYS)
     if leaked:
         raise PlannerDecisionError(
-            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
         )
     merged['employee_id'] = ctx.employee_id
     merged['trace_id'] = ctx.trace_id
@@ -173,7 +176,7 @@ def _inject_leave_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     leaked = set(args or {}).intersection(_PROPOSAL_SYSTEM_ARG_KEYS)
     if leaked:
         raise PlannerDecisionError(
-            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
         )
     merged['question'] = ctx.question
     merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
@@ -199,11 +202,11 @@ def _inject_oamcp_read(args: dict, ctx: _ExecutorContext) -> dict:
     leaked = set(args or {}).intersection(_OAMCP_READ_SYSTEM_ARG_KEYS)
     if leaked:
         raise PlannerDecisionError(
-            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
         )
     merged['employee_id'] = ctx.employee_id
     merged['trace_id'] = ctx.trace_id
-    if _calling_tool_name_for_log() == TRAVEL_RECORD_TOOL_NAME and 'limit' not in merged:
+    if ctx.tool_name == TRAVEL_RECORD_TOOL_NAME and 'limit' not in merged:
         merged['limit'] = 10
     return merged
 
@@ -287,23 +290,13 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     leaked = set(args or {}).intersection(_EXPENSE_CTCX_SYSTEM_ARG_KEYS)
     if leaked:
         raise PlannerDecisionError(
-            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
         )
     merged['question'] = ctx.question
     merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
     merged['trace_id'] = ctx.trace_id
     merged['context'] = _build_expense_proposal_context(ctx.tool_history)
     return merged
-
-
-# Module-level mutable so _inject_leave_read / _inject_leave_proposal can
-# reference the calling tool name for error messages. Set per-call by
-# tool_executor_node.
-_current_tool_name: str = ''
-
-
-def _calling_tool_name_for_log() -> str:
-    return _current_tool_name
 
 
 # --- Proposal post-hooks ---------------------------------------------------
@@ -328,7 +321,7 @@ def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
 # --- 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key ---------
 _LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
 
-# leave_proposal_tool 的系统字段与业务字段:全部由 Executor 从 AgentState 注入,
+# leave_proposal_tool 的系统字段与业务字段:全部由 Executor 从 Runtime Context 注入,
 # 模型 arguments 中不得夹带任何一项(业务参数由受控链路基于原始问题解析)
 _PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
     'employee_id', 'trace_id', 'business_date',
@@ -439,7 +432,7 @@ def _get_tool(tool_name: str):
         ) from exc
 
 
-def _blocked(state: dict, stop_reason: str, message: str,
+def _blocked(state: dict, runtime: Runtime[AgentRuntimeContext], stop_reason: str, message: str,
              tool_name=None, arguments=None, category: str = '') -> dict:
     """执行前被阻止：未真正发起 Tool 执行，不消耗 tool_call_count。
 
@@ -454,10 +447,10 @@ def _blocked(state: dict, stop_reason: str, message: str,
     }, ensure_ascii=False)
     tool_history = list(state.get('tool_history', []))
 
-    deadline = state.get('deadline_monotonic')
-    if isinstance(deadline, (int, float)) and monotonic() >= deadline:
+    if stop_reason != 'request_timeout' and monotonic() >= runtime.context['deadline_monotonic']:
         return _blocked(
             state,
+            runtime,
             'request_timeout',
             '当前任务处理超时，未继续执行工具。',
         )
@@ -491,7 +484,7 @@ def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
     return False
 
 
-def tool_executor_node(state: dict) -> dict:
+def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     """Tool 执行节点。
 
     校验顺序：结构（tool_name/arguments）→ employee_id → 权限 → Tool 调用预算 →
@@ -504,39 +497,47 @@ def tool_executor_node(state: dict) -> dict:
                         | not_allowed
                         | tool_call_budget_exhausted | already_completed
     """
-    trace_id = state.get('trace_id', '')
+    trace_id = runtime.context['trace_id']
     decision_raw = state.get('planner_decision')
     tool_call_count = state.get('tool_call_count', 0)
     tool_history = list(state.get('tool_history', []))
 
+    if monotonic() >= runtime.context['deadline_monotonic']:
+        return _blocked(
+            state,
+            runtime,
+            'request_timeout',
+            '当前任务处理超时，未继续执行工具。',
+        )
+
     # 1. 结构再校验：仅处理 action=tool 的合法决策（不信赖 Planner 已校验）
     if not isinstance(decision_raw, dict):
-        return _blocked(state, 'invalid_decision', '缺少合法的 Planner 决策，已拒绝执行。')
+        return _blocked(state, runtime, 'invalid_decision', '缺少合法的 Planner 决策，已拒绝执行。')
     try:
         decision = PlannerDecision.model_validate(decision_raw)
         decision.validate_decision()
     except (ValidationError, PlannerDecisionError) as exc:
         logger.warning('[%s] tool_executor 决策非法: %s', trace_id, exc)
-        return _blocked(state, 'invalid_decision', f'Tool 决策非法，已拒绝执行：{exc}')
+        return _blocked(state, runtime, 'invalid_decision', f'Tool 决策非法，已拒绝执行：{exc}')
     if decision.action != 'tool':
-        return _blocked(state, 'invalid_decision', 'Tool Executor 仅处理 action=tool 的决策。')
+        return _blocked(state, runtime, 'invalid_decision', 'Tool Executor 仅处理 action=tool 的决策。')
 
     # 解析 ToolSpec（registry 驱动）。未知 Tool 在 Planner schema 已拒绝，
     # 这里仍是防御性兜底：保证后续 _get_tool 不会抛 KeyError。
     spec = _TOOL_REGISTRY.get(decision.tool_name)
     if spec is None:
-        return _blocked(state, 'invalid_decision',
+        return _blocked(state, runtime, 'invalid_decision',
                         f'当前 Tool 不在注册表中：{decision.tool_name}')
 
     # 2. 身份前置校验（即使 Capability Gate / Planner 已校验，Executor 独立确认）
-    employee_id = (state.get('employee_id') or '').strip()
+    employee_id = runtime.context['employee_id'].strip()
     if spec.identity_required and not employee_id:
         logger.warning(
             '[%s] tool_executor 拒绝无 employee_id 的 Tool=%s',
             trace_id, decision.tool_name,
         )
         return _blocked(
-            state,
+            state, runtime,
             'not_allowed',
             '当前请求缺少员工身份，已拒绝执行。',
             tool_name=decision.tool_name,
@@ -545,50 +546,59 @@ def tool_executor_node(state: dict) -> dict:
         )
 
     # 3. 权限再校验（即使 Planner 已校验，Executor 独立确认）
-    if decision.tool_name == EVAL_TOOL_NAME and not state.get('allow_eval', False):
+    if decision.tool_name == EVAL_TOOL_NAME and not runtime.context['allow_eval']:
         logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, EVAL_TOOL_NAME)
-        return _blocked(state, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
+        return _blocked(state, runtime, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
     # 受控业务动作统一权限（LEAVE_PROPOSAL / EXPENSE_PROPOSAL，V2 §十二 HITL）
     if decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME):
-        if not state.get('allow_business_actions', False):
+        if not runtime.context['allow_business_actions']:
             logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
                            trace_id, decision.tool_name)
-            return _blocked(state, 'not_allowed',
+            return _blocked(state, runtime, 'not_allowed',
                             '业务动作功能未启用，或当前请求无执行权限。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
-        if state.get('business_date') is None:
+        if runtime.context['business_date'] is None:
             logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期',
                            trace_id, decision.tool_name)
-            return _blocked(state, 'not_allowed', '当前业务日期不可用。',
+            return _blocked(state, runtime, 'not_allowed', '当前业务日期不可用。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
 
     # 4. Tool 调用预算（基于实际发起执行的次数）
     if tool_call_count >= MAX_TOOL_CALLS:
-        return _blocked(state, 'tool_call_budget_exhausted',
+        return _blocked(state, runtime, 'tool_call_budget_exhausted',
                         'Tool 调用预算已耗尽，无法继续执行工具。',
                         tool_name=decision.tool_name, arguments=decision.arguments)
 
     # 5. 成功签名去重：相同 tool + 相同 arguments 且已成功完成 → 阻止；
     #    error / timeout 历史不阻止，允许合理重试
     if _already_completed(decision, tool_history):
-        return _blocked(state, 'already_completed',
+        return _blocked(state, runtime, 'already_completed',
                         '该 Tool 调用已成功完成（相同工具与相同参数），不重复执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments)
+
+    if monotonic() >= runtime.context['deadline_monotonic']:
+        return _blocked(
+            state,
+            runtime,
+            'request_timeout',
+            '当前任务处理超时，未继续执行工具。',
+            tool_name=decision.tool_name,
+            arguments=decision.arguments,
+        )
 
     # 6. 执行前计数：真正发起执行即消耗一次调用预算（成功/超时/异常都计数）
     tool_call_count += 1
     try:
-        global _current_tool_name
-        _current_tool_name = decision.tool_name
         ctx = _ExecutorContext(
+            tool_name=decision.tool_name,
             employee_id=employee_id,
             trace_id=trace_id,
             question=state.get('question', ''),
-            business_date=state.get('business_date'),
+            business_date=runtime.context['business_date'],
             tool_history=tool_history,
         )
         if spec.pre_inject is not None:

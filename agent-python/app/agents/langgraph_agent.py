@@ -16,16 +16,18 @@ from time import monotonic
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 
 from app.agents.planner_node import planner_node
+from app.agents.runtime_context import AgentRuntimeContext
 from app.agents.tool_executor_node import tool_executor_node
 from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
 from app.guards.safety_guard import check_user_query_safety
 from app.retrieval.query_rewriter import rewrite_query
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
-    LEAVE_PROPOSAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
 )
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
@@ -44,11 +46,6 @@ class AgentState(TypedDict):
     sources: list
     reason: str
     category: str
-    allow_eval: bool
-    allow_business_actions: bool
-    business_date: date | None
-    trace_id: str
-    employee_id: str  # 企业 Tool P0：Java 注入的身份字段；Tool Executor 注入到只读企业 Tool
     action_proposal: dict | None
     missing_fields: list[str]
     # Agent Loop P0：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
@@ -66,7 +63,6 @@ class AgentState(TypedDict):
     # 当前可见 Tool 集合或任何 trusted 系统字段（employee_id / business_date /
     # allow_eval / allow_business_actions）。
     memory_context: dict | None
-    deadline_monotonic: float
 
 
 def safety_node(state: AgentState) -> dict:
@@ -84,13 +80,13 @@ def safety_node(state: AgentState) -> dict:
     return {"safe": True, "reason": "", "category": "normal"}
 
 
-def router_node(state: AgentState) -> dict:
+def router_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict:
     if not state.get("safe", True):
         return {"route": "refuse"}
 
     question = state["question"]
     if any(kw in question.lower() for kw in EVAL_KEYWORDS):
-        if state.get("allow_eval", False):
+        if runtime.context["allow_eval"]:
             return {"route": "eval"}
         return {
             "route": "refuse",
@@ -99,14 +95,14 @@ def router_node(state: AgentState) -> dict:
             "reason": "",
         }
     if is_annual_leave_action_intent(question):
-        if not state.get("allow_business_actions", False):
+        if not runtime.context["allow_business_actions"]:
             return {
                 "route": "refuse",
                 "answer": "业务动作功能未启用，或当前请求无执行权限。",
                 "category": "access_control",
                 "reason": "",
             }
-        if state.get("business_date") is None:
+        if runtime.context["business_date"] is None:
             return {
                 "route": "refuse",
                 "answer": "当前业务日期不可用。",
@@ -117,7 +113,7 @@ def router_node(state: AgentState) -> dict:
     return {"route": "rag"}
 
 
-def rag_node(state: AgentState) -> dict:
+def rag_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict:
     question = state["question"]
 
     # Query Rewrite（只改写检索用 query，不改 original_query）
@@ -125,7 +121,7 @@ def rag_node(state: AgentState) -> dict:
     retrieval_query = rewrite_result['rewritten_query']
     if rewrite_result['rewrite_applied']:
         logger.info('[%s] LangGraph query rewrite applied reason=%s',
-                    state.get('trace_id', '-'), rewrite_result['rewrite_reason'])
+                    runtime.context['trace_id'] or '-', rewrite_result['rewrite_reason'])
 
     # 用 rewritten_query 检索，但传给 tool 的仍是 original_query
     # tool 内部的 LangChain RAG chain 会用 question 做检索和 prompt
@@ -133,7 +129,7 @@ def rag_node(state: AgentState) -> dict:
     result_str = rag_answer_tool.invoke({
         "question": retrieval_query,
         "original_question": question,
-        "trace_id": state.get('trace_id', ''),
+        "trace_id": runtime.context['trace_id'],
     })
     try:
         parsed = json.loads(result_str)
@@ -192,8 +188,8 @@ def eval_node(state: AgentState) -> dict:
     }
 
 
-def action_node(state: AgentState) -> dict:
-    business_date = state.get("business_date")
+def action_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict:
+    business_date = runtime.context["business_date"]
     if business_date is None:
         return {
             "route": "error",
@@ -206,7 +202,7 @@ def action_node(state: AgentState) -> dict:
     result = plan_annual_leave_action(
         state["question"],
         business_date=business_date,
-        trace_id=state.get("trace_id", ""),
+        trace_id=runtime.context["trace_id"],
     )
     if result.kind == "clarification":
         return {
@@ -245,7 +241,7 @@ def refuse_node(state: AgentState) -> dict:
 
 @lru_cache(maxsize=1)
 def build_agent_graph():
-    graph = StateGraph(AgentState)
+    graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     graph.add_node("safety_node", safety_node)
     graph.add_node("router_node", router_node)
@@ -288,7 +284,7 @@ def build_agent_loop_graph():
       其他终止（task_complete / refused / not_allowed / provider_error /
       invalid_decision / step_budget_exhausted）→ END
     """
-    graph = StateGraph(AgentState)
+    graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     graph.add_node("safety_node", safety_node)
     graph.add_node("planner_node", planner_node)
@@ -480,11 +476,6 @@ def run_langgraph_agent(
         "question": question, "safe": True, "route": "",
         "answer": "", "tool_result": {}, "sources": [],
         "reason": "", "category": "",
-        "allow_eval": allow_eval,
-        "allow_business_actions": allow_business_actions,
-        "business_date": business_date,
-        "trace_id": trace_id,
-        "employee_id": employee_id,
         "action_proposal": None,
         "missing_fields": [],
         "step_count": 0,
@@ -494,12 +485,19 @@ def run_langgraph_agent(
         "planner_decision": None,
         "stop_reason": "",
         "memory_context": memory_context,
+    }
+    runtime_context: AgentRuntimeContext = {
+        "employee_id": employee_id,
+        "allow_eval": allow_eval,
+        "allow_business_actions": allow_business_actions,
+        "business_date": business_date,
+        "trace_id": trace_id,
         "deadline_monotonic": monotonic() + AGENT_REQUEST_TIMEOUT_SECONDS,
     }
     # Observability metadata：业务 trace_id 仅用于关联定位，不覆盖 OTel Trace ID；
     # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
     config: dict = {"metadata": {"business_trace_id": trace_id}} if trace_id else {}
-    result = dict(graph.invoke(initial, config=config))
+    result = dict(graph.invoke(initial, config=config, context=runtime_context))
     if use_planner:
         result = _finalize_action_proposal(result)
         result = _finalize_response_contract(result)

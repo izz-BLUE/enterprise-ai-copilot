@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 from app.tools.enterprise_tools import expense_proposal_tool
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 # 模拟一份完整的已验证 context（travel + invoice）
 _HAPPY_CONTEXT = {
@@ -201,7 +202,9 @@ class TestExpenseProposalNoMcpCalls:
             "planner_decision": decision,
             "stop_reason": "",
         }
-        result = tool_executor_node(state)
+        result = tool_executor_node(
+            checkpoint_safe_state(state), runtime_for_state(state),
+        )
         assert result["stop_reason"] == "tool_executed"
         observation = json.loads(result["observation"])
         assert observation["kind"] == "proposal"
