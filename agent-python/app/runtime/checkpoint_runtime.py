@@ -1,11 +1,13 @@
 """LangGraph PostgreSQL 执行快照的进程级 Runtime。
 
-本模块只管理 Checkpointer 的生命周期、Graph 编译和轻量就绪探针。它不参与
-Planner、Memory、业务动作、HITL 或恢复执行；每一轮新 HTTP 请求仍由调用方
-提供完整初始 AgentState 并从 START 执行。
+本模块管理 Checkpointer 的生命周期、Graph 编译、轻量就绪探针，以及 P3-2
+execution_history 的最新快照读取与单进程 thread guard。它不参与 Planner、
+Memory、业务动作、HITL 或恢复执行；每一轮新 HTTP 请求仍由调用方提供完整
+初始 AgentState 并从 START 执行。
 """
 
 import re
+from threading import Lock
 from typing import Any
 
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -13,6 +15,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from app.agents.execution_history_policy import merge_execution_history
 from app.agents.langgraph_agent import compile_agent_graph, compile_agent_loop_graph
 from app.core.config import (
     AI_MAX_CONCURRENT_REQUESTS,
@@ -46,6 +49,9 @@ class CheckpointRuntime:
         self._saver: PostgresSaver | None = None
         self._planner_graph: Any | None = None
         self._deterministic_graph: Any | None = None
+        # P3-2：单 worker 进程内只序列化同一个 LangGraph thread；不创建永久 Lock。
+        self.active_thread_ids: set[str] = set()
+        self._active_thread_ids_lock = Lock()
 
     @classmethod
     def from_config(cls) -> 'CheckpointRuntime':
@@ -110,6 +116,51 @@ class CheckpointRuntime:
             raise RuntimeError('LangGraph checkpoint graph 尚未初始化')
         return graph
 
+    def try_acquire_thread(self, thread_id: str) -> bool:
+        """原子占用 thread；已在执行时立即返回 False，不排队。"""
+        with self._active_thread_ids_lock:
+            if thread_id in self.active_thread_ids:
+                return False
+            self.active_thread_ids.add(thread_id)
+            return True
+
+    def release_thread(self, thread_id: str) -> None:
+        """释放 thread guard；discard 保证异常路径幂等且不产生泄漏。"""
+        with self._active_thread_ids_lock:
+            self.active_thread_ids.discard(thread_id)
+
+    def load_execution_history(
+        self,
+        *,
+        graph: Any,
+        thread_id: str,
+        memory_context: dict | None,
+    ) -> list[dict]:
+        """从最新 Checkpoint hydrate 当前任务允许读取的 execution_history。
+
+        只有 Java 提供的 ACTIVE Memory 才能打开任务连续性闸门；数据库读取异常
+        原样抛出，由 endpoint 返回 POSTGRES checkpoint failure（503），不静默降级。
+        """
+        if not self.enabled:
+            return []
+        if not isinstance(memory_context, dict) or memory_context.get('status') != 'ACTIVE':
+            return []
+        task_type = memory_context.get('taskType') or memory_context.get('task_type')
+        if not isinstance(task_type, str) or not task_type:
+            return []
+
+        snapshot = graph.get_state({'configurable': {'thread_id': thread_id}})
+        if snapshot is None:
+            return []
+        values = getattr(snapshot, 'values', None)
+        if not isinstance(values, dict):
+            return []
+
+        # merge_execution_history 负责严格 Schema、稳定去重与 16 条上限；随后
+        # 再按当前 ACTIVE Memory 的 task_type 做任务隔离。
+        history = merge_execution_history(values.get('execution_history', []), [])
+        return [entry for entry in history if entry.get('task_type') == task_type]
+
     def build_thread_id(self, runtime_thread_id: str, use_planner: bool) -> str:
         """校验 Java 生成的基础 ID，并附加不可由客户端控制的拓扑后缀。"""
         if not _RUNTIME_THREAD_ID_PATTERN.fullmatch(runtime_thread_id):
@@ -140,6 +191,8 @@ class CheckpointRuntime:
         self._saver = None
         self._planner_graph = None
         self._deterministic_graph = None
+        with self._active_thread_ids_lock:
+            self.active_thread_ids.clear()
         if pool is not None:
             try:
                 pool.close()

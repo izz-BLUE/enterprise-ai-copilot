@@ -95,8 +95,8 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 
 - Java 仅用已认证 `VerifiedIdentity.userId()` 和已解析 `conversationId` 计算稳定 `X-Agent-Thread-Id`；客户端 header 不可信。
 - Python `LANGGRAPH_CHECKPOINT_MODE=POSTGRES` 时在 FastAPI 启动阶段创建 Pool、执行 `PostgresSaver.setup()`、编译两套持久化图；任一步失败即启动失败，不降级。
-- Planner 与 legacy 分别使用 `:planner-v1` / `:deterministic-v1` 后缀；每个节点 `durability="sync"` 写入。新请求始终提供完整初始 AgentState 从 START 执行，P3-1 不实现 resume、interrupt 或跨请求 Tool 历史。
-- Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。
+- Planner 与 legacy 分别使用 `:planner-v1` / `:deterministic-v1` 后缀；每个节点 `durability="sync"` 写入。新请求始终提供完整初始 AgentState 从 START 执行，P3-1/P3-2 不实现 resume、interrupt 或跨请求 Tool 自动跳过。
+- Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。`tool_history` 是当前请求历史，每次清空；`execution_history` 是最多 16 条的 `CONTEXT_ONLY` 成功步骤摘要，仅在 ACTIVE Memory 且 task type 匹配时 hydrate，不可直接复用为当前业务事实。
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）
@@ -117,6 +117,8 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 Java 和 Python 都有并发限制：
 - Java: `PythonAgentBulkhead`（Semaphore，默认 3 并发）
 - Python: `ai_request_limiter`（默认 3 并发，500ms 队列超时）
+- POSTGRES LangGraph thread：单 worker 进程内同一最终 thread 的 history hydrate + Graph invoke 由 `active_thread_ids` 保护，忙时快速返回 `429 + Retry-After`；不同 thread 不互相阻塞。多 worker / 多实例的分布式锁未实现。
+- Java LangGraph conversation：`AgentRuntimeThreadExecutionGuard` 在 Memory Read 前保护 `Memory Read → Python → PendingAction/Memory persist → response`，同一 runtime thread 忙时快速返回 `429 + Retry-After`；多 Java 实例的分布式 lease/lock 未实现。
 
 ### Business Action 流程
 

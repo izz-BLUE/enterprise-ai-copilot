@@ -15,6 +15,7 @@
 |------|------|--------|------|
 | Nginx | 按客户端 IP 限流 | 2 req/s，burst 5 | 保护公网入口，超限返回 JSON 429 |
 | Java | `PythonAgentBulkhead` | 3 个并发槽，排队 500ms | 限制 Java → Python 在途 AI 调用 |
+| Java LangGraph | `AgentRuntimeThreadExecutionGuard` | 同一 runtime thread 仅一个请求，忙时立即 429 | 串行化 Memory Read → Python → PendingAction/Memory persist 的完整 conversation 生命周期 |
 | Python | `RequestConcurrencyLimiter` | 3 个并发槽，排队 500ms | 保护检索、Agent 和 LLM 执行入口 |
 | Python LLM | 调用超时 | 30s | 限制模型调用时间 |
 | Java | Python 读取超时 | 40s | 给 Python 清理和返回错误留出空间 |
@@ -44,6 +45,8 @@ Java 和 Python 的健康接口都暴露不含敏感信息的并发快照：`max
 | `PYTHON_AGENT_READ_TIMEOUT` | `50000` | Java 读取 Python 超时，单位毫秒；须大于 Python 整体请求截止时间 |
 
 两个并发上限应保持一致。当前默认值是针对 512 MiB Python / 512 MiB Java 的保守起点，必须用目标服务器实测后再调整。
+
+LangGraph conversation guard 是 Java 进程内保护，不创建每个 thread 的永久锁对象；当前单实例部署足够。多 Java 实例或水平扩展需要分布式 conversation/thread lease，本阶段不实现。
 
 ## k6 脚本
 

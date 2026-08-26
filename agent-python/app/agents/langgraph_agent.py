@@ -18,6 +18,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
+from app.agents.execution_history_policy import merge_execution_history
 from app.agents.planner_node import planner_node
 from app.agents.runtime_context import AgentRuntimeContext
 from app.agents.tool_executor_node import tool_executor_node
@@ -54,6 +55,8 @@ class AgentState(TypedDict):
     step_count: int
     tool_call_count: int
     tool_history: list
+    # P3-2：跨请求的有限任务执行摘要；不表示当前业务事实。
+    execution_history: list
     observation: str
     planner_decision: dict | None
     stop_reason: str
@@ -461,11 +464,19 @@ def _finalize_response_contract(state: dict) -> dict:
 def finalize_node(state: AgentState) -> dict:
     """Planner-first Graph 的唯一最终化节点。
 
-    两个现有确定性 finalizer 在 Checkpoint 写入前执行，确保 Graph 返回值与
-    最后一个节点保存的状态完全一致。函数本身保持幂等，便于兼容性测试复用。
+    两个响应 finalizer 与 execution_history merge 在 Checkpoint 写入前执行，
+    确保 Graph 返回值与最后一个节点保存的状态完全一致。函数本身保持幂等，
+    便于兼容性测试复用。
     """
     state = _finalize_action_proposal(state)
-    return _finalize_response_contract(state)
+    state = _finalize_response_contract(state)
+    # 只在 Graph 内、最终 Checkpoint 写入前合并；不把 history 接入当前
+    # tool dedup、ExpenseProposalContext 或 Memory Trigger。
+    state['execution_history'] = merge_execution_history(
+        state.get('execution_history', []),
+        state.get('tool_history', []),
+    )
+    return state
 
 
 def run_langgraph_agent(
@@ -477,6 +488,7 @@ def run_langgraph_agent(
     use_planner: bool = False,
     employee_id: str = '',
     memory_context: dict | None = None,
+    execution_history: list[dict] | None = None,
     graph: Any | None = None,
     runtime_thread_id: str | None = None,
 ) -> dict:
@@ -492,7 +504,9 @@ def run_langgraph_agent(
 
     memory_context 为可选的 Phase 2 内存上下文：仅在 Java 侧 (userId, conversationId)
     命中 ACTIVE 记录时由调用方通过内部请求 body 注入；缺省 None 等价于历史行为
-   （Planner 不渲染 memory block）。
+    （Planner 不渲染 memory block）。
+    execution_history 为调用方已按 Checkpoint + ACTIVE Memory 过滤并校验的历史；
+    普通无 Checkpointer 单元测试缺省为空，确定性 Graph 始终不加载跨请求 history。
     runtime_thread_id 是已追加拓扑后缀的 LangGraph thread_id，只在 POSTGRES
     Checkpoint 模式传入；新请求仍传入完整 initial AgentState 并从 START 执行，
     不使用 Command(resume)、graph.invoke(None) 或 checkpoint resume。
@@ -508,6 +522,7 @@ def run_langgraph_agent(
         "step_count": 0,
         "tool_call_count": 0,
         "tool_history": [],
+        "execution_history": list(execution_history or []) if use_planner else [],
         "observation": "",
         "planner_decision": None,
         "stop_reason": "",

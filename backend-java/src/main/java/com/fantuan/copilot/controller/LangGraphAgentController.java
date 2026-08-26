@@ -17,6 +17,7 @@ import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
 import com.fantuan.copilot.service.agent.AgentMemoryCoordinator;
 import com.fantuan.copilot.service.agent.AgentResponseFactory;
+import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.identity.VerifiedIdentity;
@@ -93,6 +94,7 @@ public class LangGraphAgentController {
     private final AgentMemoryCoordinator memoryCoordinator;
     private final AgentEventRecorder eventRecorder;
     private final AgentRuntimeThreadIdService runtimeThreadIdService;
+    private final AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard;
 
     @Autowired
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
@@ -101,7 +103,8 @@ public class LangGraphAgentController {
                                     IdentityContext identityContext,
                                     AiTaskMemoryService memoryService,
                                     AdminLogBuffer adminLogBuffer,
-                                    AgentRuntimeThreadIdService runtimeThreadIdService) {
+                                    AgentRuntimeThreadIdService runtimeThreadIdService,
+                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard) {
         this.pythonAgentGateway = pythonAgentGateway;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
@@ -109,6 +112,7 @@ public class LangGraphAgentController {
         this.memoryCoordinator = new AgentMemoryCoordinator(memoryService);
         this.eventRecorder = new AgentEventRecorder(adminLogBuffer);
         this.runtimeThreadIdService = runtimeThreadIdService;
+        this.runtimeThreadExecutionGuard = runtimeThreadExecutionGuard;
     }
 
     /**
@@ -121,7 +125,8 @@ public class LangGraphAgentController {
                                     AiTaskMemoryService memoryService,
                                     AdminLogBuffer adminLogBuffer) {
         this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
-                memoryService, adminLogBuffer, new AgentRuntimeThreadIdService());
+                memoryService, adminLogBuffer, new AgentRuntimeThreadIdService(),
+                new AgentRuntimeThreadExecutionGuard());
     }
 
     /**
@@ -158,6 +163,23 @@ public class LangGraphAgentController {
         // 仅由已验证 identity.userId() 与已解析 conversationId 计算；绝不读取或透传
         // 客户端 X-Agent-Thread-Id。该值只定位 LangGraph 执行快照，不承载业务权威。
         String runtimeThreadId = runtimeThreadIdService.generate(identity.userId(), conversationId);
+        if (!runtimeThreadExecutionGuard.tryAcquire(runtimeThreadId)) {
+            return AgentResponseFactory.busy(traceId);
+        }
+
+        try {
+            return executeWithRuntimeThreadGuard(request, traceId, started,
+                    presentedToken, identity, allowEval, allowBusinessActions,
+                    conversationId, runtimeThreadId);
+        } finally {
+            runtimeThreadExecutionGuard.release(runtimeThreadId);
+        }
+    }
+
+    private ResponseEntity<AgentChatResponse> executeWithRuntimeThreadGuard(
+            ChatRequest request, String traceId, long started,
+            String presentedToken, VerifiedIdentity identity, boolean allowEval,
+            boolean allowBusinessActions, String conversationId, String runtimeThreadId) {
 
         // Memory Read Path：服务端按 (userId, conversationId) 复合 key 读取 ai_task_memory，
         // 仅在 status=ACTIVE 时填充内部请求体的 memoryContext 字段。
