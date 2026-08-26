@@ -180,7 +180,9 @@ flowchart TD
 - **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`；Capability Gate 同时收缩 system/user Prompt 中的 Tool contract，并在 Planner post-validation 阶段拒绝隐藏 Tool
 - **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / employee_id / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数；只读 Tool 的 Java URL / internal token 继续由下游 Tool / JavaClient 校验
 - **P3-0 状态边界**：`AgentState` 仅承载当前执行状态与不可信历史任务上下文；`employee_id` / 权限 / `business_date` / `trace_id` / 请求 deadline 由每次调用的 LangGraph `Runtime Context` 提供，不进入 `AgentState`，未来执行快照不能恢复并继续信任这些字段
-- **P3-1 执行快照**：`checkpoint_runtime` 在 FastAPI 启动时按 `LANGGRAPH_CHECKPOINT_MODE` 创建 `ConnectionPool`、显式严格 `JsonPlusSerializer`、调用官方 `PostgresSaver.setup()`，并一次性编译两套带 Checkpointer 的图；POSTGRES 模式每个节点以 `durability="sync"` 写入。`rt_<hash>:planner-v1` 与 `rt_<hash>:deterministic-v1` 相互隔离；每个新 HTTP 请求仍提交完整初始 `AgentState` 从 START 执行，不实现 resume / interrupt，也不恢复跨请求 `tool_history`
+- **P3-1 / P3-2 执行快照**：`checkpoint_runtime` 在 FastAPI 启动时按 `LANGGRAPH_CHECKPOINT_MODE` 创建 `ConnectionPool`、显式严格 `JsonPlusSerializer`、调用官方 `PostgresSaver.setup()`，并一次性编译两套带 Checkpointer 的图；POSTGRES 模式每个节点以 `durability="sync"` 写入。`rt_<hash>:planner-v1` 与 `rt_<hash>:deterministic-v1` 相互隔离；每个新 HTTP 请求仍提交完整初始 `AgentState` 从 START 执行，不实现 resume / interrupt，也不恢复跨请求 `tool_history`。`execution_history_policy` 只把当前请求中 `travel_record_tool` / `invoice_verify_tool` 的成功 Observation 白名单归一化为 `CONTEXT_ONLY` 摘要，在 `finalize_node` 中合并后随最终 Checkpoint 保存。
+- **P3-2 历史闸门**：下一轮只有 Java 注入的 `memoryContext.status=ACTIVE` 且 `taskType` 匹配时，才从该 thread 的最新 Checkpoint hydrate `execution_history`；无 Memory、终态 Memory 或任务类型不匹配时从空列表开始。历史最多 16 条，travel snapshot 最多 10 个 trip；它只供 Planner 理解以前做过哪些步骤，不是当前业务事实，不进入当前 `tool_history` 去重、`ExpenseProposalContext` 或 Memory Trigger。
+- **P3-2 同 thread 并发**：单 worker 进程内用 `active_thread_ids + threading.Lock` 原子保护“读取历史 → Graph invoke → 最终 Checkpoint”区间；同一 thread 忙时快速返回 `429 + Retry-After`，不同 thread 不互相阻塞。多 worker / 多实例需要分布式 lease 或 lock，当前不实现。
 - **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
 - **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
   - `vector`：Faiss 语义检索 + keyword 检索合并去重
@@ -351,7 +353,7 @@ POST /api/agent/langgraph/chat
            → CANCELLED
 ```
 
-**特点**：两套互斥图共用同一 Java 控制面；Planner-first 的 `finalize_node` 在最后一次 Checkpoint 写入前收敛 `_finalize_action_proposal` 与 `_finalize_response_contract`，`run_langgraph_agent` 不再在 `graph.invoke()` 返回后修改 Planner 状态。
+**特点**：两套互斥图共用同一 Java 控制面；Planner-first 的 `finalize_node` 在最后一次 Checkpoint 写入前依次收敛 `_finalize_action_proposal`、`_finalize_response_contract` 与 `execution_history`，`run_langgraph_agent` 不再在 `graph.invoke()` 返回后修改 Planner 状态。
 
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
@@ -382,7 +384,9 @@ React sessionStorage conversationId
 
 身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Java 直接使用当前认证上下文。`conversationId` 只作 namespace，并由 Java 在当前请求内解析。Read Path 只注入 `ACTIVE`；终态只由 Java PendingAction 生命周期收口，无 TTL、归档、向量或 Profile Memory。
 
-执行快照与 Memory 不同：Memory 记录对话范围内的任务语义连续性；PostgreSQL 执行快照只保存 LangGraph 当时的节点状态，不能作为用户画像、业务事实、PendingAction 查询源或权限来源。业务事实继续只以 Java 业务数据库为准。
+执行快照与 Memory 不同：Memory 记“用户在做什么”，是 Java 控制的对话范围任务生命周期；`tool_history` 记“这一轮刚刚执行了什么”，每个新请求清空；`execution_history` 记“以前做过哪些执行步骤”，只保存有限的成功 Tool 摘要并统一为 `CONTEXT_ONLY`。Checkpoint 保存这些 Agent 状态，但 `execution_history` 不能作为用户画像、当前业务事实、PendingAction 查询源或权限来源。历史 invoice 的 `valid / duplicate`、历史 trip 的 `status` 都不能直接复用，当前决策必须重新调用对应 Tool；Java 业务数据库仍是当前业务事实的权威来源。
+
+P3-2 不实现历史事实的 TTL / revalidation，也不实现失败请求绕过 Memory 生命周期的自动续接；第一次执行尚未形成 ACTIVE Memory 时的 crash / resume 连续性属于 P3-3。Checkpoint retention / pruning 同样暂缓。
 
 ## 离线知识库构建流程
 
