@@ -16,6 +16,7 @@ import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionNonceService;
+import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.action.BusinessActionProperties;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
@@ -273,10 +274,14 @@ class AdminLogSentinelLeakTest {
         when(gateway.hasConflict(anyString(), any(), any())).thenReturn(false);
         when(gateway.submit(any(LeaveSubmission.class)))
                 .thenReturn(new LeaveExecutionResult("REQ-x", Instant.now()));
+        // V2 §十七: Service 依赖 HandlerRegistry；业务 handler 在其它测试验证。
+        BusinessActionHandlerRegistry registry = new BusinessActionHandlerRegistry(
+                List.of(new com.fantuan.copilot.service.action.handler.AnnualLeaveActionHandler(
+                        accounts, gateway)));
         return new BusinessActionService(
                 props,
                 new AdminAccessService(""),
-                actions, accounts, gateway,
+                actions, registry,
                 new ActionNonceService(), memoryService,
                 buffer,
                 FIXED_CLOCK);

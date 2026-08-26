@@ -11,10 +11,10 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 
 /** 年假草稿的纯业务规则校验；不访问数据库，也不持有授权或执行职责。 */
-final class AnnualLeaveProposalValidator {
+public final class AnnualLeaveProposalValidator {
     private AnnualLeaveProposalValidator() {}
 
-    static ValidatedLeave validate(AnnualLeaveActionProposal proposal, LocalDate businessDate) {
+    public static ValidatedLeave validate(AnnualLeaveActionProposal proposal, LocalDate businessDate) {
         if (proposal == null || proposal.actionType() != BusinessActionType.ANNUAL_LEAVE_REQUEST
                 || proposal.startDate() == null || proposal.endDate() == null
                 || proposal.halfDay() == null) {
@@ -67,5 +67,5 @@ final class AnnualLeaveProposalValidator {
                 "BUSINESS_RULE_VIOLATION", message, null, null);
     }
 
-    record ValidatedLeave(String reason, BigDecimal days) {}
+    public record ValidatedLeave(String reason, BigDecimal days) {}
 }

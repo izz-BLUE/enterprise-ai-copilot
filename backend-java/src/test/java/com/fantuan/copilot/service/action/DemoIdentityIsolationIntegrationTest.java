@@ -136,7 +136,9 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
         var action = actions.find(view.actionId()).orElseThrow();
         assertEquals(employeeId, action.employeeId());
         assertEquals(displayName, action.displayName());
-        assertEquals(displayName, view.summary().employee());
+        // V2 §二十五: summary 多态为 Object，年假摘要强转 AnnualLeaveSummary。
+        assertEquals(displayName,
+                ((com.fantuan.copilot.dto.action.AnnualLeaveSummary) view.summary()).employee());
     }
 
     private void assertSameExternalError(ActionException first, ActionException second) {

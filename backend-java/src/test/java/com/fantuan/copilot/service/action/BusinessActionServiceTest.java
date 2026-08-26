@@ -9,6 +9,7 @@ import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
+import com.fantuan.copilot.service.action.handler.AnnualLeaveActionHandler;
 import com.fantuan.copilot.service.demo.DemoIdentity;
 import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
@@ -23,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import java.lang.reflect.Field;
@@ -37,13 +39,17 @@ class BusinessActionServiceTest {
             "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
 
     @Test
-    void serviceDependsOnGatewayAndNotLeaveRequestRepository() {
+    void serviceDependsOnHandlerRegistryAndNotLeaveRepositories() {
+        // V2 §十七: Service 依赖 BusinessActionHandlerRegistry（通用生命周期），
+        // 不再直接持有 LeaveExecutionGateway / LeaveAccountRepository。
         var fieldTypes = Stream.of(BusinessActionService.class.getDeclaredFields())
                 .map(Field::getType)
                 .toList();
-        assertTrue(fieldTypes.contains(LeaveExecutionGateway.class));
+        assertTrue(fieldTypes.contains(BusinessActionHandlerRegistry.class));
         assertFalse(fieldTypes.contains(
                 com.fantuan.copilot.repository.action.LeaveRequestRepository.class));
+        assertFalse(fieldTypes.contains(LeaveExecutionGateway.class));
+        assertFalse(fieldTypes.contains(LeaveAccountRepository.class));
     }
 
     @Test
@@ -113,8 +119,11 @@ class BusinessActionServiceTest {
                 LocalDate.of(2026, 7, 20), HalfDay.NONE, "x"), "o", ADMIN, USER_A, null);
         PendingActionView half = f.service.createPending(proposal(LocalDate.of(2026, 7, 21),
                 LocalDate.of(2026, 7, 21), HalfDay.AM, "x"), "o", ADMIN, USER_A, null);
-        assertEquals(new BigDecimal("2.0"), range.summary().days());
-        assertEquals(new BigDecimal("0.5"), half.summary().days());
+        // V2 §二十五: summary 多态为 Object，按 type 强转具体 record。
+        assertEquals(new BigDecimal("2.0"),
+                ((com.fantuan.copilot.dto.action.AnnualLeaveSummary) range.summary()).days());
+        assertEquals(new BigDecimal("0.5"),
+                ((com.fantuan.copilot.dto.action.AnnualLeaveSummary) half.summary()).days());
     }
 
     static Stream<Arguments> invalidProposals() {
@@ -140,8 +149,12 @@ class BusinessActionServiceTest {
         LeaveExecutionGateway gateway = mock(LeaveExecutionGateway.class);
         when(accounts.findBalanceForUpdate(anyString())).thenReturn(Optional.of(new BigDecimal("5.0")));
         Clock clock = Clock.fixed(Instant.parse("2026-07-16T00:00:00Z"), ZoneId.of("Asia/Shanghai"));
+        // V2 §十七: Service 依赖 HandlerRegistry；AnnualLeaveActionHandler 由
+        // 真实 handler 承载业务逻辑，accounts/gateway mock 注入 handler。
+        BusinessActionHandlerRegistry registry = new BusinessActionHandlerRegistry(
+                List.of(new AnnualLeaveActionHandler(accounts, gateway)));
         BusinessActionService service = new BusinessActionService(properties,
-                new AdminAccessService(ADMIN), actions, accounts, gateway,
+                new AdminAccessService(ADMIN), actions, registry,
                 new ActionNonceService(), mock(AiTaskMemoryService.class),
                 new com.fantuan.copilot.adminlog.AdminLogBuffer(), clock);
         return new Fixture(properties, actions, accounts, gateway, service);
