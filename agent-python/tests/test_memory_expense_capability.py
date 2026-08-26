@@ -1,7 +1,7 @@
 """test_memory_expense_capability.py —— P2-A EXPENSE_REQUEST Memory 接入测试
 
 V2 §二十六 / §二十七：
-- EXPENSE_REQUEST 只通过 Capability Registry 注册（DEFAULT_P0_CAPABILITIES）
+- DEFAULT_P0_CAPABILITIES 只表达 P0 默认能力；EXPENSE_REQUEST 由 runtime registry 显式注册
 - 没有业务双重 hard-code（DEFAULT_TOOL_TO_TASK_TYPE 未加 expense）
 - 其它 Expense read tools（travel_record / invoice_verify / expense_status /
   rag_answer）不触发 Extractor
@@ -13,6 +13,7 @@ from __future__ import annotations
 from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
 from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
+from app.main import _build_memory_capability_registry
 from app.memory.memory_task_type_policy import (
     DEFAULT_TOOL_TO_TASK_TYPE,
     MemoryTaskTypePolicy,
@@ -20,14 +21,22 @@ from app.memory.memory_task_type_policy import (
 from app.memory.memory_trigger_policy import MemoryTriggerPolicy
 
 
+def _runtime_registry() -> MemoryCapabilityRegistry:
+    return _build_memory_capability_registry()
+
+
 def _registry_policy() -> MemoryTaskTypePolicy:
     return MemoryTaskTypePolicy.create_from_registry(
-        MemoryCapabilityRegistry.of(DEFAULT_P0_CAPABILITIES))
+        _runtime_registry())
 
 
 class TestExpenseCapabilityRegistration:
-    def test_registry_contains_expense_request(self):
-        registry = MemoryCapabilityRegistry.of(DEFAULT_P0_CAPABILITIES)
+    def test_default_p0_capabilities_exclude_expense_request(self):
+        assert all(cap.task_type != 'EXPENSE_REQUEST'
+                   for cap in DEFAULT_P0_CAPABILITIES)
+
+    def test_runtime_registry_contains_expense_request(self):
+        registry = _runtime_registry()
         assert 'EXPENSE_REQUEST' in registry.task_types()
         assert registry.tool_mapping().get('expense_proposal_tool') == 'EXPENSE_REQUEST'
 
@@ -44,7 +53,7 @@ class TestExpenseCapabilityRegistration:
         assert policy.tool_to_task_type['expense_proposal_tool'] == 'EXPENSE_REQUEST'
 
     def test_registry_eligible_tools_only_proposal(self):
-        registry = MemoryCapabilityRegistry.of(DEFAULT_P0_CAPABILITIES)
+        registry = _runtime_registry()
         assert registry.tool_mapping().get('travel_record_tool') is None
         assert registry.tool_mapping().get('invoice_verify_tool') is None
         assert registry.tool_mapping().get('expense_status_tool') is None

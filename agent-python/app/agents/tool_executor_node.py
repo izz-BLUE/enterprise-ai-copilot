@@ -35,15 +35,15 @@ from app.schemas.planner_schema import (
     PlannerDecisionError,
 )
 from app.tools.enterprise_tools import (
-    expense_proposal_tool,
-    expense_status_tool,
-    invoice_verify_tool,
-    leave_balance_tool,
-    leave_proposal_tool,
-    leave_request_tool,
-    travel_record_tool,
+    expense_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
+    expense_status_tool,  # noqa: F401 - registry resolves tools through globals().
+    invoice_verify_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_balance_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
+    leave_request_tool,  # noqa: F401 - registry resolves tools through globals().
+    travel_record_tool,  # noqa: F401 - registry resolves tools through globals().
 )
-from app.tools.rag_tools import eval_report_tool, rag_answer_tool
+from app.tools.rag_tools import eval_report_tool, rag_answer_tool  # noqa: F401 - see registry lookup above.
 
 # 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
 # P2-A Expense Workflow V1: 提升到 5 以容纳 travel/rag/invoice/proposal/status
@@ -317,6 +317,14 @@ def _leave_proposal_post(parsed: dict, tool_name: str) -> dict:
     }
 
 
+def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
+    """把 expense proposal Tool 的结构化结果回写到 AgentState。"""
+    return {
+        'action_proposal': parsed.get('action_proposal'),
+        'missing_fields': parsed.get('missing_fields', []),
+    }
+
+
 # --- 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key ---------
 _LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
 
@@ -395,6 +403,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             system_arg_keys=_EXPENSE_CTCX_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='business_action',
             pre_inject=_inject_expense_proposal,
+            proposal_post=_expense_proposal_post,
         ),
         # P2-A Phase 8: expense_status_tool —— Java 权威状态查询（source=Java）
         EXPENSE_STATUS_TOOL_NAME: ToolSpec(

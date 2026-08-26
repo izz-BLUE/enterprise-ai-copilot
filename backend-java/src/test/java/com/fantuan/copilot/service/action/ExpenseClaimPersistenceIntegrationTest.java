@@ -50,6 +50,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     @Autowired ExpenseClaimRepository expenseClaims;
     @Autowired BusinessActionProperties properties;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ExpenseCalculationService calculation;
 
     @BeforeEach
     void resetDatabase() {
@@ -70,6 +71,10 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     }
 
     private ExpenseActionProposal proposal() {
+        return proposal(new BigDecimal("1730"));
+    }
+
+    private ExpenseActionProposal proposal(BigDecimal reimbursableAmount) {
         return new ExpenseActionProposal(
                 com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM,
                 "TRIP-20260818-001",
@@ -78,7 +83,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
                         new ExpenseActionProposal.ExpenseItemPayload(
                                 "TAXI", new BigDecimal("230"), "INV-002", "机场往返打车")),
                 new BigDecimal("1830"),
-                new BigDecimal("1730"),  // HOTEL 1600 → 封顶 750×2=1500；TAXI 230 实报 → 1730
+                reimbursableAmount,  // HOTEL 1600 → 封顶 750×2=1500；TAXI 230 实报 → 1730
                 "COST-IT",
                 "上海出差酒店与交通",
                 List.of("INV-001", "INV-002"),
@@ -100,6 +105,29 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         assertEquals(0, claim.claimedAmount().compareTo(new BigDecimal("1830")));
         assertEquals(2, expenseClaims.findItemsByExpenseId(claim.expenseId()).size());
         assertEquals(1, expenseClaims.countBySourceActionId(view.actionId()));
+    }
+
+    @Test
+    void pythonExpenseAmountCannotOverrideJavaAuthoritativeCalculation() {
+        var malicious = proposal(new BigDecimal("999999"));
+
+        var authoritative = calculation.calculate(
+                List.of(
+                        new com.fantuan.copilot.model.action.ExpenseItem(
+                                "INV-001", "HOTEL", new BigDecimal("1600"), "上海如家 2 晚"),
+                        new com.fantuan.copilot.model.action.ExpenseItem(
+                                "INV-002", "TAXI", new BigDecimal("230"), "机场往返打车")),
+                2);
+        assertEquals(0, authoritative.reimbursableAmount().compareTo(new BigDecimal("1730.00")));
+
+        ActionException exception = assertThrows(ActionException.class,
+                () -> actionService.createPending(
+                        malicious, "origin-exp-malicious", null, USER_A, null));
+        assertEquals("BUSINESS_RULE_VIOLATION", exception.errorCode());
+        assertEquals("实报金额与系统计算不一致。", exception.getMessage());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM business_action WHERE action_type = 'EXPENSE_CLAIM'",
+                Integer.class));
     }
 
     @Test

@@ -8,7 +8,7 @@ V2 §二十六：
   eligible tool（V2 §十六 / §二十七）。
 
 Capability Registry 是业务 eligibility 的唯一真理来源：
-- 本声明加入 DEFAULT_P0_CAPABILITIES（registry 默认集合）；
+- 本声明由应用 bootstrap 显式加入 runtime registry；
 - **不**在 DEFAULT_TOOL_TO_TASK_TYPE 手动为 expense 新增业务映射（避免双重注册）；
 - 不修改 Memory Core（memory_trigger_policy / memory_write_policy /
   memory_extractor / memory_pipeline / memory_write_dispatcher）。

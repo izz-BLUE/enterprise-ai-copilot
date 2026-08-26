@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import PendingActionCard from './PendingActionCard'
 import UiIcon from './UiIcon'
+import { isSupportedPendingAction } from '../hooks/useBusinessActionFlow'
 import './ChatMessage.css'
 
 const CATEGORY_LABELS = {
@@ -101,8 +102,7 @@ export default function ChatMessage({
 }) {
   const status = getStatusInfo(result)
   const pendingAction = result?.pendingAction
-  const supportedAction = pendingAction?.type === 'ANNUAL_LEAVE_REQUEST'
-    && pendingAction?.confirmationRequired === true
+  const supportedAction = isSupportedPendingAction(pendingAction)
 
   return (
     <div className="chat-message assistant">

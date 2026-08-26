@@ -7,6 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.agents.langgraph_agent import run_langgraph_agent
+from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
+from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
+from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import (
     AGENT_LOOP_ENABLED,
@@ -23,8 +26,6 @@ from app.core.observability import (
     shutdown_observability,
     trace_ai_request,
 )
-from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
-from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
 from app.memory.memory_llm_adapter import MemoryLLMAdapter
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
@@ -78,6 +79,14 @@ class _ResponseMemoryWriter:
         self.command = command
 
 
+def _build_memory_capability_registry() -> MemoryCapabilityRegistry:
+    """构造当前 Agent runtime 使用的 Memory capability registry。"""
+    return MemoryCapabilityRegistry.of([
+        *DEFAULT_P0_CAPABILITIES,
+        EXPENSE_MEMORY_CAPABILITY,
+    ])
+
+
 def _build_memory_runtime_hook(
     *, trace_id: str,
 ) -> tuple[MemoryRuntimeHook, _ResponseMemoryWriter] | None:
@@ -86,10 +95,11 @@ def _build_memory_runtime_hook(
         return None
 
     # P2-A (V2 §二十六): Capability Registry 是业务 eligibility 唯一真理来源。
-    # 用 DEFAULT_P0_CAPABILITIES（含 EXPENSE_MEMORY_CAPABILITY）+ create_from_registry
-    # 构造 policy；不修改 DEFAULT_TOOL_TO_TASK_TYPE（避免双重 hardcode）。
+    # P0 默认能力与应用层 Expense capability 显式合并；不修改
+    # DEFAULT_TOOL_TO_TASK_TYPE（避免双重 hardcode）。
+    registry = _build_memory_capability_registry()
     policy = MemoryTaskTypePolicy.create_from_registry(
-        MemoryCapabilityRegistry.of(DEFAULT_P0_CAPABILITIES))
+        registry)
     pipeline = MemoryPipeline(task_type_policy=policy,
                               llm_callable=MemoryLLMAdapter(call_llm))
     writer = _ResponseMemoryWriter()

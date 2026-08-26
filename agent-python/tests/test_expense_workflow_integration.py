@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -177,6 +177,8 @@ class TestPlannerSelection:
         # finalize contract: last proposal tool → route=action
         assert result["route"] == "action"
         assert result["category"] == "business_action"
+        assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
+        assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
 
 
 class TestStressScenarios:
