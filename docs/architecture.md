@@ -132,6 +132,7 @@ flowchart TD
 |------|------|------|
 | backend-java | `backend-java/` | Java Spring Boot 业务系统，提供对外 API 并代理 Python 接口 |
 | agent-python | `agent-python/` | Python FastAPI AI 服务，包含 RAG、Agent、Tools、Safety Guard |
+| enterprise-oa-mcp | `agent-python/enterprise_oa_mcp_server/` | P2-A 极简 MCP Server（官方 `mcp` SDK v2，Streamable HTTP `:8100/mcp`），内存 fixture：`travel_record_get` / `invoice_verify`（含 ownership check） |
 | knowledge-base | `data/hr/ bank/ it/` | 企业知识库 Markdown 文档 |
 | evaluation | `data/eval/` | RAG 评估测试集、报告和 baseline |
 | frontend | `frontend/` | React + Vite 前端演示页面 |
@@ -160,7 +161,7 @@ flowchart TD
 - **ChatRequest**：输入长度校验（`@Size(max=2000)`）
 - **GlobalExceptionHandler**：全局异常处理，统一错误响应
 - **DemoIdentityService**：默认关闭的三身份白名单目录，仅供受控兼容 fallback；服务端派生 employeeId/displayName/role
-- **BusinessActionService**：Java 权威控制面 —— PendingAction 状态机、TTL、容量、owner 校验、nonce 校验、幂等确认、Spring 事务、持久化与审计；最终执行只通过 `LeaveExecutionGateway`
+- **BusinessActionService**：Java 权威控制面 —— PendingAction 状态机、TTL、容量、owner 校验、nonce 校验、幂等确认、Spring 事务、持久化与审计；业务专属逻辑通过 `BusinessActionHandlerRegistry`（`proposal.actionType() → handler`）分发到 `AnnualLeaveActionHandler`（年假余额/冲突/执行/余额扣减）与 `ExpenseClaimActionHandler`（报销校验/确定性金额/`ExpenseExecutionGateway` 写 `expense_claim`+`expense_item`），最终执行只通过各 Handler 的 Gateway
 - **LeaveReadController**：`/api/internal/leave/{balance,requests}`，由 Python 只读企业 Tool 调用；`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权；**与 `leave_proposal_tool` 无关**（`leave_proposal_tool` 不调用此端点）
 - **PostgresLeaveSandboxGateway**：当前同数据库事务执行适配器，按 employeeId 检查冲突、生成编号并写入 LeaveRequest
 - **JdbcPendingActionRepository / JdbcLeaveAccountRepository / JdbcLeaveRequestRepository**：明确 SQL、Action/Account 行锁、唯一申请关联和原子余额扣减
@@ -186,7 +187,7 @@ flowchart TD
 - **observability**：可选 Phoenix/OpenTelemetry 旁路。FastAPI 生命周期负责初始化/关闭，`trace_id_middleware` 为两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；固定使用 BatchSpanProcessor，默认隐藏输入、输出、Prompt 和 embedding vector，Collector 故障不改变业务响应
 - **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表（legacy Router-first 与 Planner-first 的 `leave_proposal_tool` 复用此服务）
 - **tool_calling_service**：`plan_annual_leave_action` 的实现入口，由 `leave_proposal_tool` 复用；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
-- **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
+- **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；P2-A 新增 `travel_record_tool` / `invoice_verify_tool`（经 `app/integrations/mcp/enterprise_oa_client.py` → `enterprise-oa-mcp` Streamable HTTP）、`expense_proposal_tool`（显式接收 `ExpenseProposalContext`，程序层从 tool_history 构造；内部禁止再次调 MCP/Java/RAG）、`expense_status_tool`（Java `/api/internal/expense/*`，Java 权威状态）
 - **java_client**：Python → Java 内部只读 HTTP 客户端；仅供 `leave_balance_tool` / `leave_request_tool` 使用；不做 retry / fallback
 - **memory runtime hook**：Agent 响应出口旁路；按 `MEMORY_WRITE_MODE` 组装现有 LLM service、Trigger/Extractor/WritePolicy 与响应提案 writer，失败不阻断主响应
 - **Memory 持久化**：Python 响应只携带内容提案；Java 使用当前 `VerifiedIdentity` 与服务端解析的 conversationId 固定执行 `UPSERT + ACTIVE`

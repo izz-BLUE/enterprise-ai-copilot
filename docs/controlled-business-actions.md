@@ -124,6 +124,46 @@ Confirm 首次成功后，Action 的持久化成功结果成为权威结果。�
 
 卡片状态为 `pending → confirming → succeeded` 或 `pending → cancelling → cancelled`；过期草稿进入 `expired`，可重试错误进入 `error` 并且只显示与上一次决定一致的重试按钮。客户端到期计时用于提前禁用交互，服务端 `ACTION_EXPIRED` 仍是权威结果。执行中的动作会禁用清空会话、模式切换和身份选择。切换身份前对未处理草稿二次确认，确认后清空消息、nonce、Action UI、幂等 Key 和同步锁。身份只保存在 React state，不写入 localStorage、sessionStorage、Cookie 或 URL。
 
+## P2-A Expense Workflow V1（差旅报销）
+
+P2-A 在受控业务动作之上扩展 `EXPENSE_CLAIM`（Java `BusinessActionType`），
+复用同一 `BusinessActionService` 通用生命周期（HITL / nonce / TTL / 幂等 /
+Memory 收口），业务专属逻辑由 `BusinessActionHandler` 承载：
+
+- `AnnualLeaveActionHandler`：年假业务（余额 / 冲突 / 执行 / summary）
+- `ExpenseClaimActionHandler`：报销业务（proposal 校验 / 确定性金额计算 /
+  写 ExpenseClaim + ExpenseItem / ExpenseClaimSummary）
+
+分发点唯一：`proposal.actionType() → BusinessActionHandlerRegistry → handler`
+（禁止 `instanceof` / `enum switch`）。
+
+Python 侧新增 4 个 Agent Tool（V2 §六 / §九）：
+
+| Tool | source | side_effect | identity_required | memory_eligible |
+|---|---|---|---|---|
+| `travel_record_tool` | MCP (`enterprise-oa-mcp`) | NONE | true | false |
+| `invoice_verify_tool` | MCP (`enterprise-oa-mcp`) | NONE | true | false |
+| `expense_proposal_tool` | LOCAL（受控 Proposal） | NONE | true | **true → EXPENSE_REQUEST** |
+| `expense_status_tool` | Java `/api/internal/expense/*` | NONE | true | false |
+
+`ExpenseActionProposal`（strict / extra='forbid' / action_type='EXPENSE_CLAIM'）
+由程序层从 `tool_history` 中的成功 facts 确定性构造：
+`tool_executor_node` 在调用 `expense_proposal_tool` 前从已成功的
+travel / invoice / rag observation 组装 `ExpenseProposalContext`（系统注入，
+不可由 LLM arguments 伪造）；Tool 内部**禁止**再次调用 MCP / Java / RAG。
+金额 / 限额（HOTEL 750×晚封顶、其它合法实报）由确定性业务代码计算，
+禁止 LLM 计算金额。
+
+`expense_status_tool` 查询 Java 权威状态（Java Expense Domain 是最终
+Source of Truth）；`GET /api/internal/expense/status?expenseId=` +
+`/recent`，`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权，ownership
+check（跨员工 404）。
+
+Memory：`EXPENSE_REQUEST` 只通过 `MemoryCapabilityRegistry`
+（`EXPENSE_MEMORY_CAPABILITY`，eligible tool = `expense_proposal_tool`）
+注册；其余 Expense read tools（travel / invoice / expense_status / rag）
+单独成功不触发 Extractor；**未修改** Memory Trigger / Write / Extractor Core。
+
 ## 配置
 
 | 配置 | 默认值 |

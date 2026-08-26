@@ -44,7 +44,40 @@
 
 返回当前 JWT 身份。浏览器使用 HttpOnly Cookie；API 客户端使用 `Authorization: Bearer <access-token>`。Agent 和 Business Action 路由的 Spring Security 规则均为 `authenticated()`：有效 Bearer JWT 优先；凭据存在但无效或过期直接返回 401，不回退 Demo 身份；完全没有凭据时，受控 Demo 模式才可使用 `X-Demo-User-Id` fallback。
 
-`/api/internal/leave/**` 不要求用户 JWT，仅由 `X-Internal-Token` 服务间认证，并消费可信上游注入的 `X-Employee-Id`。
+`/api/internal/leave/**` 与 `/api/internal/expense/**` 不要求用户 JWT，仅由 `X-Internal-Token` 服务间认证，并消费可信上游注入的 `X-Employee-Id`。
+
+### GET /api/internal/expense/status（P2-A）
+
+内部只读接口：供 Python `expense_status_tool` 查询 Java 权威报销状态。
+
+```http
+GET /api/internal/expense/status?expenseId=EXP-20260826-000001
+X-Internal-Token: <internal-token>
+X-Employee-Id: DEMO-001
+X-Trace-Id: <trace-id>
+```
+
+响应（Java 权威，`Cache-Control: no-store`）：
+```json
+{
+  "expenseId": "EXP-20260826-000001",
+  "status": "SUBMITTED",
+  "claimedAmount": 1830.00,
+  "reimbursableAmount": 1730.00,
+  "tripId": "TRIP-20260818-001",
+  "submittedAt": "2026-08-26T10:00:00Z"
+}
+```
+
+`expense.employeeId` 必须等于可信 `X-Employee-Id`，跨员工读取返回 404
+`EXPENSE_NOT_FOUND`（V2 §二十四）。错误码：`EXPENSE_READ_DISABLED`（503）/
+`EXPENSE_READ_FORBIDDEN`（403）/ `EXPENSE_ID_REQUIRED`（400）/
+`EXPENSE_NOT_FOUND`（404）。
+
+### GET /api/internal/expense/recent（P2-A，可选）
+
+按员工拉取最近报销单（`limit` 可选，默认 10，最大 50）。响应
+`{ employeeId, total, items: [ExpenseStatusResponse...] }`。
 
 ### GET /api/health
 

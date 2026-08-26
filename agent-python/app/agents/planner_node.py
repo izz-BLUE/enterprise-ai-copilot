@@ -14,7 +14,13 @@ from pydantic import ValidationError
 
 from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
 
-ENTERPRISE_OA_MCP_URL_CONFIG = os.environ.get('ENTERPRISE_OA_MCP_URL', '')
+def _enterprise_oa_mcp_url_config() -> str:
+    """延迟读取 ENTERPRISE_OA_MCP_URL（测试/运行时变更友好）。
+
+    该值影响 travel_record_tool / invoice_verify_tool 的可见性门控
+    （V2 §三）；不缓存到 import 时快照。
+    """
+    return os.environ.get('ENTERPRISE_OA_MCP_URL', '')
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -486,7 +492,7 @@ def planner_node(state: dict) -> dict:
         allow_business_actions=allow_business_actions,
         java_base_url=JAVA_BASE_URL,
         java_internal_token=JAVA_INTERNAL_TOKEN,
-        enterprise_oa_mcp_url=ENTERPRISE_OA_MCP_URL_CONFIG,
+        enterprise_oa_mcp_url=_enterprise_oa_mcp_url_config(),
     )
 
     user_prompt = build_planner_prompt(
