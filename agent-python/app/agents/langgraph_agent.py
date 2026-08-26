@@ -25,6 +25,7 @@ from app.retrieval.query_rewriter import rewrite_query
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
 )
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
@@ -321,6 +322,13 @@ def build_agent_loop_graph():
     return graph.compile()
 
 
+# P2-A: proposal 风格 Tool 集合（leave / expense）。
+# - leave_proposal_tool / expense_proposal_tool 的最后成功 → route=action
+# - **不**包含 travel_record_tool / invoice_verify_tool / expense_status_tool
+#   （V2 §十六：这些只读/查询 Tool 单独成功不应触发 action 语义）
+_PROPOSAL_TOOL_NAMES = frozenset({LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME})
+
+
 def _finalize_action_proposal(state: dict) -> dict:
     """最终响应前的确定性 postcondition：防止 stale action_proposal 泄漏。
 
@@ -338,7 +346,8 @@ def _finalize_action_proposal(state: dict) -> dict:
     for entry in state.get('tool_history', []) or []:
         if entry.get('status') == 'success':
             last_success = entry.get('tool_name')
-    if last_success != LEAVE_PROPOSAL_TOOL_NAME:
+    # P2-A: proposal 风格 Tool 集合（leave / expense），route=action 触发条件。
+    if last_success not in _PROPOSAL_TOOL_NAMES:
         state['action_proposal'] = None
         state['missing_fields'] = []
     return state
@@ -397,7 +406,7 @@ def _finalize_response_contract(state: dict) -> dict:
             if entry.get('status') == 'success':
                 last_success = entry.get('tool_name')
 
-        if last_success == LEAVE_PROPOSAL_TOOL_NAME:
+        if last_success in _PROPOSAL_TOOL_NAMES:
             state['route'] = 'action'
             state['category'] = 'business_action'
         elif executed and all(name == RAG_TOOL_NAME for name in executed):

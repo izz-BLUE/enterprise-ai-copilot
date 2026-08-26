@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from app.core.config import logger
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
@@ -33,6 +34,7 @@ from app.schemas.planner_schema import (
     PlannerDecisionError,
 )
 from app.tools.enterprise_tools import (
+    expense_proposal_tool,
     invoice_verify_tool,
     leave_balance_tool,
     leave_proposal_tool,
@@ -123,6 +125,7 @@ class _ExecutorContext:
     trace_id: str
     question: str
     business_date: Any  # date | None
+    tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
 
 
 @dataclass(frozen=True)
@@ -200,6 +203,94 @@ def _inject_oamcp_read(args: dict, ctx: _ExecutorContext) -> dict:
     merged['trace_id'] = ctx.trace_id
     if _calling_tool_name_for_log() == TRAVEL_RECORD_TOOL_NAME and 'limit' not in merged:
         merged['limit'] = 10
+    return merged
+
+
+# ── P2-A Expense Workflow V1: expense_proposal_tool 的 context 注入 ───────
+# 追加约束 §1/§2：ExpenseProposalContext 必须由程序层从当前请求成功
+# tool_history 确定性构造（不允许把 raw tool_history 交给 LLM 解析）。
+# 从 tool_history 中抽取：
+#   - travel_record_tool success → travel_record 列表（trip 记录）
+#   - invoice_verify_tool success → invoices 列表（验真结果）
+#   - rag_answer_tool success    → policy_context（政策知识解释）
+# Tool 内部（在 Python 侧）禁止重新调用 MCP / Java / RAG（V2 §十三）。
+_EXPENSE_CTCX_SYSTEM_ARG_KEYS = frozenset({
+    'employee_id', 'trace_id', 'business_date', 'context',
+})
+
+
+def _success_observations(tool_history: list[dict], tool_name: str) -> list[dict]:
+    """从 tool_history 抽取指定 Tool 的 success observation（JSON dict）。"""
+    result = []
+    for item in tool_history:
+        if item.get('tool_name') != tool_name or item.get('status') != 'success':
+            continue
+        observation = item.get('observation')
+        try:
+            payload = json.loads(observation)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict) and payload.get('success', False):
+            result.append(payload)
+    return result
+
+
+def _build_expense_proposal_context(tool_history: list[dict]) -> dict:
+    """程序层确定性构造 ExpenseProposalContext。
+
+    只允许从当前请求成功 tool_history 中抽取已成功的结构化 facts；
+    travel_record / invoices / policy_context 都是程序层筛选结果。
+    """
+    travel_payloads = _success_observations(
+        tool_history, TRAVEL_RECORD_TOOL_NAME)
+    invoice_payloads = _success_observations(
+        tool_history, INVOICE_VERIFY_TOOL_NAME)
+    rag_payloads = _success_observations(
+        tool_history, RAG_TOOL_NAME)
+
+    travel_items = []
+    for payload in travel_payloads:
+        items = payload.get('items', [])
+        if isinstance(items, list):
+            travel_items.extend(items)
+
+    invoice_items = []
+    for payload in invoice_payloads:
+        if payload.get('success') is True and 'invoice_id' in payload:
+            invoice_items.append(payload)
+        elif payload.get('success') is True and 'items' in payload:
+            invoice_items.extend(payload.get('items', []))
+
+    policy_context = ''
+    for payload in rag_payloads:
+        answer = payload.get('answer')
+        if isinstance(answer, str) and answer:
+            policy_context = answer
+            break
+
+    return {
+        'travel_record': travel_items,
+        'invoices': invoice_items,
+        'policy_context': policy_context,
+    }
+
+
+def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
+    """expense_proposal_tool 的 pre-inject 钩子。
+
+    - 注入 question / business_date / trace_id / context（ExpenseProposalContext）
+    - 拒绝 LLM 在 arguments 中夹带任何系统字段（V2 §十五：禁止 trusted identity）
+    """
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_EXPENSE_CTCX_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{_calling_tool_name_for_log()} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['question'] = ctx.question
+    merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
+    merged['trace_id'] = ctx.trace_id
+    merged['context'] = _build_expense_proposal_context(ctx.tool_history)
     return merged
 
 
@@ -294,7 +385,16 @@ def _build_registry() -> dict[str, ToolSpec]:
             no_employee_blocked_category='access_control',
             pre_inject=_inject_oamcp_read,
         ),
-        # expense_proposal_tool / expense_status_tool 在 Phase 7 / Phase 8 加入。
+        # P2-A Phase 7: expense_proposal_tool —— 受控业务动作生成 Proposal
+        EXPENSE_PROPOSAL_TOOL_NAME: ToolSpec(
+            name=EXPENSE_PROPOSAL_TOOL_NAME,
+            executable_ref='expense_proposal_tool',
+            identity_required=True,
+            system_arg_keys=_EXPENSE_CTCX_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_expense_proposal,
+        ),
+        # expense_status_tool 在 Phase 8 加入。
     }
 
 
@@ -431,15 +531,18 @@ def tool_executor_node(state: dict) -> dict:
         return _blocked(state, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
-    if decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME:
+    # 受控业务动作统一权限（LEAVE_PROPOSAL / EXPENSE_PROPOSAL，V2 §十二 HITL）
+    if decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME):
         if not state.get('allow_business_actions', False):
-            logger.warning('[%s] tool_executor 越权执行 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
+                           trace_id, decision.tool_name)
             return _blocked(state, 'not_allowed',
                             '业务动作功能未启用，或当前请求无执行权限。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
         if state.get('business_date') is None:
-            logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] tool_executor 拒绝执行 %s：无业务日期',
+                           trace_id, decision.tool_name)
             return _blocked(state, 'not_allowed', '当前业务日期不可用。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
@@ -467,6 +570,7 @@ def tool_executor_node(state: dict) -> dict:
             trace_id=trace_id,
             question=state.get('question', ''),
             business_date=state.get('business_date'),
+            tool_history=tool_history,
         )
         if spec.pre_inject is not None:
             args = spec.pre_inject(decision.arguments or {}, ctx)

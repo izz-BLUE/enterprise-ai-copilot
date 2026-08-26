@@ -313,3 +313,150 @@ def invoice_verify_tool(
         None,
         None,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# P2-A Expense Workflow V1: expense_proposal_tool（Phase 7）
+# ──────────────────────────────────────────────────────────────────────
+# 本 Tool 显式接收由 Tool Executor 注入的 ExpenseProposalContext（V2 §十三/
+# 追加约束 §1）：Executor 从当前请求已成功 tool_history 的 travel_record /
+# invoice_verify / rag observation 确定性构造 context，作为 program-level
+# runtime context 传入 —— 不允许把 raw tool_history 交给 LLM。
+#
+# Tool 内部**禁止**重新调用 MCP / Java / RAG（V2 §十三 强制修正）——
+# 只做：
+#   - 用户输入解析（ExpenseInputExtraction，规则版确定性）
+#   - 已有 Tool facts 聚合（context.travel_record / invoices / policy_context）
+#   - deterministic validation + calculation（费用求和 / hotel cap）
+#   - cost center 内部 mock/lookup（COST-DEFAULT）
+#   - Proposal construction
+# 业务字段（cost_center / claimed_amount / reimbursable_amount / 验真状态 /
+# policy cap）由程序层计算后组装 Proposal，LLM 不得生成这些字段
+# （追加约束 §4）。
+#
+# 【重要：本 Tool 不接受任何 LLM 入参】Planner arguments 必须为 {}；
+# question / business_date / trace_id / context 全部由 Executor 注入。
+
+
+@tool
+def expense_proposal_tool(
+    question: str = '',
+    business_date: str = '',
+    trace_id: str = '',
+    context: dict | None = None,
+) -> str:
+    """生成报销申请草稿(ExpenseActionProposal)供用户确认；不提交任何写操作。
+
+    该 Tool 无 LLM 入参：question / business_date / trace_id / context
+    （ExpenseProposalContext，由 Executor 从 tool_history 构造）由 Tool
+    Executor 从 AgentState 注入；模型不得在 arguments 中提供这些字段，
+    也不得提供 trip_id / invoice_ids / cost_center / 金额等业务参数。
+
+    返回 JSON：proposal 时 kind=proposal + action_proposal + missing_fields=[]；
+    clarification 时 kind=clarification + action_proposal=null + missing_fields。
+    """
+    from app.services import expense_calculation_service, expense_input_service
+
+    if not question:
+        return _payload(False, None, 'QUESTION_REQUIRED', '缺少原始问题，无法生成报销草稿。')
+    if not business_date:
+        return _payload(False, None, 'BUSINESS_DATE_REQUIRED', '当前业务日期不可用。')
+
+    ctx_like = expense_input_service.ExpenseProposalContextLike(context or {})
+    try:
+        analysis = expense_input_service.analyze_expense_input(
+            question, context=ctx_like)
+    except expense_input_service.ExpenseInputError as exc:
+        return _payload(False, None, 'CLAIM_INTENT_REQUIRED', '无法识别报销意图。')
+
+    if analysis.missing_fields:
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': analysis.missing_fields,
+                'message': expense_input_service.clarification_question(
+                    analysis.missing_fields),
+            },
+            None,
+            None,
+        )
+
+    # 从 context 定位 trip 与验真成功的发票
+    trips = expense_input_service.find_trip_records(ctx_like)
+    invoices = expense_input_service.find_invoice_records(ctx_like)
+    trip = next(
+        (trip for trip in trips if trip.get('trip_id') == analysis.trip_id), None)
+    if trip is None:
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': ['trip_id'],
+                'message': '未找到匹配的可报销出差记录，请确认 trip_id 或目的地。',
+            },
+            None,
+            None,
+        )
+
+    # 按 invoice_id 匹配验真成功的发票，组装明细（确定性）
+    invoice_ids = analysis.invoice_ids
+    verified = {
+        invoice.get('invoice_id'): invoice
+        for invoice in invoices if invoice.get('invoice_id') in invoice_ids
+    }
+    if len(verified) != len(invoice_ids):
+        missing = [inv_id for inv_id in invoice_ids if inv_id not in verified]
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': ['invoice_ids'],
+                'message': f'以下发票尚未验真成功或归属不符：{", ".join(missing)}',
+            },
+            None,
+            None,
+        )
+
+    expense_items = []
+    for inv_id in invoice_ids:
+        invoice = verified[inv_id]
+        expense_items.append({
+            'category': invoice.get('category'),
+            'amount': invoice.get('amount'),
+            'invoice_id': inv_id,
+            'description': f'{invoice.get("vendor", "")} {invoice.get("category", "")}',
+        })
+
+    # deterministic 计算（禁 LLM 算金额，V2 §十一 / §十四）
+    stay_nights = expense_calculation_service.infer_stay_nights(trip)
+    claimed = expense_calculation_service.claimed_amount(expense_items)
+    reimbursable = expense_calculation_service.reimbursable_amount(
+        expense_items, stay_nights)
+    cost_center = 'COST-DEFAULT'  # V2 §十三：业务内部 mock/lookup，不作为 Tool
+
+    proposal = {
+        'action_type': 'EXPENSE_CLAIM',
+        'trip_id': analysis.trip_id,
+        'expense_items': expense_items,
+        'claimed_amount': str(claimed),
+        'reimbursable_amount': str(reimbursable),
+        'cost_center': cost_center,
+        'reason': question,
+        'invoice_ids': invoice_ids,
+        'stay_nights': stay_nights,
+    }
+    return _payload(
+        True,
+        {
+            'kind': 'proposal',
+            'action_proposal': proposal,
+            'missing_fields': [],
+            'message': '已生成报销申请草稿，请确认后提交。',
+        },
+        None,
+        None,
+    )

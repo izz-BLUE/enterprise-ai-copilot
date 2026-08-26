@@ -570,14 +570,15 @@ def planner_node(state: dict) -> dict:
             category='access_control',
         )
 
-    # leave_proposal_tool 权限边界：受控业务动作授权 + Java 业务日期是前置条件，
-    # 任一缺失都直接 refuse（程序层决策，模型不能绕过）
+    # 受控业务动作权限边界（leave_proposal_tool / expense_proposal_tool）：
+    # 业务动作授权 + Java 业务日期是前置条件，任一缺失都直接 refuse。
     if (
         decision.action == 'tool'
-        and decision.tool_name == LEAVE_PROPOSAL_TOOL_NAME
+        and decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME)
     ):
         if not allow_business_actions:
-            logger.warning('[%s] planner 越权要求 %s 被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] planner 越权要求 %s 被拒绝',
+                           trace_id, decision.tool_name)
             return _decision_result(
                 state,
                 _refuse_decision('业务动作功能未启用，或当前请求无执行权限。', 'not_allowed'),
@@ -585,7 +586,8 @@ def planner_node(state: dict) -> dict:
                 category='business_action',
             )
         if state.get('business_date') is None:
-            logger.warning('[%s] planner %s 在无业务日期时被拒绝', trace_id, LEAVE_PROPOSAL_TOOL_NAME)
+            logger.warning('[%s] planner %s 在无业务日期时被拒绝',
+                           trace_id, decision.tool_name)
             return _decision_result(
                 state,
                 _refuse_decision('当前业务日期不可用。', 'cannot_complete'),
