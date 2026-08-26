@@ -44,6 +44,7 @@ def test_postgres_runtime_uses_pool_strict_serializer_and_startup_compiled_graph
         'postgresql://runtime-test',
         min_size=1,
         max_size=3,
+        timeout=3,
         open=True,
         kwargs={
             'autocommit': True,

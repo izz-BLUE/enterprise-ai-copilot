@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agents.langgraph_agent import run_langgraph_agent
 from app.runtime.checkpoint_runtime import CheckpointRuntime
+from app.services.llm_service import LLMProviderError
 
 _DSN = os.getenv('LANGGRAPH_CHECKPOINT_DSN', '')
 pytestmark = pytest.mark.skipif(
@@ -212,6 +213,127 @@ def test_p8_new_request_resets_current_request_tool_history(checkpoint_runtime):
         )
     assert second['tool_history'] == []
     assert graph.get_state(_config(thread_id)).values['tool_history'] == []
+
+
+def test_f1_final_checkpoint_matches_returned_rag_response(checkpoint_runtime):
+    graph = checkpoint_runtime.get_graph(use_planner=True)
+    thread_id = _thread_id('f1-final-rag') + ':planner-v1'
+    tool_decision = json.dumps({
+        'action': 'tool',
+        'tool_name': 'rag_answer_tool',
+        'arguments': {'question': '制度问题'},
+        'reason_code': 'need_knowledge',
+    })
+    finish_decision = json.dumps({
+        'action': 'finish',
+        'answer': '制度回答',
+        'reason_code': 'task_complete',
+    })
+    with patch('app.agents.planner_node.call_llm', side_effect=[tool_decision, finish_decision]), \
+            patch('app.agents.tool_executor_node.rag_answer_tool') as rag_tool:
+        rag_tool.invoke.return_value = json.dumps({
+            'answer': '制度回答', 'success': True, 'sources': [],
+        })
+        result = run_langgraph_agent(
+            '制度问题', use_planner=True, graph=graph, runtime_thread_id=thread_id,
+        )
+
+    snapshot = graph.get_state(_config(thread_id))
+    assert result['route'] == 'rag'
+    assert result['category'] == 'normal'
+    for field in ('route', 'category', 'reason', 'stop_reason'):
+        assert snapshot.values[field] == result[field]
+
+
+def test_f2_failed_proposal_is_cleared_in_final_checkpoint(checkpoint_runtime):
+    graph = checkpoint_runtime.get_graph(use_planner=True)
+    thread_id = _thread_id('f2-stale-proposal') + ':planner-v1'
+    proposal_decision = json.dumps({
+        'action': 'tool',
+        'tool_name': 'leave_proposal_tool',
+        'arguments': {},
+        'reason_code': 'need_proposal',
+    })
+    proposal_payload = json.dumps({
+        'kind': 'proposal',
+        'action_proposal': {
+            'action_type': 'ANNUAL_LEAVE_REQUEST',
+            'start_date': '2026-08-28',
+            'end_date': '2026-08-28',
+            'reason': '私事',
+            'half_day': 'NONE',
+        },
+        'missing_fields': [],
+        'message': '已生成草稿',
+    }, ensure_ascii=False)
+    with patch('app.agents.planner_node.call_llm', side_effect=[
+        proposal_decision,
+        LLMProviderError('provider_unavailable', 'provider unavailable'),
+    ]), patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal_tool:
+        proposal_tool.invoke.return_value = proposal_payload
+        result = run_langgraph_agent(
+            '申请年假',
+            use_planner=True,
+            allow_business_actions=True,
+            business_date=date(2026, 8, 27),
+            employee_id='E10001',
+            graph=graph,
+            runtime_thread_id=thread_id,
+        )
+
+    snapshot = graph.get_state(_config(thread_id))
+    assert result['action_proposal'] is None
+    assert result['missing_fields'] == []
+    assert snapshot.values['action_proposal'] is None
+    assert snapshot.values['missing_fields'] == []
+    assert snapshot.values['stop_reason'] == result['stop_reason'] == 'provider_error'
+
+
+def test_f3_successful_proposal_remains_in_final_checkpoint(checkpoint_runtime):
+    graph = checkpoint_runtime.get_graph(use_planner=True)
+    thread_id = _thread_id('f3-valid-proposal') + ':planner-v1'
+    proposal_decision = json.dumps({
+        'action': 'tool',
+        'tool_name': 'leave_proposal_tool',
+        'arguments': {},
+        'reason_code': 'need_proposal',
+    })
+    finish_decision = json.dumps({
+        'action': 'finish',
+        'answer': '已生成草稿，请确认。',
+        'reason_code': 'task_complete',
+    })
+    proposal_payload = json.dumps({
+        'kind': 'proposal',
+        'action_proposal': {
+            'action_type': 'ANNUAL_LEAVE_REQUEST',
+            'start_date': '2026-08-28',
+            'end_date': '2026-08-28',
+            'reason': '私事',
+            'half_day': 'NONE',
+        },
+        'missing_fields': [],
+        'message': '已生成草稿，请确认。',
+    }, ensure_ascii=False)
+    with patch('app.agents.planner_node.call_llm', side_effect=[proposal_decision, finish_decision]), \
+            patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal_tool:
+        proposal_tool.invoke.return_value = proposal_payload
+        result = run_langgraph_agent(
+            '申请2026-08-28一天年假，原因为私事',
+            use_planner=True,
+            allow_business_actions=True,
+            business_date=date(2026, 8, 27),
+            employee_id='E10001',
+            graph=graph,
+            runtime_thread_id=thread_id,
+        )
+
+    snapshot = graph.get_state(_config(thread_id))
+    assert result['action_proposal'] is not None
+    assert snapshot.values['action_proposal'] == result['action_proposal']
+    assert snapshot.values['route'] == result['route'] == 'action'
+    assert snapshot.values['category'] == result['category'] == 'business_action'
+    assert snapshot.values['stop_reason'] == result['stop_reason'] == 'task_complete'
 
 
 def test_p10_postgres_unavailable_fails_closed_without_disabled_fallback():

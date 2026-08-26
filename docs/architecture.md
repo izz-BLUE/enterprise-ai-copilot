@@ -175,7 +175,7 @@ flowchart TD
 - **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
 - **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
 - **langgraph_agent**：LangGraph 状态图编排入口；同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换：
-  - `use_planner=true`（仓库部署默认）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor`
+  - `use_planner=true`（仓库部署默认）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor → finalize`
   - `use_planner=false`（显式回退 legacy）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
 - **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`；Capability Gate 同时收缩 system/user Prompt 中的 Tool contract，并在 Planner post-validation 阶段拒绝隐藏 Tool
 - **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / employee_id / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数；只读 Tool 的 Java URL / internal token 继续由下游 Tool / JavaClient 校验
@@ -339,7 +339,7 @@ POST /api/agent/langgraph/chat
           │           → Clarification response
           │           → 不创建 PendingAction
           ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
-          └── 终止后：_finalize_action_proposal + _finalize_response_contract 收敛 route / category / reason
+           └── finalize_node：在 Graph 内调用 _finalize_action_proposal + _finalize_response_contract，随后 END
     → 已创建 PendingAction
       → React 脱敏确认卡
         ├── confirm
@@ -351,7 +351,7 @@ POST /api/agent/langgraph/chat
            → CANCELLED
 ```
 
-**特点**：两套互斥图共用同一 Java 控制面；Python `run_langgraph_agent` 仅在 `use_planner=True` 时启用 `_finalize_action_proposal` 与 `_finalize_response_contract` 两层 finalization。
+**特点**：两套互斥图共用同一 Java 控制面；Planner-first 的 `finalize_node` 在最后一次 Checkpoint 写入前收敛 `_finalize_action_proposal` 与 `_finalize_response_contract`，`run_langgraph_agent` 不再在 `graph.invoke()` 返回后修改 Planner 状态。
 
 > **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
 
@@ -588,7 +588,7 @@ LangGraph 用于流程编排，main 同时保留两套互斥状态图：
   - legacy Router-first 不暴露 Planner-first 的 Tool 可见性集合；`leave_proposal_tool` 仅在 Planner-first 下被 Planner 决策调用
 
 - **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
-  - 状态图：`safety → planner ⇄ tool_executor`
+  - 状态图：`safety → planner ⇄ tool_executor → finalize`
   - Planner 拥有规划权（Pydantic 严格白名单），没有最终业务执行授权
   - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做 employee_id / 权限 / Tool 预算 / 成功签名去重校验
   - 任务拆解 / 多步规划具有有限自主规划能力，但受 Tool 白名单、权限校验、`MAX_PLANNER_STEPS=5`、`MAX_TOOL_CALLS=3` 和 Java 最终授权边界约束

@@ -77,6 +77,7 @@ class CheckpointRuntime:
                 self._dsn,
                 min_size=1,
                 max_size=self._max_connections,
+                timeout=self._connect_timeout_seconds,
                 open=True,
                 kwargs={
                     'autocommit': True,

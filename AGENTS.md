@@ -13,7 +13,7 @@
 ## 关键 invariant
 
 - **Java authority boundary**：受控业务动作必须经 Java 侧 PendingAction 持久化 + nonce 校验 + 幂等确认才执行，默认关闭；ADMIN_TOKEN 为空 = Demo 模式（eval 路由全开放），生产必须设置。
-- **Python Agent Graph**：main 同时保留两套互斥状态图。`AGENT_LOOP_ENABLED=true`（仓库部署默认）走 Planner-first：`safety → planner ⇄ tool_executor`，Planner 拥有规划权、无最终业务执行授权，预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；`AGENT_LOOP_ENABLED=false`（显式回退）走 legacy Router-first：`safety → router → rag|eval|action|refuse`，意图路由 + 规则工具。Planner-first **最多支持 5 个 Tool**，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
+- **Python Agent Graph**：main 同时保留两套互斥状态图。`AGENT_LOOP_ENABLED=true`（仓库部署默认）走 Planner-first：`safety → planner ⇄ tool_executor → finalize`，Planner 拥有规划权、无最终业务执行授权，预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；`AGENT_LOOP_ENABLED=false`（显式回退）走 legacy Router-first：`safety → router → rag|eval|action|refuse`，意图路由 + 规则工具。Planner-first **最多支持 5 个 Tool**，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
   - 始终可见：`rag_answer_tool`；`employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加 `leave_balance_tool` / `leave_request_tool`
   - `allow_eval=true` 时追加：`eval_report_tool`
   - `allow_business_actions=true` 且 `employee_id` 非空时追加：`leave_proposal_tool`

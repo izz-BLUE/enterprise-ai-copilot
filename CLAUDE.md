@@ -79,7 +79,7 @@ START → safety_node → router_node → rag_node → END
 - **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
 
 ```
-START → safety_node → planner_node ⇄ tool_executor_node → END
+START → safety_node → planner_node ⇄ tool_executor_node → finalize_node → END
 ```
 
 Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
