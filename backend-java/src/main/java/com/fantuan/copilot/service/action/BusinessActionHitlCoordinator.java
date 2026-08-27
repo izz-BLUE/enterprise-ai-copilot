@@ -14,6 +14,7 @@ import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -43,14 +44,17 @@ public class BusinessActionHitlCoordinator {
     private final AgentRuntimeThreadExecutionGuard threadGuard;
     private final AdminAccessService adminAccessService;
     private final ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
+    private final ExpenseConfirmRevalidationService expenseRevalidation;
 
+    @Autowired
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
                                          PendingActionRepository actions,
                                          PythonAgentGateway pythonAgentGateway,
                                          AgentRuntimeThreadIdService threadIdService,
                                          AgentRuntimeThreadExecutionGuard threadGuard,
                                          AdminAccessService adminAccessService,
-                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
+                                         ExpenseConfirmRevalidationService expenseRevalidation) {
         this.actionService = actionService;
         this.actions = actions;
         this.pythonAgentGateway = pythonAgentGateway;
@@ -58,6 +62,19 @@ public class BusinessActionHitlCoordinator {
         this.threadGuard = threadGuard;
         this.adminAccessService = adminAccessService;
         this.externalApprovalCoordinator = externalApprovalCoordinator;
+        this.expenseRevalidation = expenseRevalidation;
+    }
+
+    /** Compatibility constructor for focused tests that do not exercise expense revalidation. */
+    public BusinessActionHitlCoordinator(BusinessActionService actionService,
+                                         PendingActionRepository actions,
+                                         PythonAgentGateway pythonAgentGateway,
+                                         AgentRuntimeThreadIdService threadIdService,
+                                         AgentRuntimeThreadExecutionGuard threadGuard,
+                                         AdminAccessService adminAccessService,
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
+        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null);
     }
 
     /** Register the wait after Python has durably checkpointed the interrupt. */
@@ -106,6 +123,8 @@ public class BusinessActionHitlCoordinator {
         boolean guardReleased = false;
         try {
             try {
+                revalidateExpenseOutsideTransaction(routing, actionId, confirmationNonce,
+                        presentedToken, traceId, identity);
                 ActionExecutionResponse response = actionService.confirm(
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
                         traceId, identity.asDemoIdentity());
@@ -134,6 +153,27 @@ public class BusinessActionHitlCoordinator {
             if (!guardReleased) {
                 threadGuard.release(guardKey);
             }
+        }
+    }
+
+    private void revalidateExpenseOutsideTransaction(PendingAction routing, String actionId,
+                                                      String confirmationNonce,
+                                                      String presentedToken, String traceId,
+                                                      VerifiedIdentity identity) {
+        if (expenseRevalidation == null
+                || routing.actionType() != com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM
+                || routing.status() == ActionStatus.SUCCEEDED) {
+            return;
+        }
+        String staleCode = expenseRevalidation.revalidate(routing, traceId);
+        if (staleCode != null) {
+            // The service locks and rechecks the action in a separate short
+            // transaction.  It throws ActionStaleException after committing.
+            actionService.failStaleConfirmation(actionId, confirmationNonce,
+                    presentedToken, traceId, identity.asDemoIdentity(), staleCode);
+            // Keep compatibility with mocked services: a stale result must
+            // never fall through to the normal execute path.
+            throw new ActionStaleException(actionId);
         }
     }
 
