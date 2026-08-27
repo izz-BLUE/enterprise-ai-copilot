@@ -48,7 +48,7 @@ jobs:
 
       - name: Install Mock OA dependencies
         working-directory: mock-oa
-        run: pip install -r requirements.txt pytest ruff
+        run: pip install -r requirements.txt pytest ruff httpx2
 
       - name: Run Mock OA tests
         working-directory: mock-oa
