@@ -13,11 +13,11 @@ import com.fantuan.copilot.model.action.ExpenseItem;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionHandler;
+import com.fantuan.copilot.service.action.ExpenseActionPayload;
+import com.fantuan.copilot.service.action.ExpenseActionPayloadCodec;
 import com.fantuan.copilot.service.action.ExpenseCalculationService;
 import com.fantuan.copilot.service.action.ExpensePrecheckService;
 import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +25,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
  * EXPENSE_CLAIM 业务动作 Handler（V2 §十七 ExpenseClaimActionHandler）。
@@ -33,13 +32,13 @@ import java.util.Map;
  * 业务专属逻辑：
  *  - planPending：proposal 复验 + ExpensePrecheckService（items 完整/发票一致）
  *    + ExpenseCalculationService（酒店 750/晚封顶，其它合法实报）→ payloadJson
- *  - revalidateBeforeExecute：无余额类复检，返回 null（Phase 8 增加 trip 状态验收）
+ *  - revalidateBeforeExecute：无本地余额类复检；confirm-time OA 重验证由
+ *    BusinessActionHitlCoordinator 在数据库事务外完成
  *  - execute：ExpenseExecutionGateway.submit → 创建 ExpenseClaim + ExpenseItem
  *  - buildSummary：从 action_payload_json 反序列化 ExpenseClaimSummary
  *
- * 禁止在 handler 内重新调用 MCP / Java 只读端点 / RAG —— 业务事实全部来自
- * proposal（由 Python expense_proposal_tool 基于 tool_history 的
- * ExpenseProposalContext 组装）。
+ * handler 不调用 MCP / Java 只读端点 / RAG；当前业务事实由
+ * ExpenseConfirmRevalidationService 在确认前从 Enterprise OA 重新取得。
  */
 @Component
 public class ExpenseClaimActionHandler implements BusinessActionHandler {
@@ -50,14 +49,16 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
     private final ExpenseExecutionGateway expenseGateway;
     private final ExpensePrecheckService precheck;
     private final ExpenseCalculationService calculation;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ExpenseActionPayloadCodec payloadCodec;
 
     public ExpenseClaimActionHandler(ExpenseExecutionGateway expenseGateway,
                                      ExpensePrecheckService precheck,
-                                     ExpenseCalculationService calculation) {
+                                     ExpenseCalculationService calculation,
+                                     ExpenseActionPayloadCodec payloadCodec) {
         this.expenseGateway = expenseGateway;
         this.precheck = precheck;
         this.calculation = calculation;
+        this.payloadCodec = payloadCodec;
     }
 
     @Override
@@ -133,13 +134,14 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
 
     @Override
     public String revalidateBeforeExecute(PendingAction action) {
-        // EXPENSE_CLAIM 无余额类复检；Phase 8 增加 trip 状态 / 发票仍有效的验收。
+        // External OA revalidation must stay outside BusinessActionService's
+        // transaction; the coordinator performs it before confirm().
         return null;
     }
 
     @Override
     public ExecutionExecutionResult execute(PendingAction action, Instant now) {
-        ExpensePayload payload = parseExpensePayload(action.actionPayloadJson());
+        ExpenseActionPayload payload = payloadCodec.decode(action.actionPayloadJson());
         ExpenseExecutionResult execution = expenseGateway.submit(new ExpenseSubmission(
                 action.actionId(), action.employeeId(),
                 payload.tripId(), payload.costCenter(),
@@ -150,7 +152,7 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
 
     @Override
     public PendingActionView buildSummary(PendingAction action, String plaintextNonce) {
-        ExpensePayload payload = parseExpensePayload(action.actionPayloadJson());
+        ExpenseActionPayload payload = payloadCodec.decode(action.actionPayloadJson());
         return new PendingActionView(
                 action.actionId(), action.actionType(), action.status(), TITLE,
                 new ExpenseClaimSummary(
@@ -175,59 +177,7 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
                                            BigDecimal claimedAmount, BigDecimal reimbursableAmount,
                                            String costCenter, String reason,
                                            List<String> invoiceIds) {
-        try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "tripId", tripId,
-                    "claimedAmount", claimedAmount,
-                    "reimbursableAmount", reimbursableAmount,
-                    "costCenter", costCenter,
-                    "reason", reason,
-                    "invoiceIds", invoiceIds,
-                    "items", items.stream().map(it -> Map.of(
-                            "invoiceId", it.invoiceId(),
-                            "category", it.category(),
-                            "amount", it.amount(),
-                            "description", it.description() == null ? "" : it.description()
-                    )).toList(),
-                    "schemaVersion", 1));
-        } catch (Exception e) {
-            throw new IllegalStateException("expense payload 序列化失败", e);
-        }
-    }
-
-    private ExpensePayload parseExpensePayload(String payloadJson) {
-        try {
-            Map<String, Object> raw = objectMapper.readValue(payloadJson,
-                    new TypeReference<Map<String, Object>>() {
-                    });
-            List<Map<String, Object>> rawItems =
-                    (List<Map<String, Object>>) raw.getOrDefault("items", List.of());
-            List<ExpenseItem> items = rawItems.stream().map(m -> new ExpenseItem(
-                    (String) m.get("invoiceId"),
-                    (String) m.get("category"),
-                    new BigDecimal(m.get("amount").toString()),
-                    (String) m.getOrDefault("description", ""))).toList();
-            List<String> invoiceIds = ((List<?>) raw.getOrDefault("invoiceIds", List.of()))
-                    .stream().map(String::valueOf).toList();
-            return new ExpensePayload(
-                    (String) raw.get("tripId"),
-                    (String) raw.get("costCenter"),
-                    new BigDecimal(raw.get("claimedAmount").toString()),
-                    new BigDecimal(raw.get("reimbursableAmount").toString()),
-                    (String) raw.get("reason"),
-                    items, invoiceIds);
-        } catch (Exception e) {
-            throw new IllegalStateException("expense payload 解析失败", e);
-        }
-    }
-
-    private record ExpensePayload(
-            String tripId,
-            String costCenter,
-            BigDecimal claimedAmount,
-            BigDecimal reimbursableAmount,
-            String reason,
-            List<ExpenseItem> items,
-            List<String> invoiceIds) {
+        return payloadCodec.encode(tripId, items, claimedAmount, reimbursableAmount,
+                costCenter, reason, invoiceIds);
     }
 }

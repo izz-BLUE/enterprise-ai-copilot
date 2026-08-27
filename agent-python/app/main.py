@@ -2,6 +2,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager, nullcontext
 from datetime import date
+from decimal import Decimal
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -32,6 +33,7 @@ from app.core.observability import (
     shutdown_observability,
     trace_ai_request,
 )
+from app.integrations.mcp.enterprise_oa_client import get_enterprise_oa_client
 from app.memory.memory_llm_adapter import MemoryLLMAdapter
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
@@ -52,6 +54,12 @@ from app.schemas.chat_schema import (
     AgentResponse,
     ChatRequest,
     ChatResponse,
+)
+from app.schemas.expense_revalidation_schema import (
+    ExpenseRevalidationInvoiceFact,
+    ExpenseRevalidationRequest,
+    ExpenseRevalidationResponse,
+    ExpenseRevalidationTripFact,
 )
 from app.schemas.external_wait_schema import ExternalResumePayload
 from app.schemas.hitl_schema import HitlResumePayload
@@ -84,6 +92,11 @@ _BOUNDED_AI_PATHS = {
 
 # 配置在 import 时 fail-closed 校验；模式不在白名单时服务不应静默运行。
 _memory_execution_policy = make_execution_policy(MEMORY_WRITE_MODE)
+
+_OA_REVALIDATION_BUSINESS_CODES = {
+    'OA_MCP_INVOICE_NOT_FOUND',
+    'OA_MCP_INVOICE_OWNERSHIP',
+}
 
 
 class _ResponseMemoryWriter:
@@ -275,6 +288,104 @@ def _memory_context_to_dict(memory_context) -> dict | None:
     if not data:
         return None
     return data
+
+
+def _revalidation_unavailable(trace_id: str) -> JSONResponse:
+    """Keep transport failure retryable and hide MCP details from Java callers."""
+    return JSONResponse(
+        status_code=503,
+        content=ExpenseRevalidationResponse(
+            success=False,
+            error_code='EXPENSE_REVALIDATION_UNAVAILABLE',
+            message='Enterprise OA 当前不可用，请稍后重试。',
+        ).model_dump(mode='json'),
+        headers={'X-Trace-Id': trace_id, 'Retry-After': '1'},
+    )
+
+
+def _mcp_error_code(payload: dict) -> str:
+    return str(payload.get('error_code') or 'OA_MCP_TOOL_ERROR')
+
+
+def _trip_fact(raw: object) -> ExpenseRevalidationTripFact:
+    if not isinstance(raw, dict):
+        return ExpenseRevalidationTripFact()
+    return ExpenseRevalidationTripFact(
+        trip_id=raw.get('trip_id') if isinstance(raw.get('trip_id'), str) else None,
+        employee_id=raw.get('employee_id') if isinstance(raw.get('employee_id'), str) else None,
+        start_date=raw.get('start_date') if isinstance(raw.get('start_date'), str) else None,
+        end_date=raw.get('end_date') if isinstance(raw.get('end_date'), str) else None,
+        status=raw.get('status') if isinstance(raw.get('status'), str) else None,
+    )
+
+
+def _invoice_fact(raw: object) -> ExpenseRevalidationInvoiceFact:
+    if not isinstance(raw, dict):
+        return ExpenseRevalidationInvoiceFact()
+    return ExpenseRevalidationInvoiceFact(
+        invoice_id=raw.get('invoice_id') if isinstance(raw.get('invoice_id'), str) else None,
+        valid=raw.get('valid') if isinstance(raw.get('valid'), bool) else None,
+        duplicate=raw.get('duplicate') if isinstance(raw.get('duplicate'), bool) else None,
+        amount=(Decimal(str(raw.get('amount')))
+                if isinstance(raw.get('amount'), (int, float, Decimal))
+                and not isinstance(raw.get('amount'), bool) else None),
+        category=raw.get('category') if isinstance(raw.get('category'), str) else None,
+        ownership_accepted=True if raw.get('success') is True else None,
+        error_code=_mcp_error_code(raw) if raw.get('success') is not True else None,
+    )
+
+
+@app.post('/agent/internal/expense/revalidate', response_model=ExpenseRevalidationResponse)
+def expense_revalidate(
+    request: ExpenseRevalidationRequest,
+    req: Request,
+) -> ExpenseRevalidationResponse | JSONResponse:
+    """Transport current OA facts for Java's confirm-time decision only.
+
+    This endpoint deliberately bypasses Planner, LLM, LangGraph, Memory and
+    Checkpoint.  Expected invoice business errors remain facts for Java to
+    classify as stale; transport/protocol failures remain retryable 503s.
+    """
+    trace_id = req.state.trace_id
+    client = get_enterprise_oa_client()
+    try:
+        trip_result = client.travel_record_get(
+            employee_id=request.employee_id,
+            limit=20,
+        )
+        if not isinstance(trip_result, dict) or trip_result.get('success') is not True:
+            return _revalidation_unavailable(trace_id)
+        trip_items = trip_result.get('items')
+        if not isinstance(trip_items, list):
+            return _revalidation_unavailable(trace_id)
+        matching_trip = next(
+            (item for item in trip_items
+             if isinstance(item, dict) and item.get('trip_id') == request.trip_id),
+            None,
+        )
+
+        invoice_facts: list[ExpenseRevalidationInvoiceFact] = []
+        for invoice_id in request.invoice_ids:
+            invoice_result = client.invoice_verify(
+                invoice_id=invoice_id,
+                employee_id=request.employee_id,
+            )
+            if not isinstance(invoice_result, dict):
+                return _revalidation_unavailable(trace_id)
+            if invoice_result.get('success') is not True:
+                code = _mcp_error_code(invoice_result)
+                if code not in _OA_REVALIDATION_BUSINESS_CODES:
+                    return _revalidation_unavailable(trace_id)
+            invoice_facts.append(_invoice_fact(invoice_result))
+    except Exception:
+        logger.exception('[%s] Enterprise OA confirm-time revalidation failed', trace_id)
+        return _revalidation_unavailable(trace_id)
+
+    return ExpenseRevalidationResponse(
+        success=True,
+        trip=_trip_fact(matching_trip) if matching_trip is not None else None,
+        invoices=invoice_facts,
+    )
 
 
 @app.post('/agent/chat', response_model=ChatResponse)

@@ -301,6 +301,36 @@ public class BusinessActionService {
                 action.originTraceId(), traceId);
     }
 
+    /**
+     * Finalize a deterministic stale expense confirmation after the external
+     * check completed outside a transaction.  The short transaction rechecks
+     * all local authority and never overwrites another terminal state.
+     */
+    @Transactional(noRollbackFor = ActionStaleException.class)
+    public void failStaleConfirmation(String actionId, String confirmationNonce,
+                                      String presentedToken, String traceId,
+                                      DemoIdentity identity, String failureCode) {
+        requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
+        if (!isStaleFailureCode(failureCode)) {
+            throw new IllegalArgumentException("Unsupported stale failure code");
+        }
+        PendingAction action = findForUpdate(actionId);
+        verifyOwner(action, identity);
+        Instant now = clock.instant();
+        expireIfNeeded(action, now);
+        verifyNonce(action, confirmationNonce);
+        if (action.status() != ActionStatus.PENDING_CONFIRMATION) {
+            throw error(HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT",
+                    "当前状态不能拒绝确认。", action);
+        }
+        actions.markFailed(action.actionId(), failureCode, now);
+        audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.FAILED,
+                failureCode, null, now);
+        closeMemory(action, TaskStatus.ABANDONED);
+        throw new ActionStaleException(action.actionId());
+    }
+
     @Transactional(noRollbackFor = ActionExpiredAfterUpdateException.class)
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
                                           String presentedToken, String traceId,
@@ -399,6 +429,13 @@ public class BusinessActionService {
     private static boolean isTerminal(ActionStatus status) {
         return status == ActionStatus.SUCCEEDED || status == ActionStatus.CANCELLED
                 || status == ActionStatus.EXPIRED || status == ActionStatus.FAILED;
+    }
+
+    private static boolean isStaleFailureCode(String failureCode) {
+        return switch (failureCode) {
+            case "EXPENSE_TRIP_STALE", "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE" -> true;
+            default -> false;
+        };
     }
 
     private void verifyHitlCorrelation(PendingAction existing,

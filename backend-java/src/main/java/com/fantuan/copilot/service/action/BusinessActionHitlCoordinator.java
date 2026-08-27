@@ -9,11 +9,13 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
+import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -43,14 +45,17 @@ public class BusinessActionHitlCoordinator {
     private final AgentRuntimeThreadExecutionGuard threadGuard;
     private final AdminAccessService adminAccessService;
     private final ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
+    private final ExpenseConfirmRevalidationService expenseRevalidation;
 
+    @Autowired
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
                                          PendingActionRepository actions,
                                          PythonAgentGateway pythonAgentGateway,
                                          AgentRuntimeThreadIdService threadIdService,
                                          AgentRuntimeThreadExecutionGuard threadGuard,
                                          AdminAccessService adminAccessService,
-                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
+                                         ExpenseConfirmRevalidationService expenseRevalidation) {
         this.actionService = actionService;
         this.actions = actions;
         this.pythonAgentGateway = pythonAgentGateway;
@@ -58,6 +63,19 @@ public class BusinessActionHitlCoordinator {
         this.threadGuard = threadGuard;
         this.adminAccessService = adminAccessService;
         this.externalApprovalCoordinator = externalApprovalCoordinator;
+        this.expenseRevalidation = expenseRevalidation;
+    }
+
+    /** Compatibility constructor for focused tests that do not exercise expense revalidation. */
+    public BusinessActionHitlCoordinator(BusinessActionService actionService,
+                                         PendingActionRepository actions,
+                                         PythonAgentGateway pythonAgentGateway,
+                                         AgentRuntimeThreadIdService threadIdService,
+                                         AgentRuntimeThreadExecutionGuard threadGuard,
+                                         AdminAccessService adminAccessService,
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
+        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null);
     }
 
     /** Register the wait after Python has durably checkpointed the interrupt. */
@@ -106,6 +124,12 @@ public class BusinessActionHitlCoordinator {
         boolean guardReleased = false;
         try {
             try {
+                // The pre-guard row only identifies the runtime thread.  The
+                // status used for all confirmation decisions must be refreshed
+                // after this thread owns the guard.
+                routing = refreshRouting(actionId, identity);
+                revalidateExpenseOutsideTransaction(routing, actionId, confirmationNonce,
+                        presentedToken, traceId, identity);
                 ActionExecutionResponse response = actionService.confirm(
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
                         traceId, identity.asDemoIdentity());
@@ -127,6 +151,15 @@ public class BusinessActionHitlCoordinator {
                     reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
                             HitlResumePayload.HitlDecision.EXPIRED, ActionStatus.EXPIRED,
                             EXPIRED_MESSAGE, null);
+                } else if (routing.status() == ActionStatus.FAILED
+                        && "ACTION_STATE_CONFLICT".equals(exception.errorCode())) {
+                    // A stale commit may have succeeded while the first
+                    // rejection resume was unavailable.  A repeated confirm
+                    // retries only that deterministic continuation; Java's
+                    // terminal state remains authoritative.
+                    reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
+                            HitlResumePayload.HitlDecision.REJECTED, ActionStatus.FAILED,
+                            REJECTED_MESSAGE, null);
                 }
                 throw exception;
             }
@@ -135,6 +168,38 @@ public class BusinessActionHitlCoordinator {
                 threadGuard.release(guardKey);
             }
         }
+    }
+
+    private void revalidateExpenseOutsideTransaction(PendingAction routing, String actionId,
+                                                      String confirmationNonce,
+                                                      String presentedToken, String traceId,
+                                                      VerifiedIdentity identity) {
+        if (expenseRevalidation == null
+                || routing.actionType() != BusinessActionType.EXPENSE_CLAIM
+                || routing.status() != ActionStatus.PENDING_CONFIRMATION) {
+            return;
+        }
+        String staleCode = expenseRevalidation.revalidate(routing, traceId);
+        if (staleCode != null) {
+            // The service locks and rechecks the action in a separate short
+            // transaction.  It throws ActionStaleException after committing.
+            actionService.failStaleConfirmation(actionId, confirmationNonce,
+                    presentedToken, traceId, identity.asDemoIdentity(), staleCode);
+            // Keep compatibility with mocked services: a stale result must
+            // never fall through to the normal execute path.
+            throw new ActionStaleException(actionId);
+        }
+    }
+
+    private PendingAction refreshRouting(String actionId, VerifiedIdentity identity) {
+        PendingAction action = actions.find(actionId).orElseThrow(() -> new ActionException(
+                HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", null, null));
+        if (action.ownerUserId() != null
+                && !action.ownerUserId().equals(identity.userId())) {
+            throw new ActionException(HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND",
+                    "未找到申请草稿。", null, null);
+        }
+        return action;
     }
 
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
