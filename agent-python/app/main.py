@@ -357,6 +357,9 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                             thread_id=runtime_thread_id,
                             question=request.message,
                             business_date=business_date,
+                            employee_id=employee_id,
+                            allow_eval=allow_eval,
+                            allow_business_actions=allow_business_actions,
                         )
                     except Exception:
                         logger.exception('[%s] LangGraph recovery inspection 读取失败', trace_id)

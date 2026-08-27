@@ -170,6 +170,9 @@ class CheckpointRuntime:
         thread_id: str,
         question: str,
         business_date: date | None,
+        employee_id: str,
+        allow_eval: bool,
+        allow_business_actions: bool,
     ) -> RecoveryDecision:
         """Inspect only the latest head and classify automatic crash recovery."""
         snapshot = graph.get_state({'configurable': {'thread_id': thread_id}})
@@ -177,6 +180,9 @@ class CheckpointRuntime:
             snapshot,
             question=question,
             business_date=business_date,
+            employee_id=employee_id,
+            allow_eval=allow_eval,
+            allow_business_actions=allow_business_actions,
         )
 
     def build_thread_id(self, runtime_thread_id: str, use_planner: bool) -> str:

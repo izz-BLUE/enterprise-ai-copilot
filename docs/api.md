@@ -383,7 +383,7 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 }
 ```
 
-该响应覆盖 exact request 不匹配、business date 改变、旧/不兼容 marker、interrupt、未知或多个 pending node，以及非 replay-safe Tool。普通 Provider/Tool handled error 仍按原有 Agent error / 502 语义处理；完成的 Checkpoint 下一次相同请求仍 Fresh。
+该响应覆盖 exact request 不匹配、business date 改变、employee scope 改变、旧/不兼容 marker、interrupt、未知或多个 pending node、非 replay-safe Tool，以及当前权限已撤销但 Checkpoint 已物化对应 eval 或 business proposal 结果的情况。普通 Provider/Tool handled error 仍按原有 Agent error / 502 语义处理；完成的 Checkpoint 下一次相同请求仍 Fresh。
 
 **适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
 

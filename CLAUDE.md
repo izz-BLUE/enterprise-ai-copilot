@@ -96,7 +96,7 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 - Java 仅用已认证 `VerifiedIdentity.userId()` 和已解析 `conversationId` 计算稳定 `X-Agent-Thread-Id`；客户端 header 不可信。
 - Python `LANGGRAPH_CHECKPOINT_MODE=POSTGRES` 时在 FastAPI 启动阶段创建 Pool、执行 `PostgresSaver.setup()`、编译两套持久化图；任一步失败即启动失败，不降级。
 - Planner 与 legacy 分别使用 `:planner-v1` / `:deterministic-v1` 后缀；每个节点 `durability="sync"` 写入。Planner-first fresh execution 保存 strict recovery marker；同一 thread 的 exact same unfinished request 通过 latest `snapshot.next`、marker/date/pending-node/replay-safe 校验后使用 `graph.invoke(None)` 恢复，并重新注入当前 Runtime Context。completed execution 和 legacy deterministic graph 永远 Fresh；interrupt、冲突、不兼容 marker 或 unsafe Tool fail-closed 为 409。
-- Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。`tool_history` 是当前请求历史，每次清空；`execution_history` 是最多 16 条的 `CONTEXT_ONLY` 成功步骤摘要，仅在 ACTIVE Memory 且 task type 匹配时 hydrate，不可直接复用为当前业务事实。
+- Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。`tool_history` 是当前 execution 历史，Fresh 时清空、Resume 时保留；`execution_history` 是最多 16 条的 `CONTEXT_ONLY` 成功步骤摘要，仅在 ACTIVE Memory 且 task type 匹配时 hydrate，不可直接复用为当前业务事实。Recovery marker 只保存 request/date/actor scope locator，不保存 raw employee 或权限；当前权限撤销且旧状态已有 eval 成功结果或 business proposal material 时 fail-closed。
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）

@@ -10,9 +10,16 @@ from pydantic import ValidationError
 from app.agents.tool_executor_node import is_tool_resume_safe
 from app.schemas.execution_recovery_schema import (
     ExecutionRecoveryMarker,
+    fingerprint_actor_scope,
     fingerprint_request,
 )
-from app.schemas.planner_schema import PlannerDecision, PlannerDecisionError
+from app.schemas.planner_schema import (
+    EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
+    PlannerDecision,
+    PlannerDecisionError,
+)
 
 _ALLOWED_PENDING_NODES = frozenset({
     'safety_node',
@@ -27,6 +34,8 @@ class RecoveryMode(str, Enum):
     RESUME = 'RESUME'
     CONFLICT_REQUEST = 'CONFLICT_REQUEST'
     CONFLICT_DATE = 'CONFLICT_DATE'
+    CONFLICT_ACTOR_SCOPE = 'CONFLICT_ACTOR_SCOPE'
+    CONFLICT_CAPABILITY = 'CONFLICT_CAPABILITY'
     UNSUPPORTED_INTERRUPT = 'UNSUPPORTED_INTERRUPT'
     UNSAFE_REPLAY = 'UNSAFE_REPLAY'
     INCOMPATIBLE_CHECKPOINT = 'INCOMPATIBLE_CHECKPOINT'
@@ -57,11 +66,48 @@ def _current_date_anchor(business_date: date | None) -> str | None:
     return business_date.isoformat() if business_date else None
 
 
+def _has_successful_tool(tool_history: Any, tool_names: frozenset[str]) -> bool:
+    if not isinstance(tool_history, list):
+        return False
+    return any(
+        isinstance(entry, dict)
+        and entry.get('tool_name') in tool_names
+        and entry.get('status') == 'success'
+        for entry in tool_history
+    )
+
+
+def _capability_residue_reason(
+    values: dict,
+    *,
+    allow_eval: bool,
+    allow_business_actions: bool,
+) -> str | None:
+    """Reject persisted privileged material after its current capability is revoked."""
+    tool_history = values.get('tool_history', [])
+    if not allow_eval and _has_successful_tool(tool_history, frozenset({EVAL_TOOL_NAME})):
+        return 'eval_capability_revoked'
+
+    business_action_tools = frozenset({
+        LEAVE_PROPOSAL_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+    })
+    if not allow_business_actions and (
+        _has_successful_tool(tool_history, business_action_tools)
+        or values.get('action_proposal') is not None
+    ):
+        return 'business_capability_revoked'
+    return None
+
+
 def inspect_recovery(
     snapshot: Any | None,
     *,
     question: str,
     business_date: date | None,
+    employee_id: str,
+    allow_eval: bool,
+    allow_business_actions: bool,
 ) -> RecoveryDecision:
     """Classify the latest head without mutating or scanning checkpoint history."""
     if snapshot is None:
@@ -108,6 +154,25 @@ def inspect_recovery(
         return RecoveryDecision(
             RecoveryMode.CONFLICT_DATE,
             reason='date_changed',
+            execution_id=marker.execution_id,
+        )
+
+    if marker.actor_scope_fingerprint != fingerprint_actor_scope(employee_id):
+        return RecoveryDecision(
+            RecoveryMode.CONFLICT_ACTOR_SCOPE,
+            reason='actor_scope_changed',
+            execution_id=marker.execution_id,
+        )
+
+    capability_reason = _capability_residue_reason(
+        values,
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+    )
+    if capability_reason is not None:
+        return RecoveryDecision(
+            RecoveryMode.CONFLICT_CAPABILITY,
+            reason=capability_reason,
             execution_id=marker.execution_id,
         )
 

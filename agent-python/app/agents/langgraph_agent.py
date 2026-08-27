@@ -532,7 +532,7 @@ def run_langgraph_agent(
         "stop_reason": "",
         "memory_context": memory_context,
         "execution_recovery": (
-            new_execution_recovery_marker(question, business_date)
+            new_execution_recovery_marker(question, business_date, employee_id)
             if use_planner else None
         ),
     }
