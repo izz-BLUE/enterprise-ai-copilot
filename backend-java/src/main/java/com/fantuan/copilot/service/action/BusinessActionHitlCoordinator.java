@@ -103,12 +103,13 @@ public class BusinessActionHitlCoordinator {
         PendingAction routing = resolveRouting(actionId, presentedToken, identity);
         String guardKey = guardKey(routing, identity);
         acquireOrBusy(guardKey);
+        boolean guardReleased = false;
         try {
             try {
                 ActionExecutionResponse response = actionService.confirm(
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
                         traceId, identity.asDemoIdentity());
-                reconcileAfterCommittedAction(actionId, routing, response,
+                guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
                         identity, presentedToken, traceId, guardKey);
                 return response;
             } catch (ActionExpiredAfterUpdateException exception) {
@@ -130,7 +131,9 @@ public class BusinessActionHitlCoordinator {
                 throw exception;
             }
         } finally {
-            threadGuard.release(guardKey);
+            if (!guardReleased) {
+                threadGuard.release(guardKey);
+            }
         }
     }
 
@@ -140,12 +143,13 @@ public class BusinessActionHitlCoordinator {
         PendingAction routing = resolveRouting(actionId, presentedToken, identity);
         String guardKey = guardKey(routing, identity);
         acquireOrBusy(guardKey);
+        boolean guardReleased = false;
         try {
             try {
                 ActionExecutionResponse response = actionService.cancel(
                         actionId, confirmationNonce, presentedToken, traceId,
                         identity.asDemoIdentity());
-                reconcileAfterCommittedAction(actionId, routing, response,
+                guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
                         identity, presentedToken, traceId, guardKey);
                 return response;
             } catch (ActionExpiredAfterUpdateException exception) {
@@ -162,7 +166,9 @@ public class BusinessActionHitlCoordinator {
                 throw exception;
             }
         } finally {
-            threadGuard.release(guardKey);
+            if (!guardReleased) {
+                threadGuard.release(guardKey);
+            }
         }
     }
 
@@ -208,17 +214,16 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    private void reconcileAfterCommittedAction(String actionId, PendingAction routing,
-                                               ActionExecutionResponse response,
-                                               VerifiedIdentity identity,
-                                               String presentedToken,
-                                               String traceId,
-                                               String guardKey) {
+    private boolean reconcileAfterCommittedAction(String actionId, PendingAction routing,
+                                                  ActionExecutionResponse response,
+                                                  VerifiedIdentity identity,
+                                                  String presentedToken,
+                                                  String traceId,
+                                                  String guardKey) {
         PendingAction action = actions.find(actionId).orElse(routing);
         if (response.status() == ActionStatus.SUCCEEDED) {
             if (action.actionType() == com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM) {
-                reconcileConfirmedExpense(action, response, identity, presentedToken, traceId, guardKey);
-                return;
+                return reconcileConfirmedExpense(action, response, identity, presentedToken, traceId, guardKey);
             }
             reconcileTerminal(actionId, action, identity, presentedToken, traceId,
                     HitlResumePayload.HitlDecision.CONFIRMED, ActionStatus.SUCCEEDED,
@@ -228,19 +233,21 @@ public class BusinessActionHitlCoordinator {
                     HitlResumePayload.HitlDecision.CANCELLED, ActionStatus.CANCELLED,
                     response.message(), null);
         }
+        return false;
     }
 
-    private void reconcileConfirmedExpense(PendingAction action, ActionExecutionResponse response,
-                                           VerifiedIdentity identity, String presentedToken,
-                                           String traceId, String guardKey) {
+    private boolean reconcileConfirmedExpense(PendingAction action, ActionExecutionResponse response,
+                                              VerifiedIdentity identity, String presentedToken,
+                                              String traceId, String guardKey) {
         if (action.hitlWaitId() == null || action.agentExecutionId() == null
                 || action.ownerUserId() == null || action.conversationId() == null) {
-            return;
+            return false;
         }
         HitlResumePayload payload = new HitlResumePayload(1, action.hitlWaitId(),
                 action.agentExecutionId(), HitlResumePayload.HitlDecision.CONFIRMED,
                 action.actionId(), action.actionType(), ActionStatus.SUCCEEDED,
                 response.requestId(), canonicalMessage(action, ActionStatus.SUCCEEDED, response.message()));
+        boolean guardReleased = false;
         try {
             PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity.employeeId(),
                     action.conversationId(), presentedToken, traceId, payload);
@@ -248,12 +255,14 @@ public class BusinessActionHitlCoordinator {
             // for OA.  Hand the same runtime thread boundary to the external
             // resume coordinator before it performs its own guard acquisition.
             threadGuard.release(guardKey);
+            guardReleased = true;
             externalApprovalCoordinator.registerExternalWaitAndDispatch(action, response,
                     pythonResponse.externalWait(), traceId);
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}", traceId,
                     BusinessActionService.auditRef(action.actionId()), exception.getClass().getSimpleName());
         }
+        return guardReleased;
     }
 
     private void reconcileTerminal(String actionId, PendingAction routing,
