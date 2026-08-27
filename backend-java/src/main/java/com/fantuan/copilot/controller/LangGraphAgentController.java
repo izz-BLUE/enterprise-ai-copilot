@@ -274,7 +274,11 @@ public class LangGraphAgentController {
                     "HITL wait 上下文无效。");
         }
         if (pythonResponse.actionProposal() != null) {
-            if (!allowBusinessActions) {
+            // A durable HITL wait may belong to an already-terminal Java
+            // action whose checkpoint still needs reconciliation.  Let the
+            // coordinator inspect that correlation even after capability
+            // revocation; non-HITL proposals retain the original gate.
+            if (!allowBusinessActions && pythonResponse.hitlWait() == null) {
                 eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
                         AdminLogEvent.LEVEL_WARN, started);
                 return AgentResponseFactory.actionFailure(traceId, "业务动作功能未启用或当前请求无权限。");

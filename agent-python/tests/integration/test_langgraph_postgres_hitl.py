@@ -136,7 +136,7 @@ def test_hitl_wait_survives_restart_confirm_cancel_and_completed_replay():
             business_date=date(2099, 1, 1),
             employee_id='E10001',
             allow_eval=False,
-            allow_business_actions=True,
+            allow_business_actions=False,
         )
         assert waiting.mode is RecoveryMode.WAITING_USER
         assert waiting.execution_id == marker
@@ -144,13 +144,13 @@ def test_hitl_wait_survives_restart_confirm_cancel_and_completed_replay():
         payload = _payload(wait)
         assert inspect_hitl_resume(
             graph.get_state(_config(thread_id)), payload,
-            employee_id='E10001', allow_business_actions=True,
+            employee_id='E10001', allow_business_actions=False,
         ).mode is RecoveryMode.WAITING_USER
         result = resume_hitl_langgraph_agent(
             graph=graph,
             runtime_thread_id=thread_id,
             payload=payload,
-            allow_business_actions=True,
+            allow_business_actions=False,
             business_date=date(2026, 8, 28),
             employee_id='E10001',
         )
@@ -166,7 +166,7 @@ def test_hitl_wait_survives_restart_confirm_cancel_and_completed_replay():
         graph = runtime_c.get_graph(use_planner=True)
         before_replay = graph.get_state(_config(thread_id))
         replay = inspect_hitl_resume(
-            before_replay, payload, employee_id='E10001', allow_business_actions=True,
+            before_replay, payload, employee_id='E10001', allow_business_actions=False,
         )
         assert replay.mode is RecoveryMode.HITL_COMPLETED
         assert graph.get_state(_config(thread_id)).values == before_replay.values
@@ -195,6 +195,35 @@ def test_cancel_is_authoritative_and_does_not_reenter_planner_or_tools():
         assert result['stop_reason'] == 'hitl_cancelled'
         assert result['hitl_result']['action_status'] == 'CANCELLED'
         assert graph.get_state(_config(thread_id)).next == ()
+    finally:
+        runtime.shutdown()
+
+
+def test_rejected_resume_is_durable_and_repeated_payload_is_noop():
+    thread_id = _thread_id('p3-4-rejected')
+    runtime = _runtime()
+    try:
+        wait, _ = _run_to_wait(runtime.get_graph(use_planner=True), thread_id)
+        graph = runtime.get_graph(use_planner=True)
+        payload = _payload(wait, 'REJECTED')
+        assert inspect_hitl_resume(
+            graph.get_state(_config(thread_id)), payload,
+            employee_id='E10001', allow_business_actions=False,
+        ).mode is RecoveryMode.WAITING_USER
+        result = resume_hitl_langgraph_agent(
+            graph=graph,
+            runtime_thread_id=thread_id,
+            payload=payload,
+            allow_business_actions=False,
+            employee_id='E10001',
+        )
+        assert result['stop_reason'] == 'hitl_rejected'
+        assert result['hitl_result']['action_id'] is None
+        assert graph.get_state(_config(thread_id)).next == ()
+        assert inspect_hitl_resume(
+            graph.get_state(_config(thread_id)), payload,
+            employee_id='E10001', allow_business_actions=False,
+        ).mode is RecoveryMode.HITL_COMPLETED
     finally:
         runtime.shutdown()
 
@@ -244,38 +273,40 @@ def test_crash_after_approval_is_resumed_from_finalizer_checkpoint():
         with patch('app.agents.langgraph_agent.finalize_node', side_effect=crash_once):
             crash_graph = compile_agent_loop_graph(checkpointer=runtime_a._saver)
         wait, _ = _run_to_wait(crash_graph, thread_id)
+        payload = _payload(wait, 'EXPIRED').model_copy(update={
+            'message': '该申请草稿已过期，请重新生成。',
+        })
         with pytest.raises(RuntimeError, match='simulated crash after HITL approval'):
             resume_hitl_langgraph_agent(
                 graph=crash_graph,
                 runtime_thread_id=thread_id,
-                payload=_payload(wait),
-                allow_business_actions=True,
+                payload=payload,
+                allow_business_actions=False,
                 business_date=date(2026, 8, 27),
                 employee_id='E10001',
             )
         crashed = crash_graph.get_state(_config(thread_id))
         assert crashed.next == ('finalize_node',)
-        assert crashed.values['hitl_result']['decision'] == 'CONFIRMED'
+        assert crashed.values['hitl_result']['decision'] == 'EXPIRED'
     finally:
         runtime_a.shutdown()
 
     runtime_b = _runtime()
     try:
         graph = runtime_b.get_graph(use_planner=True)
-        payload = _payload(wait)
         decision = inspect_hitl_resume(
             graph.get_state(_config(thread_id)), payload,
-            employee_id='E10001', allow_business_actions=True,
+            employee_id='E10001', allow_business_actions=False,
         )
         assert decision.mode is RecoveryMode.HITL_CONTINUATION
         result = resume_langgraph_agent(
             graph=graph,
             runtime_thread_id=thread_id,
-            allow_business_actions=True,
+            allow_business_actions=False,
             business_date=date(2026, 8, 27),
             employee_id='E10001',
         )
-        assert result['stop_reason'] == 'hitl_confirmed'
+        assert result['stop_reason'] == 'hitl_expired'
         assert result['hitl_result'] == payload.model_dump()
         assert graph.get_state(_config(thread_id)).next == ()
     finally:

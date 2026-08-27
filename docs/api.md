@@ -547,7 +547,7 @@ Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 }
 ```
 
-Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、能力与 pending node，然后用 `Command(resume=...)` 继续 `approval_node → finalize_node`；不运行 Planner、Tool 或 Memory proposal pipeline。`CANCELLED`、`EXPIRED`、`REJECTED` 分别对应 `CANCELLED`、`EXPIRED`、`FAILED`，完成的 HITL 执行重复调用为 no-op。关联不匹配、权限撤销或不安全 checkpoint 返回稳定的 recovery conflict，不改变 Checkpoint。
+Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、correlation 与合法 pending/finalize/completed 状态，然后用 `Command(resume=...)` 继续 `approval_node → finalize_node`；不运行 Planner、Tool 或 Memory proposal pipeline。`CANCELLED`、`EXPIRED`、`REJECTED` 分别对应 `CANCELLED`、`EXPIRED`、`FAILED`，完成的 HITL 执行重复调用为 no-op。对 Java 已持久化的 terminal business result，当前 `X-Allow-Business-Actions=false` 仍可完成 approval/finalize 收口；该值会继续注入 Runtime Context，防止意外重新进入 Planner/Tool。关联不匹配、actor scope 变化或不安全 checkpoint 返回稳定的 recovery conflict，不改变 Checkpoint。
 
 ---
 

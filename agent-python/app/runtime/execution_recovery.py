@@ -183,17 +183,12 @@ def inspect_recovery(
                 reason='actor_scope_changed',
                 execution_id=marker.execution_id,
             )
-        capability_reason = _capability_residue_reason(
-            values,
-            allow_eval=allow_eval,
-            allow_business_actions=allow_business_actions,
-        )
-        if capability_reason is not None:
-            return RecoveryDecision(
-                RecoveryMode.CONFLICT_CAPABILITY,
-                reason=capability_reason,
-                execution_id=marker.execution_id,
-            )
+        # A durable HITL wait is already at the approval boundary.  Returning
+        # it to Java is side-effect free; Java still decides whether a new
+        # PendingAction may be created.  In particular, a terminal Java action
+        # may need to reconcile this wait after the current capability has
+        # been revoked.  Do not apply the automatic Planner/Tool recovery
+        # capability-residue gate to this approval-only checkpoint.
         return RecoveryDecision(
             RecoveryMode.WAITING_USER,
             reason='business_action_confirmation_pending',
@@ -329,12 +324,11 @@ def inspect_hitl_resume(
             reason='actor_scope_changed',
             execution_id=marker.execution_id,
         )
-    if not allow_business_actions:
-        return RecoveryDecision(
-            RecoveryMode.CONFLICT_CAPABILITY,
-            reason='business_capability_revoked',
-            execution_id=marker.execution_id,
-        )
+    # `allow_business_actions` is intentionally not a gate here.  The payload
+    # is an authoritative terminal decision produced by Java after its own
+    # feature/admin/identity/nonce/TTL/owner/idempotency checks.  The flag is
+    # still re-injected into the Runtime Context by the caller, so any
+    # accidental Planner/Tool re-entry remains capability-gated.
     if (
         payload.wait_id != wait.wait_id
         or payload.execution_id != marker.execution_id

@@ -32,6 +32,7 @@ import java.util.Optional;
 @Service
 public class BusinessActionHitlCoordinator {
     private static final Logger log = LoggerFactory.getLogger(BusinessActionHitlCoordinator.class);
+    private static final String CANCELLED_MESSAGE = "申请草稿已取消。";
     private static final String EXPIRED_MESSAGE = "该申请草稿已过期，请重新生成。";
     private static final String REJECTED_MESSAGE = "申请未能完成，已安全拒绝。";
 
@@ -64,17 +65,35 @@ public class BusinessActionHitlCoordinator {
                                           VerifiedIdentity identity,
                                           String conversationId) {
         validateWaitAndProposal(proposal, wait);
-        PendingActionView view = actionService.createHitlPending(
-                proposal, originTraceId, presentedToken, identity.asDemoIdentity(),
-                conversationId, wait.executionId(), wait.waitId());
+        try {
+            PendingActionView view = actionService.createHitlPending(
+                    proposal, originTraceId, presentedToken, identity.asDemoIdentity(),
+                    conversationId, wait.executionId(), wait.waitId());
 
-        // A Java commit may have succeeded before the HTTP response was lost.
-        // Reconcile that terminal row without creating a second action.
-        Optional<PendingAction> terminal = actions.findByHitlWaitId(wait.waitId());
-        if (terminal != null && terminal.isPresent() && isTerminal(terminal.get().status())) {
-            tryResume(terminal.get(), identity, presentedToken, originTraceId);
+            // A Java commit may have succeeded before the HTTP response was lost.
+            // Reconcile that terminal row without creating a second action.
+            Optional<PendingAction> terminal = actions.findByHitlWaitId(wait.waitId());
+            if (terminal != null && terminal.isPresent() && isTerminal(terminal.get().status())) {
+                tryResume(terminal.get(), identity, presentedToken, originTraceId);
+            }
+            return view;
+        } catch (ActionException exception) {
+            if ("BUSINESS_RULE_VIOLATION".equals(exception.errorCode())) {
+                // No PendingAction exists on this path.  Close only Java's
+                // existing ACTIVE task memory and reject the durable wait;
+                // never manufacture a fake action row for correlation.
+                try {
+                    actionService.abandonMemoryAfterHitlRejection(
+                            identity.asDemoIdentity(), conversationId);
+                } catch (RuntimeException memoryException) {
+                    log.warn("[{}] HITL rejection Memory 收口失败 errorType={}",
+                            originTraceId, memoryException.getClass().getSimpleName());
+                }
+                tryResumeRejected(wait, identity, conversationId,
+                        presentedToken, originTraceId);
+            }
+            throw exception;
         }
-        return view;
     }
 
     public ActionExecutionResponse confirm(String actionId, String confirmationNonce,
@@ -148,7 +167,7 @@ public class BusinessActionHitlCoordinator {
 
     private void validateWaitAndProposal(BusinessActionProposal proposal, HitlWaitMarker wait) {
         if (proposal == null || wait == null || !wait.structurallyValid()
-                || proposal.actionType() != wait.actionType()) {
+                || (proposal.actionType() != null && proposal.actionType() != wait.actionType())) {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
                     "HITL wait 或业务 Proposal 无效。", null, null);
         }
@@ -226,8 +245,28 @@ public class BusinessActionHitlCoordinator {
         HitlResumePayload payload = new HitlResumePayload(
                 1, action.hitlWaitId(), action.agentExecutionId(), decision,
                 action.actionId(), action.actionType(), status, requestId,
-                boundedMessage(message));
+                canonicalMessage(action, status, message));
         tryResume(action, identity, presentedToken, traceId, payload);
+    }
+
+    private void tryResumeRejected(HitlWaitMarker wait, VerifiedIdentity identity,
+                                   String conversationId, String presentedToken,
+                                   String traceId) {
+        if (identity == null || identity.userId() == null || identity.employeeId() == null
+                || conversationId == null || conversationId.isBlank()) {
+            return;
+        }
+        HitlResumePayload payload = new HitlResumePayload(
+                1, wait.waitId(), wait.executionId(), HitlResumePayload.HitlDecision.REJECTED,
+                null, wait.actionType(), ActionStatus.FAILED, null, REJECTED_MESSAGE);
+        try {
+            postResume(identity.userId(), identity.employeeId(), conversationId,
+                    presentedToken, traceId, payload);
+        } catch (RuntimeException exception) {
+            log.warn("[{}] HITL_REJECTION_CONTINUATION_PENDING waitIdPrefix={} errorType={}",
+                    traceId, BusinessActionService.auditRef(wait.waitId()),
+                    exception.getClass().getSimpleName());
+        }
     }
 
     private void tryResume(PendingAction action, VerifiedIdentity identity,
@@ -246,31 +285,52 @@ public class BusinessActionHitlCoordinator {
         tryResume(action, identity, presentedToken, traceId,
                 new HitlResumePayload(1, action.hitlWaitId(), action.agentExecutionId(),
                         decision, action.actionId(), action.actionType(), status,
-                        action.requestId(), boundedMessage(action.executionMessage())));
+                        action.requestId(), canonicalMessage(action, status, null)));
     }
 
     private void tryResume(PendingAction action, VerifiedIdentity identity,
                            String presentedToken, String traceId,
                            HitlResumePayload payload) {
         try {
-            String runtimeThreadId = threadIdService.generate(
-                    action.ownerUserId(), action.conversationId());
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("X-Agent-Thread-Id", runtimeThreadId);
-            headers.set("X-Employee-Id", identity.employeeId());
-            headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdmin(presentedToken)));
-            headers.set("X-Allow-Business-Actions",
-                    Boolean.toString(actionService.isAllowed(presentedToken)));
-            LocalDate businessDate = actionService.businessDate();
-            headers.set("X-Business-Date", businessDate.toString());
-            headers.set("X-Conversation-Id", action.conversationId());
-            pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
-                    PythonAgentResponse.class, traceId);
+            postResume(action.ownerUserId(), identity.employeeId(), action.conversationId(),
+                    presentedToken, traceId, payload);
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(action.actionId()),
                     exception.getClass().getSimpleName());
         }
+    }
+
+    private void postResume(String ownerUserId, String employeeId, String conversationId,
+                            String presentedToken, String traceId,
+                            HitlResumePayload payload) {
+        String runtimeThreadId = threadIdService.generate(ownerUserId, conversationId);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Agent-Thread-Id", runtimeThreadId);
+        headers.set("X-Employee-Id", employeeId);
+        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdmin(presentedToken)));
+        headers.set("X-Allow-Business-Actions",
+                Boolean.toString(actionService.isAllowed(presentedToken)));
+        LocalDate businessDate = actionService.businessDate();
+        headers.set("X-Business-Date", businessDate.toString());
+        headers.set("X-Conversation-Id", conversationId);
+        pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
+                PythonAgentResponse.class, traceId);
+    }
+
+    private static String canonicalMessage(PendingAction action, ActionStatus status,
+                                           String fallback) {
+        return switch (status) {
+            case SUCCEEDED -> boundedMessage(firstNonBlank(action.executionMessage(), fallback));
+            case CANCELLED -> boundedMessage(firstNonBlank(action.executionMessage(), CANCELLED_MESSAGE));
+            case EXPIRED -> EXPIRED_MESSAGE;
+            case FAILED -> REJECTED_MESSAGE;
+            default -> boundedMessage(fallback);
+        };
+    }
+
+    private static String firstNonBlank(String preferred, String fallback) {
+        return preferred == null || preferred.isBlank() ? fallback : preferred;
     }
 
     private static boolean isTerminal(ActionStatus status) {

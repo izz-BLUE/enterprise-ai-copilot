@@ -314,7 +314,7 @@ def test_hitl_resume_endpoint_uses_authoritative_command_and_skips_memory(monkey
             _request({
                 'X-Agent-Thread-Id': 'rt_' + ('h' * 64),
                 'X-Employee-Id': 'E10001',
-                'X-Allow-Business-Actions': 'true',
+                'X-Allow-Business-Actions': 'false',
                 'X-Business-Date': '2026-08-27',
             }),
         )
@@ -323,6 +323,7 @@ def test_hitl_resume_endpoint_uses_authoritative_command_and_skips_memory(monkey
     assert response.hitl_wait is not None
     resume.assert_called_once()
     assert resume.call_args.kwargs['payload'] == payload
+    assert resume.call_args.kwargs['allow_business_actions'] is False
     legacy.assert_not_called()
     memory.assert_not_called()
     runtime.release_thread.assert_called_once()

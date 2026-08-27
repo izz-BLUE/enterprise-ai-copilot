@@ -121,6 +121,19 @@ public class BusinessActionService {
         requireIdentity(identity);
     }
 
+    /**
+     * Close the Java-owned task memory when a durable HITL Proposal is
+     * deterministically rejected before a PendingAction can be created.
+     * This is intentionally package-private: Python never controls this
+     * lifecycle transition.
+     */
+    void abandonMemoryAfterHitlRejection(DemoIdentity identity, String conversationId) {
+        if (identity == null || identity.userId() == null || conversationId == null) {
+            return;
+        }
+        memoryService.abandon(identity.userId(), conversationId);
+    }
+
     private PendingActionView createPendingInternal(BusinessActionProposal proposal,
                                                      String originTraceId,
                                                      String presentedToken,
@@ -132,8 +145,6 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
                     "缺少 action_proposal。", null, null);
         }
-        requireEnabledAndAdmin(presentedToken);
-        requireIdentity(identity);
         if (hitlWaitId != null && (hitlWaitId.isBlank()
                 || agentExecutionId == null || agentExecutionId.isBlank())) {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
@@ -144,6 +155,8 @@ public class BusinessActionService {
         // 未知非空类型属于协议层错误（INVALID_REQUEST）。
         BusinessActionType actionType = proposal.actionType();
         if (actionType == null) {
+            requireEnabledAndAdmin(presentedToken);
+            requireIdentity(identity);
             throw new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "BUSINESS_RULE_VIOLATION", "action_type 缺失，请检查申请参数。", null, null);
         }
@@ -151,13 +164,23 @@ public class BusinessActionService {
                 .orElseThrow(() -> new ActionException(HttpStatus.BAD_REQUEST,
                         "INVALID_REQUEST",
                         "暂不支持的 action subtype: " + actionType, null, null));
-        actions.lockControl();
         if (hitlWaitId != null) {
+            // Terminal HITL rows only need trusted identity/correlation for
+            // checkpoint reconciliation.  Business capability is checked
+            // below for every new or still-actionable row.
+            requireIdentity(identity);
+            actions.lockControl();
             Optional<PendingAction> existingResult = actions.findByHitlWaitIdForUpdate(hitlWaitId);
             PendingAction existing = existingResult == null ? null : existingResult.orElse(null);
             if (existing != null) {
                 verifyHitlCorrelation(existing, proposal.actionType(), identity,
                         conversationId, agentExecutionId, hitlWaitId);
+                if (isTerminal(existing.status())) {
+                    // A Java terminal result must be able to finish the
+                    // approval checkpoint after capability revocation.
+                    return handler.buildSummary(existing, null);
+                }
+                requireEnabledAndAdmin(presentedToken);
                 if (existing.status() == ActionStatus.PENDING_CONFIRMATION) {
                     ActionNonceService.Nonce nonce = nonceService.create();
                     actions.updateConfirmationNonceDigest(
@@ -168,10 +191,12 @@ public class BusinessActionService {
                     throw error(HttpStatus.CONFLICT, "ACTION_IN_PROGRESS",
                             "申请正在处理中。", existing);
                 }
-                // Terminal rows are returned for reconciliation; no new action
-                // or nonce is created for a previously committed wait.
-                return handler.buildSummary(existing, null);
             }
+        }
+        requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
+        if (hitlWaitId == null) {
+            actions.lockControl();
         }
         Instant now = clock.instant();
         BusinessActionHandler.PendingPlan plan =
@@ -369,6 +394,11 @@ public class BusinessActionService {
             return Optional.empty();
         }
         return actions.findByHitlWaitId(hitlWaitId);
+    }
+
+    private static boolean isTerminal(ActionStatus status) {
+        return status == ActionStatus.SUCCEEDED || status == ActionStatus.CANCELLED
+                || status == ActionStatus.EXPIRED || status == ActionStatus.FAILED;
     }
 
     private void verifyHitlCorrelation(PendingAction existing,

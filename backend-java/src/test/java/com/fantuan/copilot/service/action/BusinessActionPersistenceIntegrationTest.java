@@ -71,6 +71,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
         jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'DEMO-001'");
+        properties.setEnabled(true);
+        properties.setRequireAdmin(false);
         properties.setMaxPending(100);
     }
 
@@ -128,6 +130,51 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
                 () -> actionService.confirm(first.actionId(), first.confirmationNonce(),
                         UUID.randomUUID().toString(), null, "old-nonce", USER_A));
         assertEquals("INVALID_CONFIRMATION_NONCE", staleNonce.errorCode());
+    }
+
+    @Test
+    void terminalHitlRegistrationReconcilesAfterCapabilityRevocationWithoutNonce() {
+        String executionId = "ex_" + "c".repeat(32);
+        String waitId = "wait_" + "d".repeat(64);
+        AnnualLeaveActionProposal proposal = proposal(nextWeekday(2));
+
+        PendingActionView first = actionService.createHitlPending(
+                proposal, "hitl-terminal", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "ANNUAL_LEAVE_REQUEST",
+                TaskStatus.ACTIVE, "{}", "HITL approval in progress");
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "hitl-confirm", USER_A);
+
+        properties.setEnabled(false);
+        PendingActionView replay = actionService.createHitlPending(
+                proposal, "hitl-terminal-retry", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+
+        assertEquals(ActionStatus.SUCCEEDED, replay.status());
+        assertNull(replay.confirmationNonce());
+        assertFalse(replay.confirmationRequired());
+        assertEquals(1, requests.countBySourceActionId(first.actionId()));
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void pendingHitlConfirmStillRequiresCurrentBusinessCapability() {
+        PendingActionView pending = actionService.createHitlPending(
+                proposal(nextWeekday(2)), "hitl-pending-capability", null, USER_A,
+                CONV_LIFECYCLE, "ex_" + "e".repeat(32), "wait_" + "f".repeat(64));
+        properties.setEnabled(false);
+
+        ActionException exception = assertThrows(ActionException.class, () -> actionService.confirm(
+                pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "revoked-confirm", USER_A));
+
+        assertEquals("BUSINESS_ACTIONS_DISABLED", exception.errorCode());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(0, requests.countBySourceActionId(pending.actionId()));
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
     }
 
     @Test

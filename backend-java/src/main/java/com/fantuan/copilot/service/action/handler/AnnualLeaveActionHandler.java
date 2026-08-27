@@ -116,7 +116,9 @@ public class AnnualLeaveActionHandler implements BusinessActionHandler {
                         action.displayName(), action.startDate(), action.endDate(),
                         action.halfDay(), action.days(), action.reason(),
                         action.balanceBefore(), action.balanceAfter()),
-                plaintextNonce, action.expiresAt(), true);
+                plaintextNonce, action.expiresAt(),
+                action.status() == com.fantuan.copilot.model.action.ActionStatus.PENDING_CONFIRMATION
+                        && plaintextNonce != null);
     }
 
     private static ActionException rule(String message) {
