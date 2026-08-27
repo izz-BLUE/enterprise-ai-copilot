@@ -21,7 +21,7 @@ public class AgentRuntimeThreadExecutionGuard {
                 "runtimeThreadId 不能为空"));
     }
 
-    /** 释放 thread；重复释放是安全的。 */
+    /** 释放 thread；调用方不得在其他生命周期重新占用后再次释放同一 key。 */
     public void release(String runtimeThreadId) {
         if (runtimeThreadId != null) {
             activeThreadIds.remove(runtimeThreadId);

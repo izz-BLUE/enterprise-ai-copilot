@@ -9,6 +9,7 @@ import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -20,13 +21,24 @@ public class ExpenseExternalApprovalStatusSyncService {
     private final ExpenseClaimRepository claims;
     private final ExpenseApprovalGateway approvalGateway;
     private final TransactionOperations transactions;
+    private final ExpenseExternalResumeCoordinator resumeCoordinator;
 
+    @Autowired
     public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
                                                     ExpenseApprovalGateway approvalGateway,
-                                                    TransactionOperations transactions) {
+                                                    TransactionOperations transactions,
+                                                    ExpenseExternalResumeCoordinator resumeCoordinator) {
         this.claims = claims;
         this.approvalGateway = approvalGateway;
         this.transactions = transactions;
+        this.resumeCoordinator = resumeCoordinator;
+    }
+
+    /** Compatibility constructor for focused status-sync unit tests without B3 wiring. */
+    public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
+                                                    ExpenseApprovalGateway approvalGateway,
+                                                    TransactionOperations transactions) {
+        this(claims, approvalGateway, transactions, null);
     }
 
     public void sync(String externalRequestId) {
@@ -60,5 +72,10 @@ public class ExpenseExternalApprovalStatusSyncService {
                 ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED;
         transactions.executeWithoutResult(ignored ->
                 claims.applyExternalApprovalStatus(externalRequestId, terminal));
+        if (resumeCoordinator != null) {
+            // The terminal ExpenseClaim transaction has committed before this
+            // best-effort Python continuation starts.
+            resumeCoordinator.tryResume(claim.expenseId());
+        }
     }
 }

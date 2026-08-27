@@ -332,6 +332,75 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     }
 
     @Test
+    void v11ResumeMarkersAreNullableAndPersistedWithoutChangingTerminalStatus() {
+        String expenseId = createWaitingApprovalClaim("resume-markers");
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-markers", ExpenseStatus.APPROVED);
+        ExpenseClaim terminal = expenseClaims.findByExpenseId(expenseId).orElseThrow();
+
+        assertNull(terminal.externalResumeLastAttemptAt());
+        assertNull(terminal.externalResumeCompletedAt());
+
+        Instant attemptedAt = Instant.parse("2026-08-28T00:00:00Z");
+        assertTrue(expenseClaims.tryMarkExternalResumeAttempt(
+                expenseId, attemptedAt.minusSeconds(60), attemptedAt));
+        assertEquals(attemptedAt,
+                expenseClaims.findByExpenseId(expenseId).orElseThrow().externalResumeLastAttemptAt());
+
+        expenseClaims.markExternalResumeCompleted(expenseId, attemptedAt.plusSeconds(1));
+        expenseClaims.markExternalResumeCompleted(expenseId, attemptedAt.plusSeconds(2));
+        ExpenseClaim completed = expenseClaims.findByExpenseId(expenseId).orElseThrow();
+        assertEquals(attemptedAt.plusSeconds(1), completed.externalResumeCompletedAt());
+        assertEquals(ExpenseStatus.APPROVED, completed.status());
+    }
+
+    @Test
+    void resumeCandidatesAreTerminalFilteredAndFairlyOrdered() {
+        Instant now = Instant.parse("2026-08-28T00:00:00Z");
+        String neverAttempted = createWaitingApprovalClaim("resume-never");
+        String oldAttempted = createWaitingApprovalClaim("resume-old");
+        String recentAttempted = createWaitingApprovalClaim("resume-recent");
+        String pending = createWaitingApprovalClaim("resume-pending");
+        String completed = createWaitingApprovalClaim("resume-completed");
+
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-never", ExpenseStatus.APPROVED);
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-old", ExpenseStatus.REJECTED);
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-recent", ExpenseStatus.APPROVED);
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-completed", ExpenseStatus.APPROVED);
+        setExternalResumeLastAttempt(oldAttempted, now.minusSeconds(120));
+        setExternalResumeLastAttempt(recentAttempted, now.minusSeconds(10));
+        expenseClaims.markExternalResumeCompleted(completed, now);
+
+        List<ExpenseClaim> candidates = expenseClaims.findExternalResumeCandidates(
+                now.minusSeconds(60), 100);
+
+        assertEquals(List.of(neverAttempted, oldAttempted),
+                candidates.stream().map(ExpenseClaim::expenseId).toList());
+        assertTrue(candidates.stream().allMatch(claim ->
+                claim.status() == ExpenseStatus.APPROVED || claim.status() == ExpenseStatus.REJECTED));
+        assertFalse(candidates.stream().anyMatch(claim -> claim.expenseId().equals(pending)));
+    }
+
+    @Test
+    void resumeAttemptCasIsDueBoundedAndStopsAfterCompletion() {
+        String expenseId = createWaitingApprovalClaim("resume-cas");
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-resume-cas", ExpenseStatus.REJECTED);
+        Instant attemptedAt = Instant.parse("2026-08-28T00:00:00Z");
+
+        assertTrue(expenseClaims.tryMarkExternalResumeAttempt(
+                expenseId, attemptedAt.minusSeconds(60), attemptedAt));
+        assertFalse(expenseClaims.tryMarkExternalResumeAttempt(
+                expenseId, attemptedAt.minusSeconds(60), attemptedAt.plusSeconds(1)));
+        assertTrue(expenseClaims.tryMarkExternalResumeAttempt(
+                expenseId, attemptedAt.plusSeconds(1), attemptedAt.plusSeconds(61)));
+
+        expenseClaims.markExternalResumeCompleted(expenseId, attemptedAt.plusSeconds(62));
+        assertFalse(expenseClaims.tryMarkExternalResumeAttempt(
+                expenseId, attemptedAt.plusSeconds(61), attemptedAt.plusSeconds(120)));
+        assertEquals(ExpenseStatus.REJECTED,
+                expenseClaims.findByExpenseId(expenseId).orElseThrow().status());
+    }
+
+    @Test
     void concurrentConfirmCreatesOnlyOneExpenseClaim() throws Exception {
         PendingActionView view = actionService.createPending(
                 proposal(), "origin-exp-conc", null, USER_A, null);
@@ -399,5 +468,10 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     private void setExternalLastChecked(String expenseId, Instant checkedAt) {
         jdbc.update("UPDATE expense_claim SET external_last_checked_at = ? WHERE expense_id = ?",
                 java.sql.Timestamp.from(checkedAt), expenseId);
+    }
+
+    private void setExternalResumeLastAttempt(String expenseId, Instant attemptedAt) {
+        jdbc.update("UPDATE expense_claim SET external_resume_last_attempt_at = ? WHERE expense_id = ?",
+                java.sql.Timestamp.from(attemptedAt), expenseId);
     }
 }

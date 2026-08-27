@@ -182,6 +182,53 @@ class BusinessActionHitlCoordinatorTest {
     }
 
     @Test
+    void externalHandoffPreservesInterveningOwnerAfterConfirmReturns() {
+        AgentRuntimeThreadExecutionGuard realGuard = new AgentRuntimeThreadExecutionGuard();
+        coordinator = new BusinessActionHitlCoordinator(
+                actionService, actions, pythonAgentGateway, threadIdService,
+                realGuard, adminAccessService, externalApprovalCoordinator);
+        when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
+                .thenReturn(RUNTIME_THREAD_ID);
+        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        PendingAction expense = org.mockito.Mockito.mock(PendingAction.class);
+        when(expense.actionId()).thenReturn(ACTION_ID);
+        when(expense.actionType()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(expense.ownerUserId()).thenReturn(IDENTITY.userId());
+        when(expense.conversationId()).thenReturn(CONVERSATION_ID);
+        when(expense.agentExecutionId()).thenReturn("ex_" + "b".repeat(32));
+        when(expense.hitlWaitId()).thenReturn("wait_" + "a".repeat(64));
+        ActionExecutionResponse committed = new ActionExecutionResponse(
+                ACTION_ID, BusinessActionType.EXPENSE_CLAIM, ActionStatus.SUCCEEDED,
+                "EXP-20260827-000001", "已提交。", false, Instant.now(), "origin", "trace");
+        ExternalWaitMarker externalWait = new ExternalWaitMarker(1, "EXPENSE_APPROVAL",
+                ExternalWaitMarker.expectedWaitId("ex_" + "b".repeat(32), "EXP-20260827-000001"),
+                "ex_" + "b".repeat(32), BusinessActionType.EXPENSE_CLAIM, "EXP-20260827-000001");
+        when(actions.find(ACTION_ID)).thenReturn(Optional.of(expense));
+        when(actionService.confirm(anyString(), anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(committed);
+        doReturn(new PythonAgentResponse("waiting", "action", true, "business_action", "", List.of(),
+                true, "resume-trace", null, List.of(), null, null, externalWait))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            // T1 has handed off the guard; T2 must be able to own it now.
+            assertTrue(realGuard.tryAcquire(RUNTIME_THREAD_ID));
+            return null;
+        }).when(externalApprovalCoordinator).registerExternalWaitAndDispatch(
+                eq(expense), eq(committed), eq(externalWait), eq("trace"));
+
+        coordinator.confirm(ACTION_ID, "nonce", "idem", ADMIN_TOKEN, "trace", IDENTITY);
+
+        // T1's finally must not remove T2's ownership.
+        assertFalse(realGuard.tryAcquire(RUNTIME_THREAD_ID));
+        realGuard.release(RUNTIME_THREAD_ID);
+        assertTrue(realGuard.tryAcquire(RUNTIME_THREAD_ID));
+        realGuard.release(RUNTIME_THREAD_ID);
+    }
+
+    @Test
     void terminalReconciliationStillRunsAfterBusinessCapabilityRevocation() {
         stubResumeDependencies(false);
         PendingAction pending = pendingAction();

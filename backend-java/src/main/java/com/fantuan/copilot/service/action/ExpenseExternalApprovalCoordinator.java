@@ -11,6 +11,7 @@ import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,13 +31,24 @@ public class ExpenseExternalApprovalCoordinator {
     private final ExpenseClaimRepository claims;
     private final ExpenseApprovalGateway approvalGateway;
     private final TransactionOperations transactions;
+    private final ExpenseExternalResumeCoordinator resumeCoordinator;
 
+    @Autowired
     public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
                                               ExpenseApprovalGateway approvalGateway,
-                                              TransactionOperations transactions) {
+                                              TransactionOperations transactions,
+                                              ExpenseExternalResumeCoordinator resumeCoordinator) {
         this.claims = claims;
         this.approvalGateway = approvalGateway;
         this.transactions = transactions;
+        this.resumeCoordinator = resumeCoordinator;
+    }
+
+    /** Compatibility constructor for focused B2a unit tests without B3 wiring. */
+    public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
+                                              ExpenseApprovalGateway approvalGateway,
+                                              TransactionOperations transactions) {
+        this(claims, approvalGateway, transactions, null);
     }
 
     public void registerExternalWaitAndDispatch(PendingAction action,
@@ -124,6 +136,11 @@ public class ExpenseExternalApprovalCoordinator {
             if (result.isTerminal()) {
                 transactions.executeWithoutResult(ignored -> claims.applyExternalApprovalStatus(
                         result.requestId(), terminalStatus(result.status())));
+                if (resumeCoordinator != null) {
+                    // The terminal ExpenseClaim update has committed; resume
+                    // delivery is a separate best-effort operation.
+                    resumeCoordinator.tryResume(claim.expenseId());
+                }
             }
         } catch (RuntimeException exception) {
             log.warn("[{}] EXTERNAL_SUBMISSION_PENDING expenseIdPrefix={} errorType={}", traceId,

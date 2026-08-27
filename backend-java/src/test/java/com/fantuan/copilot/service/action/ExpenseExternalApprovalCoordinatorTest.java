@@ -42,12 +42,13 @@ class ExpenseExternalApprovalCoordinatorTest {
     @Mock ExpenseClaimRepository claims;
     @Mock ExpenseApprovalGateway gateway;
     @Mock PendingAction action;
+    @Mock ExpenseExternalResumeCoordinator resumeCoordinator;
     private ExpenseExternalApprovalCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         coordinator = new ExpenseExternalApprovalCoordinator(claims, gateway,
-                new TransactionTemplate(new NoopTransactionManager()));
+                new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator);
     }
 
     @Test
@@ -164,6 +165,23 @@ class ExpenseExternalApprovalCoordinatorTest {
 
         verify(claims).bindExternalRequest(EXPENSE_ID, "MOCK_OA", "OA-EXP-1");
         verify(claims).applyExternalApprovalStatus("OA-EXP-1", ExpenseStatus.REJECTED);
+    }
+
+    @Test
+    void terminalSubmissionReplayTriggersExternalResumeAfterStatusCommit() {
+        ExpenseClaim claim = claim();
+        ExternalWaitMarker marker = marker(EXECUTION, EXPENSE_ID);
+        stubExpenseAction();
+        when(action.actionId()).thenReturn("act-expense");
+        when(action.employeeId()).thenReturn("E10001");
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim));
+        when(gateway.submit(claim)).thenReturn(new ExternalApprovalSubmissionResult("OA-EXP-1", "APPROVED"));
+
+        coordinator.registerExternalWaitAndDispatch(action, success(), marker, "trace");
+
+        var order = org.mockito.Mockito.inOrder(claims, resumeCoordinator);
+        order.verify(claims).applyExternalApprovalStatus("OA-EXP-1", ExpenseStatus.APPROVED);
+        order.verify(resumeCoordinator).tryResume(EXPENSE_ID);
     }
 
     private static ActionExecutionResponse success() {

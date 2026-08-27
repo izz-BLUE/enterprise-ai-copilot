@@ -23,13 +23,16 @@ public record ExpenseClaim(
         String externalProvider,
         String externalRequestId,
         String externalWaitId,
-        Instant externalLastCheckedAt) {
+        Instant externalLastCheckedAt,
+        Instant externalResumeLastAttemptAt,
+        Instant externalResumeCompletedAt) {
 
     public ExpenseClaim(String expenseId, String sourceActionId, String employeeId, String tripId,
                         String costCenter, BigDecimal claimedAmount, BigDecimal reimbursableAmount,
                         ExpenseStatus status, Instant createdAt, Instant updatedAt) {
         this(expenseId, sourceActionId, employeeId, tripId, costCenter, claimedAmount,
-                reimbursableAmount, status, createdAt, updatedAt, null, null, null, null);
+                reimbursableAmount, status, createdAt, updatedAt,
+                null, null, null, null, null, null);
     }
 
     public ExpenseClaim(String expenseId, String sourceActionId, String employeeId, String tripId,
@@ -38,6 +41,6 @@ public record ExpenseClaim(
                         String externalProvider, String externalRequestId, String externalWaitId) {
         this(expenseId, sourceActionId, employeeId, tripId, costCenter, claimedAmount,
                 reimbursableAmount, status, createdAt, updatedAt, externalProvider,
-                externalRequestId, externalWaitId, null);
+                externalRequestId, externalWaitId, null, null, null);
     }
 }
