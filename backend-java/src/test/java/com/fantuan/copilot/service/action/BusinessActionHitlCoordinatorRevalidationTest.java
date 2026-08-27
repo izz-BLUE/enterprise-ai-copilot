@@ -14,15 +14,19 @@ import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -126,6 +130,45 @@ class BusinessActionHitlCoordinatorRevalidationTest {
         verify(revalidation, never()).revalidate(any(), any());
         verify(actionService).confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
                 eq(ADMIN_TOKEN), eq(TRACE_ID), any());
+    }
+
+    @Test
+    void pendingBeforeGuardButSucceededAfterGuardSkipsOaAndDelegatesReplay() {
+        PendingAction pending = org.mockito.Mockito.mock(PendingAction.class);
+        when(pending.ownerUserId()).thenReturn("user-1");
+        when(pending.conversationId()).thenReturn("conversation-1");
+        PendingAction succeeded = org.mockito.Mockito.mock(PendingAction.class);
+        when(succeeded.actionType()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(succeeded.status()).thenReturn(ActionStatus.SUCCEEDED);
+        when(actions.find(ACTION_ID)).thenReturn(Optional.of(pending), Optional.of(succeeded));
+        when(actionService.confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
+                eq(ADMIN_TOKEN), eq(TRACE_ID), any())).thenReturn(success().replayedFor(TRACE_ID));
+
+        ActionExecutionResponse response = coordinator.confirm(
+                ACTION_ID, "nonce", "idem", ADMIN_TOKEN, TRACE_ID, IDENTITY);
+
+        assertTrue(response.replayed());
+        verify(revalidation, never()).revalidate(any(), any());
+        verify(actionService).confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
+                eq(ADMIN_TOKEN), eq(TRACE_ID), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ActionStatus.class, names = {"FAILED", "CANCELLED", "EXPIRED", "PROCESSING"})
+    void nonPendingExpenseStatesNeverCallAuthoritativeRevalidation(ActionStatus status) {
+        PendingAction terminal = expenseAction(status);
+        when(actions.find(ACTION_ID)).thenReturn(Optional.of(terminal));
+        when(actionService.confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
+                eq(ADMIN_TOKEN), eq(TRACE_ID), any())).thenThrow(new ActionException(
+                HttpStatus.CONFLICT, "ACTION_STATE_CONFLICT", "state", ACTION_ID, status));
+
+        assertThrows(ActionException.class, () -> coordinator.confirm(
+                ACTION_ID, "nonce", "idem", ADMIN_TOKEN, TRACE_ID, IDENTITY));
+
+        verify(revalidation, never()).revalidate(any(), any());
+        verify(actionService).confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
+                eq(ADMIN_TOKEN), eq(TRACE_ID), any());
+        verify(threadGuard).release(THREAD_ID);
     }
 
     private static PendingAction expenseAction(ActionStatus status) {

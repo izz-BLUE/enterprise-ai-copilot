@@ -28,6 +28,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -151,8 +152,9 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
     void staleHitlConfirmationAbandonsMemoryAndSendsRejectedContinuation() {
         memoryService.upsert("DEMO-001", CONVERSATION_ID, "EXPENSE_CLAIM",
                 TaskStatus.ACTIVE, "{}", "active");
-        when(revalidationGateway.revalidate(any(), anyString())).thenReturn(
-                new ExpenseRevalidationResponse(1, true, null, validFacts().invoices(), null, null));
+        when(revalidationGateway.revalidate(any(), anyString()))
+                .thenReturn(new ExpenseRevalidationResponse(
+                        1, true, null, validFacts().invoices(), null, null));
         when(pythonAgentGateway.post(anyString(), any(), any(),
                 any(), anyString())).thenReturn(null);
         HitlWaitMarker wait = new HitlWaitMarker(
@@ -170,6 +172,52 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
         verify(pythonAgentGateway).post(anyString(), any(HitlResumePayload.class),
                 any(), any(), anyString());
+        assertEquals(0, claims.countBySourceActionId(pending.actionId()));
+    }
+
+    @Test
+    void failedStaleResumeIsRetriedByConfirmWithStableRejectedPayload() {
+        memoryService.upsert("DEMO-001", CONVERSATION_ID, "EXPENSE_CLAIM",
+                TaskStatus.ACTIVE, "{}", "active");
+        when(revalidationGateway.revalidate(any(), anyString()))
+                .thenReturn(new ExpenseRevalidationResponse(
+                        1, true, null, validFacts().invoices(), null, null))
+                .thenThrow(new RuntimeException("provider must not be consulted after FAILED"));
+        List<HitlResumePayload> resumes = new ArrayList<>();
+        when(pythonAgentGateway.post(anyString(), any(), any(), any(), anyString()))
+                .thenAnswer(invocation -> {
+                    resumes.add(invocation.getArgument(1, HitlResumePayload.class));
+                    if (resumes.size() == 1) {
+                        throw new RuntimeException("Python HITL resume unavailable");
+                    }
+                    return null;
+                });
+        HitlWaitMarker wait = new HitlWaitMarker(
+                1, "BUSINESS_ACTION_CONFIRMATION", "wait_" + "a".repeat(64),
+                "ex_" + "b".repeat(32), BusinessActionType.EXPENSE_CLAIM);
+        PendingActionView pending = hitlCoordinator.registerWait(
+                proposal(), wait, "origin-p6-retry", null, IDENTITY, CONVERSATION_ID);
+
+        assertThrows(ActionStaleException.class, () -> hitlCoordinator.confirm(
+                pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "trace-p6-retry-first", IDENTITY));
+        assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
+        assertEquals(0, claims.countBySourceActionId(pending.actionId()));
+
+        assertThrows(ActionException.class, () -> hitlCoordinator.confirm(
+                pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "trace-p6-retry-second", IDENTITY));
+
+        verify(revalidationGateway).revalidate(any(), anyString());
+        assertEquals(2, resumes.size());
+        assertEquals(resumes.get(0), resumes.get(1));
+        assertEquals(HitlResumePayload.HitlDecision.REJECTED, resumes.get(1).decision());
+        assertEquals(ActionStatus.FAILED, resumes.get(1).actionStatus());
+        assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
         assertEquals(0, claims.countBySourceActionId(pending.actionId()));
     }
 
