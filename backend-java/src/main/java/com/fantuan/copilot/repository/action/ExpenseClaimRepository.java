@@ -16,6 +16,15 @@ public interface ExpenseClaimRepository {
 
     Optional<ExpenseClaim> findByExpenseId(String expenseId);
 
+    /** Binds the immutable durable external wait; same value is an idempotent replay. */
+    void bindExternalWait(String expenseId, String waitId);
+
+    /** Binds provider correlation and performs the B1 SUBMITTED -> WAITING_APPROVAL transition. */
+    void bindExternalRequest(String expenseId, String provider, String externalRequestId);
+
+    /** Bounded retry candidates only; this is deliberately not approval-status polling. */
+    List<ExpenseClaim> findPendingExternalSubmissions(int limit);
+
     List<ExpenseItem> findItemsByExpenseId(String expenseId);
 
     /** 按 employee_id 倒序拉取最近报销单（只读企业 Tool 用）。 */

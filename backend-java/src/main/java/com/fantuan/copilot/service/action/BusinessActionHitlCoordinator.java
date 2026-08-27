@@ -42,19 +42,22 @@ public class BusinessActionHitlCoordinator {
     private final AgentRuntimeThreadIdService threadIdService;
     private final AgentRuntimeThreadExecutionGuard threadGuard;
     private final AdminAccessService adminAccessService;
+    private final ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
 
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
                                          PendingActionRepository actions,
                                          PythonAgentGateway pythonAgentGateway,
                                          AgentRuntimeThreadIdService threadIdService,
                                          AgentRuntimeThreadExecutionGuard threadGuard,
-                                         AdminAccessService adminAccessService) {
+                                         AdminAccessService adminAccessService,
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
         this.actionService = actionService;
         this.actions = actions;
         this.pythonAgentGateway = pythonAgentGateway;
         this.threadIdService = threadIdService;
         this.threadGuard = threadGuard;
         this.adminAccessService = adminAccessService;
+        this.externalApprovalCoordinator = externalApprovalCoordinator;
     }
 
     /** Register the wait after Python has durably checkpointed the interrupt. */
@@ -212,6 +215,10 @@ public class BusinessActionHitlCoordinator {
                                                String traceId) {
         PendingAction action = actions.find(actionId).orElse(routing);
         if (response.status() == ActionStatus.SUCCEEDED) {
+            if (action.actionType() == com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM) {
+                reconcileConfirmedExpense(action, response, identity, presentedToken, traceId);
+                return;
+            }
             reconcileTerminal(actionId, action, identity, presentedToken, traceId,
                     HitlResumePayload.HitlDecision.CONFIRMED, ActionStatus.SUCCEEDED,
                     response.message(), response.requestId());
@@ -219,6 +226,28 @@ public class BusinessActionHitlCoordinator {
             reconcileTerminal(actionId, action, identity, presentedToken, traceId,
                     HitlResumePayload.HitlDecision.CANCELLED, ActionStatus.CANCELLED,
                     response.message(), null);
+        }
+    }
+
+    private void reconcileConfirmedExpense(PendingAction action, ActionExecutionResponse response,
+                                           VerifiedIdentity identity, String presentedToken,
+                                           String traceId) {
+        if (action.hitlWaitId() == null || action.agentExecutionId() == null
+                || action.ownerUserId() == null || action.conversationId() == null) {
+            return;
+        }
+        HitlResumePayload payload = new HitlResumePayload(1, action.hitlWaitId(),
+                action.agentExecutionId(), HitlResumePayload.HitlDecision.CONFIRMED,
+                action.actionId(), action.actionType(), ActionStatus.SUCCEEDED,
+                response.requestId(), canonicalMessage(action, ActionStatus.SUCCEEDED, response.message()));
+        try {
+            PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity.employeeId(),
+                    action.conversationId(), presentedToken, traceId, payload);
+            externalApprovalCoordinator.registerExternalWaitAndDispatch(action, response,
+                    pythonResponse.externalWait(), traceId);
+        } catch (RuntimeException exception) {
+            log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}", traceId,
+                    BusinessActionService.auditRef(action.actionId()), exception.getClass().getSimpleName());
         }
     }
 
@@ -299,9 +328,9 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    private void postResume(String ownerUserId, String employeeId, String conversationId,
-                            String presentedToken, String traceId,
-                            HitlResumePayload payload) {
+    private PythonAgentResponse postResume(String ownerUserId, String employeeId, String conversationId,
+                                           String presentedToken, String traceId,
+                                           HitlResumePayload payload) {
         String runtimeThreadId = threadIdService.generate(ownerUserId, conversationId);
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-Agent-Thread-Id", runtimeThreadId);
@@ -312,7 +341,7 @@ public class BusinessActionHitlCoordinator {
         LocalDate businessDate = actionService.businessDate();
         headers.set("X-Business-Date", businessDate.toString());
         headers.set("X-Conversation-Id", conversationId);
-        pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
+        return pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
                 PythonAgentResponse.class, traceId);
     }
 

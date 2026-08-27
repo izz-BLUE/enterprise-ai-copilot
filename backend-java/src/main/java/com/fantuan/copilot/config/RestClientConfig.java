@@ -3,6 +3,7 @@ package com.fantuan.copilot.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -25,6 +26,7 @@ public class RestClientConfig {
     private int maxConnections;
 
     @Bean
+    @Primary
     public RestTemplate restTemplate() {
         var connectionConfig = ConnectionConfig.custom()
                 .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout))

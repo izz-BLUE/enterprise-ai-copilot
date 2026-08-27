@@ -561,7 +561,7 @@ Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、corre
 
 ### POST /agent/langgraph/external/resume
 
-P3-5A 提供的 Python 内部恢复端点；当前没有 Java production caller，Java OA / webhook 接线属于 P3-5B。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与 `X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
+P3-5A 提供的 Python 内部恢复端点。P3-5B1 已实现 Java → Mock OA **提交**与本地 external correlation，但仍没有该 external resume endpoint 的 Java production caller：Webhook / 审批结果接线属于后续 B2。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与 `X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
 
 ```json
 {

@@ -21,5 +21,18 @@ services:
       timeout: 5s
       retries: 10
 
+  mock-oa:
+    build:
+      context: ../mock-oa
+    container_name: ai-copilot-mock-oa-local
+    restart: unless-stopped
+    environment:
+      MOCK_OA_DB_PATH: /data/mock-oa.sqlite3
+    ports:
+      - "127.0.0.1:8010:8010"
+    volumes:
+      - copilot-mock-oa-local-data:/data
+
 volumes:
   copilot-postgres-local-data:
+  copilot-mock-oa-local-data:

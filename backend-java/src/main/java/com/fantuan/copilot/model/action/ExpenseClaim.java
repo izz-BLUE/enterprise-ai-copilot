@@ -19,5 +19,15 @@ public record ExpenseClaim(
         BigDecimal reimbursableAmount,
         ExpenseStatus status,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String externalProvider,
+        String externalRequestId,
+        String externalWaitId) {
+
+    public ExpenseClaim(String expenseId, String sourceActionId, String employeeId, String tripId,
+                        String costCenter, BigDecimal claimedAmount, BigDecimal reimbursableAmount,
+                        ExpenseStatus status, Instant createdAt, Instant updatedAt) {
+        this(expenseId, sourceActionId, employeeId, tripId, costCenter, claimedAmount,
+                reimbursableAmount, status, createdAt, updatedAt, null, null, null);
+    }
 }

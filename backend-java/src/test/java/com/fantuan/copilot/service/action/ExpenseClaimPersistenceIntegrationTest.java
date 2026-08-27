@@ -5,6 +5,7 @@ import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.ExpenseActionProposal;
 import com.fantuan.copilot.dto.action.HitlResumePayload;
 import com.fantuan.copilot.dto.action.HitlWaitMarker;
+import com.fantuan.copilot.dto.action.ExternalWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
@@ -198,6 +199,33 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         assertTrue(replay.replayed());
         assertEquals(replay.requestId(), replay.requestId());
         assertEquals(1, expenseClaims.countBySourceActionId(view.actionId()));
+    }
+
+    @Test
+    void externalCorrelationBindingIsIdempotentAndOnlyAdvancesOnSameOaRequest() {
+        PendingActionView view = actionService.createPending(
+                proposal(), "origin-external", null, USER_A, null);
+        ActionExecutionResponse response = actionService.confirm(
+                view.actionId(), view.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "trace-external", USER_A);
+        String waitId = ExternalWaitMarker.expectedWaitId("ex_" + "a".repeat(32), response.requestId());
+
+        expenseClaims.bindExternalWait(response.requestId(), waitId);
+        expenseClaims.bindExternalWait(response.requestId(), waitId);
+        var bound = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertEquals(waitId, bound.externalWaitId());
+        assertEquals(ExpenseStatus.SUBMITTED, bound.status());
+
+        expenseClaims.bindExternalRequest(response.requestId(), "MOCK_OA", "OA-EXP-001");
+        expenseClaims.bindExternalRequest(response.requestId(), "MOCK_OA", "OA-EXP-001");
+        var submitted = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertEquals(ExpenseStatus.WAITING_APPROVAL, submitted.status());
+        assertEquals("MOCK_OA", submitted.externalProvider());
+        assertEquals("OA-EXP-001", submitted.externalRequestId());
+        assertThrows(IllegalStateException.class,
+                () -> expenseClaims.bindExternalWait(response.requestId(), "extwait_" + "b".repeat(64)));
+        assertThrows(IllegalStateException.class,
+                () -> expenseClaims.bindExternalRequest(response.requestId(), "MOCK_OA", "OA-EXP-002"));
     }
 
     @Test
