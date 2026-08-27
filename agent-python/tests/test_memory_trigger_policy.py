@@ -42,6 +42,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 from app.memory.memory_trigger_policy import (
     NO_TRIGGER_REASON_AGENT_FAILURE,
     NO_TRIGGER_REASON_NO_SIGNAL,
@@ -51,7 +52,6 @@ from app.memory.memory_trigger_policy import (
     MemoryTriggerDecision,
     MemoryTriggerPolicy,
 )
-from app.memory.memory_task_type_policy import MemoryTaskTypePolicy
 
 
 @pytest.fixture
@@ -229,6 +229,22 @@ class TestNoTrigger:
     def test_leave_balance_success_does_not_trigger(self, policy):
         decision = policy.evaluate({
             'tool_history': [{'tool_name': 'leave_balance_tool', 'status': 'success'}],
+        })
+        assert decision.should_extract is False
+        assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL
+
+    def test_external_wait_fields_are_not_memory_trigger_signals(self, policy):
+        decision = policy.evaluate({
+            'external_wait': {
+                'kind': 'EXPENSE_APPROVAL',
+                'request_id': 'EXP-001',
+            },
+            'external_result': {
+                'decision': 'APPROVED',
+                'message': '审批已通过。',
+            },
+            'action_proposal': None,
+            'tool_history': [],
         })
         assert decision.should_extract is False
         assert decision.reason == NO_TRIGGER_REASON_NO_SIGNAL

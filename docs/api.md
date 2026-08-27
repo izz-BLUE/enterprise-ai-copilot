@@ -557,7 +557,26 @@ Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 }
 ```
 
-Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、correlation 与合法 pending/finalize/completed 状态，然后用 `Command(resume=...)` 继续 `approval_node → finalize_node`；不运行 Planner、Tool 或 Memory proposal pipeline。`CANCELLED`、`EXPIRED`、`REJECTED` 分别对应 `CANCELLED`、`EXPIRED`、`FAILED`，完成的 HITL 执行重复调用为 no-op。对 Java 已持久化的 terminal business result，当前 `X-Allow-Business-Actions=false` 仍可完成 approval/finalize 收口；该值会继续注入 Runtime Context，防止意外重新进入 Planner/Tool。关联不匹配、actor scope 变化或不安全 checkpoint 返回稳定的 recovery conflict，不改变 Checkpoint。
+Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、correlation 与合法 pending/finalize/completed 状态，然后用 `Command(resume=...)` 继续；不运行 Planner、Tool 或 Memory proposal pipeline。年假 `CONFIRMED` 仍走 `approval_node → finalize_node`。报销 `CONFIRMED` 且包含 Java 本地 `ExpenseClaim` id（`request_id`）时，P3-5A 走 `approval_node → prepare_external_wait_node → external_wait_node(interrupt)`；若 Python 响应丢失，相同 HITL payload 重试会幂等返回已持久化的 `external_wait`，不会产生第三个 interrupt。`CANCELLED`、`EXPIRED`、`REJECTED` 分别对应 `CANCELLED`、`EXPIRED`、`FAILED`，不会进入 external wait。对 Java 已持久化的 terminal business result，当前 `X-Allow-Business-Actions=false` 仍可完成确定性收口；该值会继续注入 Runtime Context，防止意外重新进入 Planner/Tool。关联不匹配、actor scope 变化或不安全 checkpoint 返回稳定的 recovery conflict，不改变 Checkpoint。
+
+### POST /agent/langgraph/external/resume
+
+P3-5A 提供的 Python 内部恢复端点；当前没有 Java production caller，Java OA / webhook 接线属于 P3-5B。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与 `X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
+
+```json
+{
+  "schema_version": 1,
+  "wait_id": "extwait_<sha256>",
+  "execution_id": "ex_<id>",
+  "action_type": "EXPENSE_CLAIM",
+  "request_id": "EXP-...",
+  "decision": "APPROVED",
+  "status": "APPROVED",
+  "message": "外部审批已通过。"
+}
+```
+
+`request_id` 是 Java 本地 ExpenseClaim id，不是 OA request id。Python 在 same-thread guard 内只读取 latest snapshot，要求 exactly one `ExternalWaitMarker` interrupt，并严格匹配 wait / execution / action / local request 与 actor scope；business date 可跨日，当前 eval / business permission 可以为 false。合法 pending 必须使用 `Command(resume=payload)`，external result 已落盘但 finalizer 未完成时才使用 `invoke(None)`，已完成且 payload 完全相同则 HTTP 200 no-op，不同 payload 或关联错误返回 409。该端点不调用 Planner、Tool、Java、OA 或 Memory pipeline。
 
 ---
 

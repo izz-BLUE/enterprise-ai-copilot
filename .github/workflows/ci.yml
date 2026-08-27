@@ -93,6 +93,7 @@ jobs:
           tests/integration/test_langgraph_postgres_checkpoint.py
           tests/integration/test_langgraph_postgres_crash_resume.py
           tests/integration/test_langgraph_postgres_hitl.py
+          tests/integration/test_langgraph_postgres_external_resume.py
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python

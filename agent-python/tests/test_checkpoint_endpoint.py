@@ -5,12 +5,19 @@ from unittest.mock import Mock, patch
 from fastapi import Request
 
 from app.agents.langgraph_agent import (
+    resume_external_langgraph_agent,
     resume_langgraph_agent,
     run_langgraph_agent,
 )
-from app.main import app, langgraph_chat, langgraph_hitl_resume
+from app.main import (
+    app,
+    langgraph_chat,
+    langgraph_external_resume,
+    langgraph_hitl_resume,
+)
 from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
 from app.schemas.chat_schema import ChatRequest
+from app.schemas.external_wait_schema import ExternalResumePayload
 from app.schemas.hitl_schema import HitlResumePayload
 
 
@@ -327,3 +334,191 @@ def test_hitl_resume_endpoint_uses_authoritative_command_and_skips_memory(monkey
     legacy.assert_not_called()
     memory.assert_not_called()
     runtime.release_thread.assert_called_once()
+
+
+def _external_wait_dict():
+    return {
+        'schema_version': 1,
+        'kind': 'EXPENSE_APPROVAL',
+        'wait_id': 'extwait_' + ('c' * 64),
+        'execution_id': 'ex_' + ('a' * 32),
+        'action_type': 'EXPENSE_CLAIM',
+        'request_id': 'EXP-20260827-0001',
+    }
+
+
+def _external_payload():
+    wait = _external_wait_dict()
+    return ExternalResumePayload(
+        schema_version=1,
+        wait_id=wait['wait_id'],
+        execution_id=wait['execution_id'],
+        action_type=wait['action_type'],
+        request_id=wait['request_id'],
+        decision='APPROVED',
+        status='APPROVED',
+        message='外部审批已通过。',
+    )
+
+
+def test_normal_chat_returns_waiting_external_without_fresh_or_resume(monkeypatch):
+    runtime = Mock()
+    graph = Mock()
+    thread_id = 'rt_' + ('i' * 64) + ':planner-v1'
+    runtime.build_thread_id.return_value = thread_id
+    runtime.get_graph.return_value = graph
+    runtime.try_acquire_thread.return_value = True
+    runtime.inspect_recovery.return_value = RecoveryDecision(
+        RecoveryMode.WAITING_EXTERNAL,
+        pending_node='external_wait_node',
+        execution_id='ex_' + ('a' * 32),
+        external_wait=_external_wait_dict(),
+    )
+    graph.get_state.return_value = Mock(values={
+        **_RESULT,
+        'answer': 'old answer',
+        'external_wait': _external_wait_dict(),
+    })
+    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
+    monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
+
+    with patch('app.main.resume_langgraph_agent') as resume, \
+            patch('app.main.run_langgraph_agent') as fresh, \
+            patch('app.main._build_memory_runtime_hook') as memory:
+        response = langgraph_chat(
+            ChatRequest(message='新的问题不能覆盖等待中的 execution'),
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('i' * 64),
+                'X-Employee-Id': 'E10001',
+            }),
+        )
+
+    assert response.success is True
+    assert response.answer == '报销申请已提交，正在等待外部审批。'
+    assert response.external_wait is not None
+    resume.assert_not_called()
+    fresh.assert_not_called()
+    memory.assert_not_called()
+    runtime.load_execution_history.assert_not_called()
+
+
+def test_hitl_response_loss_returns_persisted_external_wait_without_command(monkeypatch):
+    runtime = Mock()
+    graph = Mock()
+    thread_id = 'rt_' + ('j' * 64) + ':planner-v1'
+    runtime.build_thread_id.return_value = thread_id
+    runtime.get_graph.return_value = graph
+    runtime.try_acquire_thread.return_value = True
+    decision = RecoveryDecision(
+        RecoveryMode.WAITING_EXTERNAL,
+        pending_node='external_wait_node',
+        execution_id='ex_' + ('a' * 32),
+        external_wait=_external_wait_dict(),
+    )
+    graph.get_state.return_value = Mock(values={
+        **_RESULT,
+        'route': 'action',
+        'category': 'business_action',
+        'external_wait': _external_wait_dict(),
+    })
+    wait = {
+        'schema_version': 1,
+        'kind': 'BUSINESS_ACTION_CONFIRMATION',
+        'wait_id': 'wait_' + ('b' * 64),
+        'execution_id': 'ex_' + ('a' * 32),
+        'action_type': 'EXPENSE_CLAIM',
+    }
+    payload = HitlResumePayload(
+        schema_version=1,
+        wait_id=wait['wait_id'],
+        execution_id=wait['execution_id'],
+        decision='CONFIRMED',
+        action_id='act-java-001',
+        action_type='EXPENSE_CLAIM',
+        action_status='SUCCEEDED',
+        request_id='EXP-20260827-0001',
+        message='Java authoritative result',
+    )
+    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
+    monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
+
+    with patch('app.main.inspect_hitl_resume', return_value=decision), \
+            patch('app.main.resume_hitl_langgraph_agent') as hitl_command, \
+            patch('app.main.resume_langgraph_agent') as continuation:
+        response = langgraph_hitl_resume(
+            payload,
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('j' * 64),
+                'X-Employee-Id': 'E10001',
+            }),
+        )
+
+    assert response.success is True
+    assert response.external_wait is not None
+    hitl_command.assert_not_called()
+    continuation.assert_not_called()
+
+
+def test_external_resume_endpoint_uses_command_and_fresh_runtime(monkeypatch):
+    runtime = Mock()
+    graph = Mock()
+    thread_id = 'rt_' + ('k' * 64) + ':planner-v1'
+    runtime.build_thread_id.return_value = thread_id
+    runtime.get_graph.return_value = graph
+    runtime.try_acquire_thread.return_value = True
+    decision = RecoveryDecision(
+        RecoveryMode.WAITING_EXTERNAL,
+        pending_node='external_wait_node',
+        execution_id='ex_' + ('a' * 32),
+        external_wait=_external_wait_dict(),
+    )
+    result = {
+        **_RESULT,
+        'answer': '外部审批已通过。',
+        'route': 'action',
+        'category': 'business_action',
+        'external_wait': _external_wait_dict(),
+    }
+    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
+    monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
+
+    with patch('app.main.inspect_external_resume', return_value=decision), \
+            patch('app.main.resume_external_langgraph_agent', return_value=result) as resume, \
+            patch('app.main.resume_langgraph_agent') as continuation, \
+            patch('app.main._build_memory_runtime_hook') as memory:
+        response = langgraph_external_resume(
+            _external_payload(),
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('k' * 64),
+                'X-Employee-Id': 'E10001',
+                'X-Allow-Eval': 'false',
+                'X-Allow-Business-Actions': 'false',
+                'X-Business-Date': '2026-08-30',
+            }),
+        )
+
+    assert response.success is True
+    assert response.external_wait is not None
+    assert resume.call_args.kwargs['payload'] == _external_payload()
+    assert resume.call_args.kwargs['allow_eval'] is False
+    assert resume.call_args.kwargs['allow_business_actions'] is False
+    assert resume.call_args.kwargs['business_date'] == date(2026, 8, 30)
+    continuation.assert_not_called()
+    memory.assert_not_called()
+    runtime.release_thread.assert_called_once()
+
+
+def test_external_resume_invocation_uses_command_not_none():
+    graph = Mock()
+    graph.invoke.return_value = _RESULT
+    payload = _external_payload()
+    result = resume_external_langgraph_agent(
+        graph=graph,
+        runtime_thread_id='rt_' + ('l' * 64) + ':planner-v1',
+        payload=payload,
+        employee_id='E10001',
+    )
+    assert result == _RESULT
+    command = graph.invoke.call_args.args[0]
+    assert command.resume == payload.model_dump()
+    assert graph.invoke.call_args.kwargs['durability'] == 'sync'
