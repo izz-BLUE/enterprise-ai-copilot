@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 
 from app.agents.langgraph_agent import (
     AgentState,
@@ -113,11 +114,14 @@ def _crashable_planner_graph(runtime: CheckpointRuntime, calls: dict):
     """Use a test-only wrapper to model a process-level unhandled graph failure."""
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
-    def planner_with_fault(state, runtime_context):
+    def planner_with_fault(
+        state: AgentState,
+        runtime: Runtime[AgentRuntimeContext],
+    ) -> dict:
         calls['planner'] += 1
         if calls['planner'] == 2:
             raise RuntimeError('simulated process failure after travel checkpoint')
-        return planner_node(state, runtime_context)
+        return planner_node(state, runtime)
 
     graph.add_node('safety_node', safety_node)
     graph.add_node('planner_node', planner_with_fault)
