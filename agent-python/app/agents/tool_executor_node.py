@@ -142,6 +142,8 @@ class ToolSpec:
     no_employee_blocked_category: str = 'access_control'
     pre_inject: Callable[[dict, _ExecutorContext], dict] | None = None
     proposal_post: Callable[[dict, str], dict] | None = None
+    # Crash Resume 默认拒绝 Tool 重放；只有完成副作用审计的 Tool 才显式打开。
+    resume_safe: bool = False
 
 
 # --- Pre-inject hooks ------------------------------------------------------
@@ -337,6 +339,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=RAG_TOOL_NAME,
             executable_ref='rag_answer_tool',
             identity_required=False,
+            resume_safe=True,
             system_arg_keys=frozenset(),
             pre_inject=_inject_rag,
         ),
@@ -344,12 +347,14 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=EVAL_TOOL_NAME,
             executable_ref='eval_report_tool',
             identity_required=False,
+            resume_safe=True,
             system_arg_keys=frozenset(),
         ),
         LEAVE_BALANCE_TOOL_NAME: ToolSpec(
             name=LEAVE_BALANCE_TOOL_NAME,
             executable_ref='leave_balance_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_leave_read,
@@ -358,6 +363,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=LEAVE_REQUEST_TOOL_NAME,
             executable_ref='leave_request_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_leave_read,
@@ -366,6 +372,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=LEAVE_PROPOSAL_TOOL_NAME,
             executable_ref='leave_proposal_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_PROPOSAL_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='business_action',
             pre_inject=_inject_leave_proposal,
@@ -376,6 +383,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=TRAVEL_RECORD_TOOL_NAME,
             executable_ref='travel_record_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_oamcp_read,
@@ -384,6 +392,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=INVOICE_VERIFY_TOOL_NAME,
             executable_ref='invoice_verify_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_OAMCP_READ_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_oamcp_read,
@@ -393,6 +402,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=EXPENSE_PROPOSAL_TOOL_NAME,
             executable_ref='expense_proposal_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_EXPENSE_CTCX_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='business_action',
             pre_inject=_inject_expense_proposal,
@@ -403,6 +413,7 @@ def _build_registry() -> dict[str, ToolSpec]:
             name=EXPENSE_STATUS_TOOL_NAME,
             executable_ref='expense_status_tool',
             identity_required=True,
+            resume_safe=True,
             system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_oamcp_read,
@@ -411,6 +422,12 @@ def _build_registry() -> dict[str, ToolSpec]:
 
 
 _TOOL_REGISTRY: dict[str, ToolSpec] = _build_registry()
+
+
+def is_tool_resume_safe(tool_name: str) -> bool:
+    """Return the explicit replay policy; unknown tools fail closed."""
+    spec = _TOOL_REGISTRY.get(tool_name)
+    return bool(spec is not None and spec.resume_safe)
 
 
 def _get_tool(tool_name: str):
