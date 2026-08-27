@@ -145,7 +145,13 @@ def test_postgres_endpoint_resumes_without_history_hydration(monkeypatch):
             patch('app.main.run_langgraph_agent') as fresh:
         response = langgraph_chat(
             ChatRequest(message='问题'),
-            _request({'X-Agent-Thread-Id': 'rt_' + ('d' * 64)}),
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('d' * 64),
+                'X-Employee-Id': 'E20002',
+                'X-Allow-Eval': 'true',
+                'X-Allow-Business-Actions': 'true',
+                'X-Business-Date': '2026-08-27',
+            }),
         )
 
     assert response.success is True
@@ -153,6 +159,15 @@ def test_postgres_endpoint_resumes_without_history_hydration(monkeypatch):
     assert resume.call_args.kwargs['graph'] is graph
     assert resume.call_args.kwargs['runtime_thread_id'].endswith(':planner-v1')
     assert resume.call_args.kwargs['trace_id'] == 'checkpoint-trace'
+    runtime.inspect_recovery.assert_called_once_with(
+        graph=graph,
+        thread_id='rt_' + ('d' * 64) + ':planner-v1',
+        question='问题',
+        business_date=date(2026, 8, 27),
+        employee_id='E20002',
+        allow_eval=True,
+        allow_business_actions=True,
+    )
     fresh.assert_not_called()
     runtime.load_execution_history.assert_not_called()
     runtime.release_thread.assert_called_once()
@@ -184,6 +199,39 @@ def test_postgres_endpoint_recovery_conflict_returns_409_without_side_effects(mo
     assert payload['category'] == 'recovery_conflict'
     assert payload['success'] is False
     assert '当前会话存在未完成的 Agent 执行' in payload['answer']
+    resume.assert_not_called()
+    fresh.assert_not_called()
+    runtime.load_execution_history.assert_not_called()
+    runtime.release_thread.assert_called_once()
+
+
+def test_postgres_endpoint_capability_conflict_hides_persisted_proposal(monkeypatch):
+    runtime = Mock()
+    graph = Mock()
+    runtime.build_thread_id.return_value = 'rt_' + ('g' * 64) + ':planner-v1'
+    runtime.get_graph.return_value = graph
+    runtime.inspect_recovery.return_value = RecoveryDecision(
+        RecoveryMode.CONFLICT_CAPABILITY,
+        reason='business_capability_revoked',
+        execution_id='ex_' + ('d' * 32),
+    )
+    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
+    monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
+
+    with patch('app.main.resume_langgraph_agent') as resume, \
+            patch('app.main.run_langgraph_agent') as fresh:
+        response = langgraph_chat(
+            ChatRequest(message='申请报销'),
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('g' * 64),
+                'X-Allow-Business-Actions': 'false',
+            }),
+        )
+
+    assert response.status_code == 409
+    payload = json.loads(response.body)
+    assert payload['category'] == 'recovery_conflict'
+    assert payload['action_proposal'] is None
     resume.assert_not_called()
     fresh.assert_not_called()
     runtime.load_execution_history.assert_not_called()

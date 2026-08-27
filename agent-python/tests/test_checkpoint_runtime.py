@@ -107,7 +107,7 @@ def test_inspect_recovery_reads_latest_state_only_without_history_scan():
         values={
             'question': 'Q',
             'execution_recovery': new_execution_recovery_marker(
-                'Q', date(2026, 8, 27),
+                'Q', date(2026, 8, 27), 'E10001',
             ),
         },
         interrupts=(),
@@ -119,6 +119,9 @@ def test_inspect_recovery_reads_latest_state_only_without_history_scan():
         thread_id='rt_' + ('a' * 64) + ':planner-v1',
         question='Q',
         business_date=date(2026, 8, 27),
+        employee_id='E10001',
+        allow_eval=False,
+        allow_business_actions=False,
     )
 
     assert decision.mode is RecoveryMode.RESUME

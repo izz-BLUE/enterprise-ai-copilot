@@ -86,6 +86,29 @@ def _invoice_result():
     }, ensure_ascii=False)
 
 
+def _eval_result():
+    return json.dumps({
+        'success': True,
+        'retrieval': {'final_pass_rate': 0.99},
+        'privileged_eval_material': 'evaluation-only result',
+    }, ensure_ascii=False)
+
+
+def _leave_proposal_result():
+    return json.dumps({
+        'success': True,
+        'kind': 'proposal',
+        'action_proposal': {
+            'action_type': 'ANNUAL_LEAVE_REQUEST',
+            'start_date': '2026-09-01',
+            'end_date': '2026-09-01',
+            'reason': 'P3-3 security audit',
+            'half_day': None,
+        },
+        'missing_fields': [],
+    }, ensure_ascii=False)
+
+
 def _crashable_planner_graph(runtime: CheckpointRuntime, calls: dict):
     """Use a test-only wrapper to model a process-level unhandled graph failure."""
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
@@ -185,6 +208,9 @@ def test_r1_to_r16_real_postgres_crash_restart_resume_and_fail_closed():
             thread_id=thread_id,
             question=question,
             business_date=business_date,
+            employee_id='E10001',
+            allow_eval=False,
+            allow_business_actions=False,
         )
         assert recovery.mode is RecoveryMode.RESUME
         assert recovery.pending_node == 'planner_node'
@@ -260,11 +286,130 @@ def test_r10_r11_real_postgres_incomplete_checkpoint_conflicts_without_resume():
         assert runtime_b.inspect_recovery(
             graph=graph, thread_id=thread_id, question=question,
             business_date=date(2026, 8, 28),
+            employee_id='E10001', allow_eval=False,
+            allow_business_actions=False,
         ).mode is RecoveryMode.CONFLICT_DATE
         assert runtime_b.inspect_recovery(
             graph=graph, thread_id=thread_id, question='另一个任务',
             business_date=date(2026, 8, 27),
+            employee_id='E10001', allow_eval=False,
+            allow_business_actions=False,
         ).mode is RecoveryMode.CONFLICT_REQUEST
+        assert graph.get_state(_config(thread_id)).next == ('planner_node',)
+    finally:
+        runtime_b.shutdown()
+
+
+def test_s2_real_postgres_changed_employee_scope_conflicts_without_overwrite():
+    question = '查询我的上海出差记录'
+    thread_id = _thread_id('p3-3-security-actor-scope')
+    runtime_a = _runtime()
+    try:
+        crash_graph = _crashable_planner_graph(runtime_a, {'planner': 0})
+        with patch('app.agents.planner_node.call_llm', return_value=_tool(
+            'travel_record_tool', {}, 'need_travel_history',
+        )), patch('app.agents.tool_executor_node.travel_record_tool') as travel:
+            travel.invoke.return_value = _travel_result()
+            with pytest.raises(RuntimeError, match='simulated process failure'):
+                run_langgraph_agent(
+                    question, use_planner=True, business_date=date(2026, 8, 27),
+                    employee_id='E10001', trace_id='scope-A',
+                    graph=crash_graph, runtime_thread_id=thread_id,
+                )
+    finally:
+        runtime_a.shutdown()
+
+    runtime_b = _runtime()
+    try:
+        graph = runtime_b.get_graph(use_planner=True)
+        before = graph.get_state(_config(thread_id))
+        recovery = runtime_b.inspect_recovery(
+            graph=graph, thread_id=thread_id, question=question,
+            business_date=date(2026, 8, 27), employee_id='E20002',
+            allow_eval=False, allow_business_actions=False,
+        )
+        assert recovery.mode is RecoveryMode.CONFLICT_ACTOR_SCOPE
+        assert recovery.reason == 'actor_scope_changed'
+        after = graph.get_state(_config(thread_id))
+        assert after.next == before.next == ('planner_node',)
+        assert after.values == before.values
+    finally:
+        runtime_b.shutdown()
+
+
+def test_s3_real_postgres_revoked_eval_capability_blocks_eval_residue():
+    question = '查看 RAG 评估报告'
+    thread_id = _thread_id('p3-3-security-eval-residue')
+    runtime_a = _runtime()
+    try:
+        crash_graph = _crashable_planner_graph(runtime_a, {'planner': 0})
+        with patch('app.agents.planner_node.call_llm', return_value=_tool(
+            'eval_report_tool', {'report_type': 'all'}, 'need_eval',
+        )), patch('app.agents.tool_executor_node.eval_report_tool') as evaluation:
+            evaluation.invoke.return_value = _eval_result()
+            with pytest.raises(RuntimeError, match='simulated process failure'):
+                run_langgraph_agent(
+                    question, use_planner=True, allow_eval=True,
+                    business_date=date(2026, 8, 27), trace_id='eval-A',
+                    graph=crash_graph, runtime_thread_id=thread_id,
+                )
+    finally:
+        runtime_a.shutdown()
+
+    runtime_b = _runtime()
+    try:
+        graph = runtime_b.get_graph(use_planner=True)
+        snapshot = graph.get_state(_config(thread_id))
+        assert snapshot.next == ('planner_node',)
+        assert snapshot.values['tool_history'][0]['tool_name'] == 'eval_report_tool'
+        assert snapshot.values['tool_history'][0]['status'] == 'success'
+        recovery = runtime_b.inspect_recovery(
+            graph=graph, thread_id=thread_id, question=question,
+            business_date=date(2026, 8, 27), employee_id='',
+            allow_eval=False, allow_business_actions=False,
+        )
+        assert recovery.mode is RecoveryMode.CONFLICT_CAPABILITY
+        assert recovery.reason == 'eval_capability_revoked'
+        assert graph.get_state(_config(thread_id)).next == ('planner_node',)
+    finally:
+        runtime_b.shutdown()
+
+
+def test_s4_real_postgres_revoked_business_capability_blocks_proposal_residue():
+    question = '申请明天年假'
+    thread_id = _thread_id('p3-3-security-business-residue')
+    runtime_a = _runtime()
+    try:
+        crash_graph = _crashable_planner_graph(runtime_a, {'planner': 0})
+        with patch('app.agents.planner_node.call_llm', return_value=_tool(
+            'leave_proposal_tool', {}, 'need_proposal',
+        )), patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal:
+            proposal.invoke.return_value = _leave_proposal_result()
+            with pytest.raises(RuntimeError, match='simulated process failure'):
+                run_langgraph_agent(
+                    question, use_planner=True, allow_business_actions=True,
+                    business_date=date(2026, 8, 27), employee_id='E10001',
+                    trace_id='proposal-A', graph=crash_graph,
+                    runtime_thread_id=thread_id,
+                )
+    finally:
+        runtime_a.shutdown()
+
+    runtime_b = _runtime()
+    try:
+        graph = runtime_b.get_graph(use_planner=True)
+        snapshot = graph.get_state(_config(thread_id))
+        assert snapshot.next == ('planner_node',)
+        assert snapshot.values['tool_history'][0]['tool_name'] == 'leave_proposal_tool'
+        assert snapshot.values['tool_history'][0]['status'] == 'success'
+        assert snapshot.values['action_proposal'] is not None
+        recovery = runtime_b.inspect_recovery(
+            graph=graph, thread_id=thread_id, question=question,
+            business_date=date(2026, 8, 27), employee_id='E10001',
+            allow_eval=False, allow_business_actions=False,
+        )
+        assert recovery.mode is RecoveryMode.CONFLICT_CAPABILITY
+        assert recovery.reason == 'business_capability_revoked'
         assert graph.get_state(_config(thread_id)).next == ('planner_node',)
     finally:
         runtime_b.shutdown()
@@ -342,6 +487,7 @@ def test_r13_real_postgres_legacy_incomplete_checkpoint_is_incompatible():
         assert snapshot.next == ('crash',)
         assert runtime.inspect_recovery(
             graph=graph, thread_id=thread_id, question='legacy', business_date=None,
+            employee_id='', allow_eval=False, allow_business_actions=False,
         ).mode is RecoveryMode.INCOMPATIBLE_CHECKPOINT
     finally:
         runtime.shutdown()
