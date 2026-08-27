@@ -6,6 +6,8 @@ import com.fantuan.copilot.model.action.ExpenseStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -71,7 +73,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
                        claimed_amount, reimbursable_amount, status, created_at, updated_at,
-                       external_provider, external_request_id, external_wait_id
+                       external_provider, external_request_id, external_wait_id,
+                       external_last_checked_at
                 FROM expense_claim WHERE expense_id = :id
                 """, Map.of("id", expenseId), (rs, rowNum) -> new ExpenseClaim(
                 rs.getString("expense_id"),
@@ -85,7 +88,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id")))
+                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at")))
                 .stream().findFirst();
     }
 
@@ -94,7 +97,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
                        claimed_amount, reimbursable_amount, status, created_at, updated_at,
-                       external_provider, external_request_id, external_wait_id
+                       external_provider, external_request_id, external_wait_id,
+                       external_last_checked_at
                 FROM expense_claim WHERE external_request_id = :requestId
                 """, Map.of("requestId", requestId), (rs, rowNum) -> new ExpenseClaim(
                 rs.getString("expense_id"),
@@ -108,7 +112,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id")))
+                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at")))
                 .stream().findFirst();
     }
 
@@ -169,11 +173,53 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
     }
 
     @Override
+    public List<ExpenseClaim> findExternalApprovalReconciliationCandidates(Instant cutoff, int limit) {
+        int boundedLimit = Math.max(1, Math.min(limit, 100));
+        return jdbc.query("""
+                SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
+                       claimed_amount, reimbursable_amount, status, created_at, updated_at,
+                       external_provider, external_request_id, external_wait_id,
+                       external_last_checked_at
+                FROM expense_claim
+                WHERE status = 'WAITING_APPROVAL'
+                  AND external_provider = 'MOCK_OA'
+                  AND external_request_id IS NOT NULL
+                  AND (external_last_checked_at IS NULL OR external_last_checked_at <= :cutoff)
+                ORDER BY external_last_checked_at ASC NULLS FIRST, expense_id ASC
+                LIMIT :limit
+                """, Map.of("cutoff", Timestamp.from(cutoff), "limit", boundedLimit),
+                (rs, rowNum) -> new ExpenseClaim(
+                rs.getString("expense_id"), rs.getString("source_action_id"),
+                rs.getString("employee_id"), rs.getString("trip_id"),
+                rs.getString("cost_center"), rs.getBigDecimal("claimed_amount"),
+                rs.getBigDecimal("reimbursable_amount"), ExpenseStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("external_provider"), rs.getString("external_request_id"),
+                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at")));
+    }
+
+    @Override
+    public boolean tryMarkExternalApprovalChecked(String expenseId, String externalRequestId,
+                                                   Instant cutoff, Instant checkedAt) {
+        return jdbc.update("""
+                UPDATE expense_claim
+                SET external_last_checked_at = :checkedAt
+                WHERE expense_id = :expenseId
+                  AND external_request_id = :requestId
+                  AND external_provider = 'MOCK_OA'
+                  AND status = 'WAITING_APPROVAL'
+                  AND (external_last_checked_at IS NULL OR external_last_checked_at <= :cutoff)
+                """, Map.of("expenseId", expenseId, "requestId", externalRequestId,
+                "cutoff", Timestamp.from(cutoff), "checkedAt", Timestamp.from(checkedAt))) == 1;
+    }
+
+    @Override
     public List<ExpenseClaim> findPendingExternalSubmissions(int limit) {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
                        claimed_amount, reimbursable_amount, status, created_at, updated_at,
-                       external_provider, external_request_id, external_wait_id
+                       external_provider, external_request_id, external_wait_id,
+                       external_last_checked_at
                 FROM expense_claim
                 WHERE status = 'SUBMITTED' AND external_wait_id IS NOT NULL
                   AND external_request_id IS NULL
@@ -186,7 +232,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 rs.getBigDecimal("reimbursable_amount"), ExpenseStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
                 rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id")));
+                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at")));
     }
 
     @Override
@@ -208,7 +254,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
                        claimed_amount, reimbursable_amount, status, created_at, updated_at,
-                       external_provider, external_request_id, external_wait_id
+                       external_provider, external_request_id, external_wait_id,
+                       external_last_checked_at
                 FROM expense_claim
                 WHERE employee_id = :employeeId
                 ORDER BY created_at DESC
@@ -226,6 +273,11 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                         rs.getTimestamp("created_at").toInstant(),
                         rs.getTimestamp("updated_at").toInstant(),
                         rs.getString("external_provider"), rs.getString("external_request_id"),
-                        rs.getString("external_wait_id")));
+                        rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at")));
+    }
+
+    private Instant nullableInstant(ResultSet rs, String column) throws SQLException {
+        Timestamp timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toInstant();
     }
 }

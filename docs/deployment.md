@@ -296,10 +296,13 @@ graph LR
 | MOCK_OA_WEBHOOK_REPLAY_WINDOW_SECONDS | Java webhook 时间戳窗口，最大 300 秒，默认 300 |
 | MOCK_OA_WEBHOOK_URL | Mock OA 回调 Java 的完整 URL；本地 Compose 默认使用 `host.docker.internal:8080` |
 | MOCK_OA_WEBHOOK_TIMEOUT_SECONDS | Mock OA 回调超时，默认 5 秒，最大 30 秒 |
+| EXTERNAL_APPROVAL_RECONCILIATION_ENABLED | Java 是否启用丢失 webhook 后的审批状态 reconciliation，默认 false |
+| EXTERNAL_APPROVAL_RECONCILIATION_INTERVAL_MS | reconciliation 间隔与单 claim 再检查窗口，默认 60000 ms |
+| EXTERNAL_APPROVAL_RECONCILIATION_BATCH_SIZE | 每轮 reconciliation 候选上限，默认 20，代码限制为 1–100 |
 
 PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
-本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true` 与 `DEMO_AUTH_DEFAULT_PASSWORD`；受控请假兼容演示还需 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。P3-5B2a 的 Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Webhook-loss polling/reconciliation、外部 resume、event inbox 和生产级异步投递仍属于后续阶段。
+本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true` 与 `DEMO_AUTH_DEFAULT_PASSWORD`；受控请假兼容演示还需 `DEMO_IDENTITY_ENABLED=true` 与 `BUSINESS_ACTIONS_ENABLED=true`。`X-Demo-User-Id` 不是认证机制，任何公开生产环境都不得将其作为用户身份依据。P3-5B2a 的 Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。P3-5B2b 在 Java 侧以默认关闭、低频、限批的 reconciliation GET 同一权威状态，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；OA 失败保持 `WAITING_APPROVAL` 并在窗口后重试。外部 resume、event inbox 和生产级异步投递仍属于后续阶段。
 
 Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；启用后由 Java 当前认证请求持久化响应内提案。
 

@@ -4,6 +4,7 @@ import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseItem;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +31,11 @@ public interface ExpenseClaimRepository {
 
     /** Bounded retry candidates only; this is deliberately not approval-status polling. */
     List<ExpenseClaim> findPendingExternalSubmissions(int limit);
+
+    List<ExpenseClaim> findExternalApprovalReconciliationCandidates(Instant cutoff, int limit);
+
+    boolean tryMarkExternalApprovalChecked(String expenseId, String externalRequestId,
+                                           Instant cutoff, Instant checkedAt);
 
     List<ExpenseItem> findItemsByExpenseId(String expenseId);
 

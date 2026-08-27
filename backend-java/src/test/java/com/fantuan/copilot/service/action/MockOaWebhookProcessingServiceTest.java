@@ -38,8 +38,10 @@ class MockOaWebhookProcessingServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MockOaWebhookProcessingService(claims, gateway,
-                new TransactionTemplate(new NoopTransactionManager()));
+        ExpenseExternalApprovalStatusSyncService statusSyncService =
+                new ExpenseExternalApprovalStatusSyncService(claims, gateway,
+                        new TransactionTemplate(new NoopTransactionManager()));
+        service = new MockOaWebhookProcessingService(statusSyncService);
     }
 
     @Test

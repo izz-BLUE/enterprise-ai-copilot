@@ -475,7 +475,7 @@ HITL 注册只有显式确定性 Proposal 校验错误（`BUSINESS_RULE_VIOLATIO
 
 `X-Demo-User-Id` 仅是默认关闭的本地/受控兼容 fallback，不是登录凭证；任何公开生产环境都不得依赖它建立用户身份。
 
-### POST /api/webhooks/mock-oa/expense-approval（P3-5B2a）
+### POST /api/webhooks/mock-oa/expense-approval（P3-5B2a / P3-5B2b）
 
 Mock OA 的唯一 Java webhook 接收路径。该路径在 Spring Security 中仅对这个精确的
 `POST` permitAll；真实认证边界是 HMAC，不使用浏览器 JWT。
@@ -505,8 +505,10 @@ X-Mock-OA-Signature: v1=<lowercase hex HMAC-SHA256>
 `status` 不来自 webhook。Java 通过 `GET /api/expense-approvals/{requestId}` 重新读取
 Mock OA 权威状态，再将本地 `ExpenseClaim` 从 `WAITING_APPROVAL` 幂等更新为
 `APPROVED` 或 `REJECTED`；PENDING、重复通知和乱序通知不能使本地状态回退。未知本地
-request 会安全 no-op。P3-5B2a 不调用 `/agent/langgraph/external/resume`，Graph 仍为
-`WAITING_EXTERNAL`。后续接线属于 P3-5B3。
+request 会安全 no-op。P3-5B2b 另有默认关闭的 Java reconciliation worker，按
+`external_last_checked_at` 限批补查同一 Mock OA GET 权威状态；它不改变 webhook
+协议，也不调用 `/agent/langgraph/external/resume`。Graph 仍为 `WAITING_EXTERNAL`，
+后续接线属于 P3-5B3。
 
 ---
 
@@ -616,7 +618,8 @@ Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、corre
 ### POST /agent/langgraph/external/resume
 
 P3-5A 提供的 Python 内部恢复端点。P3-5B2a 已实现 Java → Mock OA **提交**、本地
-external correlation、HMAC webhook 接收和 Java authoritative GET，但仍明确没有该
+external correlation、HMAC webhook 接收和 Java authoritative GET；P3-5B2b 仅增加
+Java 侧 webhook-loss reconciliation，仍明确没有该
 external resume endpoint 的 Java production caller；external resume 接线属于后续
 B3。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、
 `X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与

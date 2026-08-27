@@ -1,0 +1,64 @@
+package com.fantuan.copilot.service.action;
+
+import com.fantuan.copilot.gateway.expense.ExpenseApprovalGateway;
+import com.fantuan.copilot.gateway.expense.ExternalApprovalSubmissionException;
+import com.fantuan.copilot.gateway.expense.ExternalApprovalSubmissionResult;
+import com.fantuan.copilot.gateway.expense.MockOaExpenseApprovalGateway;
+import com.fantuan.copilot.model.action.ExpenseClaim;
+import com.fantuan.copilot.model.action.ExpenseStatus;
+import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionOperations;
+
+/** Shared Mock OA authority refresh used by webhook delivery and reconciliation. */
+@Service
+public class ExpenseExternalApprovalStatusSyncService {
+    private static final Logger log = LoggerFactory.getLogger(ExpenseExternalApprovalStatusSyncService.class);
+
+    private final ExpenseClaimRepository claims;
+    private final ExpenseApprovalGateway approvalGateway;
+    private final TransactionOperations transactions;
+
+    public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
+                                                    ExpenseApprovalGateway approvalGateway,
+                                                    TransactionOperations transactions) {
+        this.claims = claims;
+        this.approvalGateway = approvalGateway;
+        this.transactions = transactions;
+    }
+
+    public void sync(String externalRequestId) {
+        if (externalRequestId == null || externalRequestId.isBlank()) {
+            return;
+        }
+        ExpenseClaim claim = claims.findByExternalRequestId(externalRequestId).orElse(null);
+        if (claim == null || !MockOaExpenseApprovalGateway.PROVIDER.equals(claim.externalProvider())) {
+            log.warn("Ignoring Mock OA status refresh for unknown local requestIdPrefix={}",
+                    BusinessActionService.auditRef(externalRequestId));
+            return;
+        }
+
+        ExternalApprovalSubmissionResult authoritative;
+        try {
+            authoritative = approvalGateway.getStatus(externalRequestId);
+        } catch (ExternalApprovalSubmissionException exception) {
+            throw new ExpenseExternalApprovalStatusSyncException(
+                    "Mock OA authoritative status query failed", exception);
+        }
+        if (authoritative == null || !externalRequestId.equals(authoritative.requestId())
+                || !authoritative.isSupportedStatus()) {
+            throw new ExpenseExternalApprovalStatusSyncException(
+                    "Mock OA returned invalid authoritative status");
+        }
+        if ("PENDING".equals(authoritative.status())) {
+            return;
+        }
+
+        ExpenseStatus terminal = "APPROVED".equals(authoritative.status())
+                ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED;
+        transactions.executeWithoutResult(ignored ->
+                claims.applyExternalApprovalStatus(externalRequestId, terminal));
+    }
+}
