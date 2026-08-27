@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.HitlWaitMarker;
+import com.fantuan.copilot.dto.action.ExternalWaitMarker;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 
 import java.util.List;
@@ -28,7 +29,8 @@ public record PythonAgentResponse(
         @JsonAlias("action_proposal") BusinessActionProposal actionProposal,
         @JsonAlias("missing_fields") List<String> missingFields,
         @JsonAlias("memory_proposal") AgentMemoryProposal memoryProposal,
-        @JsonAlias("hitl_wait") HitlWaitMarker hitlWait) {
+        @JsonAlias("hitl_wait") HitlWaitMarker hitlWait,
+        @JsonAlias("external_wait") ExternalWaitMarker externalWait) {
 
     /** Compatibility constructor for pre-P3-4 test fixtures and legacy responses. */
     public PythonAgentResponse(String answer, String route, Boolean safe, String category,
@@ -36,6 +38,16 @@ public record PythonAgentResponse(
                                String traceId, BusinessActionProposal actionProposal,
                                List<String> missingFields, AgentMemoryProposal memoryProposal) {
         this(answer, route, safe, category, reason, sources, success, traceId,
-                actionProposal, missingFields, memoryProposal, null);
+                actionProposal, missingFields, memoryProposal, null, null);
+    }
+
+    /** Compatibility constructor for P3-5A fixtures that already include hitl_wait. */
+    public PythonAgentResponse(String answer, String route, Boolean safe, String category,
+                               String reason, List<String> sources, Boolean success,
+                               String traceId, BusinessActionProposal actionProposal,
+                               List<String> missingFields, AgentMemoryProposal memoryProposal,
+                               HitlWaitMarker hitlWait) {
+        this(answer, route, safe, category, reason, sources, success, traceId,
+                actionProposal, missingFields, memoryProposal, hitlWait, null);
     }
 }

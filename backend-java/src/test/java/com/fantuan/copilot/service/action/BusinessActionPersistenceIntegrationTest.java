@@ -87,8 +87,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         Integer migrations = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success", Integer.class);
         // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item；
-        // P3-4 V8: durable HITL wait correlation columns and unique wait index
-        assertEquals(8, migrations);
+        // P3-4 V8: durable HITL wait correlation; P3-5B1 V9: OA correlation columns/indexes.
+        assertEquals(9, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());

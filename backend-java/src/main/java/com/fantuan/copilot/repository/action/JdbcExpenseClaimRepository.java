@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,7 +70,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
     public Optional<ExpenseClaim> findByExpenseId(String expenseId) {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
-                       claimed_amount, reimbursable_amount, status, created_at, updated_at
+                       claimed_amount, reimbursable_amount, status, created_at, updated_at,
+                       external_provider, external_request_id, external_wait_id
                 FROM expense_claim WHERE expense_id = :id
                 """, Map.of("id", expenseId), (rs, rowNum) -> new ExpenseClaim(
                 rs.getString("expense_id"),
@@ -81,8 +83,62 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 rs.getBigDecimal("reimbursable_amount"),
                 ExpenseStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()))
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("external_provider"), rs.getString("external_request_id"),
+                rs.getString("external_wait_id")))
                 .stream().findFirst();
+    }
+
+    @Override
+    public void bindExternalWait(String expenseId, String waitId) {
+        int changed = jdbc.update("""
+                UPDATE expense_claim
+                SET external_wait_id = :waitId, updated_at = :now
+                WHERE expense_id = :expenseId
+                  AND (external_wait_id IS NULL OR external_wait_id = :waitId)
+                """, Map.of("expenseId", expenseId, "waitId", waitId,
+                "now", Timestamp.from(Instant.now())));
+        if (changed != 1) {
+            throw new IllegalStateException("External wait correlation conflict");
+        }
+    }
+
+    @Override
+    public void bindExternalRequest(String expenseId, String provider, String externalRequestId) {
+        int changed = jdbc.update("""
+                UPDATE expense_claim
+                SET external_provider = :provider, external_request_id = :requestId,
+                    status = 'WAITING_APPROVAL', updated_at = :now
+                WHERE expense_id = :expenseId
+                  AND ((external_request_id IS NULL AND status = 'SUBMITTED')
+                       OR (external_request_id = :requestId AND external_provider = :provider
+                           AND status = 'WAITING_APPROVAL'))
+                """, Map.of("expenseId", expenseId, "provider", provider,
+                "requestId", externalRequestId, "now", Timestamp.from(Instant.now())));
+        if (changed != 1) {
+            throw new IllegalStateException("External request correlation conflict");
+        }
+    }
+
+    @Override
+    public List<ExpenseClaim> findPendingExternalSubmissions(int limit) {
+        return jdbc.query("""
+                SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
+                       claimed_amount, reimbursable_amount, status, created_at, updated_at,
+                       external_provider, external_request_id, external_wait_id
+                FROM expense_claim
+                WHERE status = 'SUBMITTED' AND external_wait_id IS NOT NULL
+                  AND external_request_id IS NULL
+                ORDER BY updated_at ASC
+                LIMIT :limit
+                """, Map.of("limit", limit), (rs, rowNum) -> new ExpenseClaim(
+                rs.getString("expense_id"), rs.getString("source_action_id"),
+                rs.getString("employee_id"), rs.getString("trip_id"),
+                rs.getString("cost_center"), rs.getBigDecimal("claimed_amount"),
+                rs.getBigDecimal("reimbursable_amount"), ExpenseStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("external_provider"), rs.getString("external_request_id"),
+                rs.getString("external_wait_id")));
     }
 
     @Override
@@ -103,7 +159,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
     public List<ExpenseClaim> findRecentByEmployee(String employeeId, int limit) {
         return jdbc.query("""
                 SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
-                       claimed_amount, reimbursable_amount, status, created_at, updated_at
+                       claimed_amount, reimbursable_amount, status, created_at, updated_at,
+                       external_provider, external_request_id, external_wait_id
                 FROM expense_claim
                 WHERE employee_id = :employeeId
                 ORDER BY created_at DESC
@@ -119,6 +176,8 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                         rs.getBigDecimal("reimbursable_amount"),
                         ExpenseStatus.valueOf(rs.getString("status")),
                         rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant()));
+                        rs.getTimestamp("updated_at").toInstant(),
+                        rs.getString("external_provider"), rs.getString("external_request_id"),
+                        rs.getString("external_wait_id")));
     }
 }

@@ -8,6 +8,7 @@ import com.fantuan.copilot.dto.action.AnnualLeaveSummary;
 import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.HitlResumePayload;
 import com.fantuan.copilot.dto.action.HitlWaitMarker;
+import com.fantuan.copilot.dto.action.ExternalWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
@@ -69,6 +70,7 @@ class BusinessActionHitlCoordinatorTest {
     @Mock AgentRuntimeThreadIdService threadIdService;
     @Mock AgentRuntimeThreadExecutionGuard threadGuard;
     @Mock AdminAccessService adminAccessService;
+    @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
 
     private BusinessActionHitlCoordinator coordinator;
 
@@ -76,7 +78,7 @@ class BusinessActionHitlCoordinatorTest {
     void setUp() {
         coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService,
-                threadGuard, adminAccessService);
+                threadGuard, adminAccessService, externalApprovalCoordinator);
     }
 
     private void stubResumeDependencies() {
@@ -147,6 +149,36 @@ class BusinessActionHitlCoordinatorTest {
 
         assertSame(committed, actual);
         verify(threadGuard).release(RUNTIME_THREAD_ID);
+    }
+
+    @Test
+    void confirmedExpensePassesOnlyInternalExternalMarkerToFocusedCoordinator() {
+        stubResumeDependencies();
+        PendingAction expense = org.mockito.Mockito.mock(PendingAction.class);
+        when(expense.actionId()).thenReturn(ACTION_ID);
+        when(expense.actionType()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(expense.ownerUserId()).thenReturn(IDENTITY.userId());
+        when(expense.conversationId()).thenReturn(CONVERSATION_ID);
+        when(expense.agentExecutionId()).thenReturn("ex_" + "b".repeat(32));
+        when(expense.hitlWaitId()).thenReturn("wait_" + "a".repeat(64));
+        ActionExecutionResponse committed = new ActionExecutionResponse(
+                ACTION_ID, BusinessActionType.EXPENSE_CLAIM, ActionStatus.SUCCEEDED,
+                "EXP-20260827-000001", "已提交。", false, Instant.now(), "origin", "trace");
+        ExternalWaitMarker externalWait = new ExternalWaitMarker(1, "EXPENSE_APPROVAL",
+                ExternalWaitMarker.expectedWaitId("ex_" + "b".repeat(32), "EXP-20260827-000001"),
+                "ex_" + "b".repeat(32), BusinessActionType.EXPENSE_CLAIM, "EXP-20260827-000001");
+        when(actions.find(ACTION_ID)).thenReturn(Optional.of(expense));
+        when(actionService.confirm(anyString(), anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(committed);
+        doReturn(new PythonAgentResponse("waiting", "action", true, "business_action", "", List.of(),
+                true, "resume-trace", null, List.of(), null, null, externalWait))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
+
+        assertSame(committed, coordinator.confirm(ACTION_ID, "nonce", "idem", ADMIN_TOKEN, "trace", IDENTITY));
+
+        verify(externalApprovalCoordinator).registerExternalWaitAndDispatch(
+                eq(expense), eq(committed), eq(externalWait), eq("trace"));
     }
 
     @Test
