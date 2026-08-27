@@ -10,6 +10,7 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
+import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
@@ -24,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -254,6 +256,82 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     }
 
     @Test
+    void externalCheckTimeMigrationIsNullableAndPersistedByDueCas() {
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_name = 'expense_claim' AND column_name = 'external_last_checked_at'
+                """, Integer.class));
+        String expenseId = createWaitingApprovalClaim("check-time");
+        Instant checkedAt = Instant.parse("2026-08-28T00:00:00Z");
+
+        assertNull(expenseClaims.findByExpenseId(expenseId).orElseThrow().externalLastCheckedAt());
+        assertTrue(expenseClaims.tryMarkExternalApprovalChecked(
+                expenseId, "OA-EXP-check-time", checkedAt.minusSeconds(60), checkedAt));
+        assertEquals(checkedAt,
+                expenseClaims.findByExpenseId(expenseId).orElseThrow().externalLastCheckedAt());
+    }
+
+    @Test
+    void reconciliationCandidatesAreFilteredAndFairlyOrdered() {
+        Instant now = Instant.parse("2026-08-28T00:00:00Z");
+        String neverChecked = createWaitingApprovalClaim("never");
+        String oldChecked = createWaitingApprovalClaim("old");
+        String recentChecked = createWaitingApprovalClaim("recent");
+        String otherProvider = createWaitingApprovalClaim("other-provider");
+        String missingRequest = createWaitingApprovalClaim("missing-request");
+
+        setExternalLastChecked(oldChecked, now.minusSeconds(120));
+        setExternalLastChecked(recentChecked, now.minusSeconds(10));
+        jdbc.update("UPDATE expense_claim SET external_provider = 'OTHER' WHERE expense_id = ?",
+                otherProvider);
+        jdbc.update("UPDATE expense_claim SET external_provider = NULL, external_request_id = NULL "
+                + "WHERE expense_id = ?", missingRequest);
+
+        List<ExpenseClaim> candidates = expenseClaims.findExternalApprovalReconciliationCandidates(
+                now.minusSeconds(60), 100);
+
+        assertEquals(List.of(neverChecked, oldChecked),
+                candidates.stream().map(ExpenseClaim::expenseId).toList());
+        assertTrue(candidates.stream().allMatch(claim -> claim.status() == ExpenseStatus.WAITING_APPROVAL));
+    }
+
+    @Test
+    void dueCasPreventsRepeatUntilCutoffAndStopsAfterTerminalization() {
+        String expenseId = createWaitingApprovalClaim("cas");
+        Instant checkedAt = Instant.parse("2026-08-28T00:00:00Z");
+
+        assertTrue(expenseClaims.tryMarkExternalApprovalChecked(
+                expenseId, "OA-EXP-cas", checkedAt.minusSeconds(60), checkedAt));
+        assertFalse(expenseClaims.tryMarkExternalApprovalChecked(
+                expenseId, "OA-EXP-cas", checkedAt.minusSeconds(60), checkedAt.plusSeconds(1)));
+        assertTrue(expenseClaims.tryMarkExternalApprovalChecked(
+                expenseId, "OA-EXP-cas", checkedAt.plusSeconds(1), checkedAt.plusSeconds(61)));
+
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-cas", ExpenseStatus.APPROVED);
+        assertFalse(expenseClaims.tryMarkExternalApprovalChecked(
+                expenseId, "OA-EXP-cas", checkedAt.plusSeconds(60), checkedAt.plusSeconds(61)));
+    }
+
+    @Test
+    void boundedCandidateBatchAllowsLaterRowsToProgress() {
+        Instant now = Instant.parse("2026-08-28T00:00:00Z");
+        String first = createWaitingApprovalClaim("batch-1");
+        String second = createWaitingApprovalClaim("batch-2");
+        String third = createWaitingApprovalClaim("batch-3");
+        Instant cutoff = now.minusSeconds(60);
+
+        List<ExpenseClaim> firstBatch = expenseClaims
+                .findExternalApprovalReconciliationCandidates(cutoff, 2);
+        assertEquals(List.of(first, second), firstBatch.stream().map(ExpenseClaim::expenseId).toList());
+        firstBatch.forEach(claim -> assertTrue(expenseClaims.tryMarkExternalApprovalChecked(
+                claim.expenseId(), claim.externalRequestId(), cutoff, now)));
+
+        List<ExpenseClaim> secondBatch = expenseClaims
+                .findExternalApprovalReconciliationCandidates(now.minusSeconds(1), 2);
+        assertEquals(List.of(third), secondBatch.stream().map(ExpenseClaim::expenseId).toList());
+    }
+
+    @Test
     void concurrentConfirmCreatesOnlyOneExpenseClaim() throws Exception {
         PendingActionView view = actionService.createPending(
                 proposal(), "origin-exp-conc", null, USER_A, null);
@@ -304,5 +382,22 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         assertEquals(wait.executionId(), payload.executionId());
         assertEquals(wait.actionType(), payload.actionType());
         assertEquals("申请未能完成，已安全拒绝。", payload.message());
+    }
+
+    private String createWaitingApprovalClaim(String suffix) {
+        PendingActionView view = actionService.createPending(
+                proposal(), "origin-reconcile-" + suffix, null, USER_A, null);
+        ActionExecutionResponse response = actionService.confirm(
+                view.actionId(), view.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "trace-reconcile-" + suffix, USER_A);
+        String waitId = ExternalWaitMarker.expectedWaitId("ex_" + "c".repeat(32), response.requestId());
+        expenseClaims.bindExternalWait(response.requestId(), waitId);
+        expenseClaims.bindExternalRequest(response.requestId(), "MOCK_OA", "OA-EXP-" + suffix);
+        return response.requestId();
+    }
+
+    private void setExternalLastChecked(String expenseId, Instant checkedAt) {
+        jdbc.update("UPDATE expense_claim SET external_last_checked_at = ? WHERE expense_id = ?",
+                java.sql.Timestamp.from(checkedAt), expenseId);
     }
 }
