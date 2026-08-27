@@ -9,11 +9,14 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Money = Annotated[Decimal, Field(strict=False, ge=Decimal(0), decimal_places=2)]
 
 
 class ExpenseApprovalSubmission(BaseModel):
@@ -23,8 +26,14 @@ class ExpenseApprovalSubmission(BaseModel):
     employeeId: str = Field(min_length=1, max_length=64)
     tripId: str = Field(min_length=1, max_length=64)
     costCenter: str = Field(min_length=1, max_length=64)
-    claimedAmount: float = Field(ge=0)
-    reimbursableAmount: float = Field(ge=0)
+    claimedAmount: Money
+    reimbursableAmount: Money
+
+    @model_validator(mode="after")
+    def validate_reimbursable_amount(self) -> ExpenseApprovalSubmission:
+        if self.reimbursableAmount > self.claimedAmount:
+            raise ValueError("reimbursableAmount must not exceed claimedAmount")
+        return self
 
 
 class ExpenseApprovalResponse(BaseModel):
@@ -64,7 +73,10 @@ class MockOaStore:
 
     @staticmethod
     def _canonical_payload(submission: ExpenseApprovalSubmission) -> str:
-        return json.dumps(submission.model_dump(), sort_keys=True, separators=(",", ":"))
+        payload = submission.model_dump()
+        for field in ("claimedAmount", "reimbursableAmount"):
+            payload[field] = "0" if payload[field] == 0 else format(payload[field].normalize(), "f")
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
     def submit(self, key: str, submission: ExpenseApprovalSubmission) -> ExpenseApprovalResponse:
         payload = self._canonical_payload(submission)

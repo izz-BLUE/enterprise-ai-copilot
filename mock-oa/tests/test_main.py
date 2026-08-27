@@ -1,16 +1,20 @@
+from decimal import Decimal
+
+import pytest
+from app import main
 from fastapi.testclient import TestClient
 
-from app import main
 
-
-def _payload(amount=100.0):
+def _payload(amount="100.00", reimbursable_amount=None):
+    if reimbursable_amount is None:
+        reimbursable_amount = amount
     return {
         "expenseId": "EXP-20260827-000001",
         "employeeId": "E10001",
         "tripId": "TRIP-001",
         "costCenter": "COST-IT",
         "claimedAmount": amount,
-        "reimbursableAmount": amount,
+        "reimbursableAmount": reimbursable_amount,
     }
 
 
@@ -42,7 +46,45 @@ def test_same_key_with_different_business_payload_is_conflict(tmp_path, monkeypa
     client = _client(tmp_path, monkeypatch)
     headers = {"Idempotency-Key": "expense:EXP-20260827-000001"}
     assert client.post("/api/expense-approvals", json=_payload(), headers=headers).status_code == 200
-    assert client.post("/api/expense-approvals", json=_payload(101.0), headers=headers).status_code == 409
+    assert client.post("/api/expense-approvals", json=_payload("101.00"), headers=headers).status_code == 409
+
+
+def test_decimal_amounts_are_exact_and_equivalent_scales_share_idempotency_payload(tmp_path):
+    store = main.MockOaStore(str(tmp_path / "mock-oa.sqlite3"))
+    first_payload = main.ExpenseApprovalSubmission(**_payload("100.1"))
+    equivalent_payload = main.ExpenseApprovalSubmission(**_payload("100.10"))
+
+    assert type(first_payload.claimedAmount) is Decimal
+    assert first_payload.claimedAmount == Decimal("100.1")
+    assert main.MockOaStore._canonical_payload(first_payload) == main.MockOaStore._canonical_payload(
+        equivalent_payload
+    )
+    assert '"claimedAmount":"100.1"' in main.MockOaStore._canonical_payload(first_payload)
+
+    first = store.submit("expense:EXP-20260827-000001", first_payload)
+    replay = store.submit("expense:EXP-20260827-000001", equivalent_payload)
+    assert replay == first
+
+
+def test_money_precision_and_order_are_validated(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    headers = {"Idempotency-Key": "expense:EXP-20260827-000001"}
+
+    too_precise = client.post(
+        "/api/expense-approvals", json=_payload("100.001"), headers=headers
+    )
+    too_large_reimbursement = client.post(
+        "/api/expense-approvals", json=_payload("100.00", "100.01"), headers=headers
+    )
+
+    assert too_precise.status_code == 422
+    assert too_large_reimbursement.status_code == 422
+
+
+@pytest.mark.parametrize("amount", ["-0.01"])
+def test_money_amounts_must_be_nonnegative(amount):
+    with pytest.raises(ValueError):
+        main.ExpenseApprovalSubmission(**_payload(amount))
 
 
 def test_sqlite_persists_idempotency_across_store_restart(tmp_path):

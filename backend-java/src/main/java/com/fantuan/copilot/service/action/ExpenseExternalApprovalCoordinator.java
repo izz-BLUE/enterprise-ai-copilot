@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Post-commit orchestration only: validates Java-owned correlation, records it,
@@ -49,11 +50,18 @@ public class ExpenseExternalApprovalCoordinator {
         }
         try {
             transactions.executeWithoutResult(ignored -> bindValidatedWait(action, response, marker));
+        } catch (RuntimeException exception) {
+            log.warn("[{}] EXTERNAL_CORRELATION_BINDING_FAILED expenseIdPrefix={} errorType={}", traceId,
+                    BusinessActionService.auditRef(response.requestId()),
+                    exception.getClass().getSimpleName());
+            return;
+        }
+        // The action and Memory terminal state are authoritative and already committed.
+        // Do not turn an external issue into a business-action failure or a graph resume.
+        try {
             dispatchByExpenseId(response.requestId(), traceId);
         } catch (RuntimeException exception) {
-            // The action and Memory terminal state are authoritative and already committed.
-            // Do not turn an external issue into a business-action failure or a graph resume.
-            log.warn("[{}] EXTERNAL_SUBMISSION_PENDING expenseIdPrefix={} errorType={}", traceId,
+            log.warn("[{}] EXTERNAL_CORRELATION_LOOKUP_FAILED expenseIdPrefix={} errorType={}", traceId,
                     BusinessActionService.auditRef(response.requestId()),
                     exception.getClass().getSimpleName());
         }
@@ -75,6 +83,10 @@ public class ExpenseExternalApprovalCoordinator {
                 || !marker.hasExpectedWaitId()
                 || !response.requestId().equals(marker.requestId())
                 || !claim.expenseId().equals(marker.requestId())
+                || action.actionId() == null
+                || !Objects.equals(claim.sourceActionId(), action.actionId())
+                || action.employeeId() == null
+                || !Objects.equals(claim.employeeId(), action.employeeId())
                 || !action.agentExecutionId().equals(marker.executionId())) {
             throw new IllegalStateException("External wait marker correlation mismatch");
         }

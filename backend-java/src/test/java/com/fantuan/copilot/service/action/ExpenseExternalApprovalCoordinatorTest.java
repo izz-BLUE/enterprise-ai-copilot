@@ -55,6 +55,8 @@ class ExpenseExternalApprovalCoordinatorTest {
         ExpenseClaim claim = claim();
         ExternalWaitMarker marker = marker(EXECUTION, EXPENSE_ID);
         stubExpenseAction();
+        when(action.actionId()).thenReturn("act-expense");
+        when(action.employeeId()).thenReturn("E10001");
         when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim));
         when(gateway.submit(claim)).thenReturn(new ExternalApprovalSubmissionResult("OA-EXP-1", "PENDING"));
 
@@ -77,10 +79,39 @@ class ExpenseExternalApprovalCoordinatorTest {
     }
 
     @Test
+    void mismatchedSourceActionFailsClosedBeforeBindingOrGatewayCall() {
+        ExternalWaitMarker marker = marker(EXECUTION, EXPENSE_ID);
+        stubExpenseAction();
+        when(action.actionId()).thenReturn("act-expense");
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim("another-action", "E10001")));
+
+        coordinator.registerExternalWaitAndDispatch(action, success(), marker, "trace");
+
+        verify(claims, never()).bindExternalWait(any(), any());
+        verify(gateway, never()).submit(any());
+    }
+
+    @Test
+    void mismatchedEmployeeFailsClosedBeforeBindingOrGatewayCall() {
+        ExternalWaitMarker marker = marker(EXECUTION, EXPENSE_ID);
+        stubExpenseAction();
+        when(action.actionId()).thenReturn("act-expense");
+        when(action.employeeId()).thenReturn("E10001");
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim("act-expense", "E99999")));
+
+        coordinator.registerExternalWaitAndDispatch(action, success(), marker, "trace");
+
+        verify(claims, never()).bindExternalWait(any(), any());
+        verify(gateway, never()).submit(any());
+    }
+
+    @Test
     void outboundFailureKeepsBoundWaitAndDoesNotBindExternalRequest() {
         ExpenseClaim claim = claim();
         ExternalWaitMarker marker = marker(EXECUTION, EXPENSE_ID);
         stubExpenseAction();
+        when(action.actionId()).thenReturn("act-expense");
+        when(action.employeeId()).thenReturn("E10001");
         when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim));
         when(gateway.submit(claim)).thenThrow(new RuntimeException("timeout"));
 
@@ -109,7 +140,11 @@ class ExpenseExternalApprovalCoordinatorTest {
     }
 
     private static ExpenseClaim claim() {
-        return new ExpenseClaim(EXPENSE_ID, "act-expense", "E10001", "TRIP-1", "COST-IT",
+        return claim("act-expense", "E10001");
+    }
+
+    private static ExpenseClaim claim(String sourceActionId, String employeeId) {
+        return new ExpenseClaim(EXPENSE_ID, sourceActionId, employeeId, "TRIP-1", "COST-IT",
                 new BigDecimal("100"), new BigDecimal("100"), ExpenseStatus.SUBMITTED,
                 Instant.now(), Instant.now(), null, null, "extwait_existing");
     }
