@@ -157,6 +157,30 @@ class LangGraphAgentControllerThreadGuardTest {
     }
 
     @Test
+    void recoveryConflictReturns409WithoutMemoryOrPendingAction() {
+        doAnswer(invocation -> {
+            throw new PythonAgentTransportException(
+                    HttpStatus.CONFLICT, "recovery conflict", null);
+        }).when(pythonAgentGateway).post(
+                eq("/agent/langgraph/chat"), any(InternalAgentChatRequest.class),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), anyString());
+
+        var response = controller.langgraphChat(
+                new ChatRequest("继续报销", CONVERSATION_ID), request("guard-recovery-conflict"));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals("recovery_conflict", response.getBody().category());
+        assertFalse(response.getBody().success());
+        assertTrue(response.getBody().answer().contains("未完成的 Agent 执行"));
+        verify(memoryService, never()).upsertActiveFromAgent(
+                anyString(), anyString(), anyString(), anyMap(), anyString());
+        verify(businessActionService, never()).createPending(
+                any(), anyString(), anyString(), any(), anyString());
+        assertTrue(guard.tryAcquire(threadId()));
+        guard.release(threadId());
+    }
+
+    @Test
     void pendingActionFailureReleasesGuard() {
         when(businessActionService.isAllowed(ADMIN_TOKEN)).thenReturn(true);
         AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(

@@ -221,6 +221,9 @@ public class LangGraphAgentController {
                     traceId, exception.responseStatus());
             eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
                     AdminLogEvent.LEVEL_ERROR, started);
+            if (exception.responseStatus() == HttpStatus.CONFLICT) {
+                return AgentResponseFactory.recoveryConflict(traceId);
+            }
             return ResponseEntity.status(exception.responseStatus())
                     .body(AgentResponseFactory.fallback(traceId));
         } catch (Exception e) {

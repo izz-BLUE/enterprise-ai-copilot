@@ -6,6 +6,7 @@ from fastapi import Request
 
 from app.main import app, langgraph_chat
 from app.runtime.checkpoint_runtime import CheckpointRuntime
+from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
 from app.schemas.chat_schema import ChatRequest
 
 
@@ -54,6 +55,7 @@ def test_endpoint_same_thread_busy_returns_429_and_does_not_run_agent(monkeypatc
 def test_endpoint_graph_failure_releases_same_thread_guard(monkeypatch):
     base_thread_id = 'rt_' + ('b' * 64)
     runtime = _runtime()
+    runtime.inspect_recovery = Mock(return_value=RecoveryDecision(RecoveryMode.NEW_EXECUTION))
     runtime.load_execution_history = Mock(return_value=[])
     monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
@@ -71,6 +73,7 @@ def test_endpoint_graph_failure_releases_same_thread_guard(monkeypatch):
 def test_endpoint_checkpoint_history_read_failure_returns_503_and_releases_guard(monkeypatch):
     base_thread_id = 'rt_' + ('c' * 64)
     runtime = _runtime()
+    runtime.inspect_recovery = Mock(return_value=RecoveryDecision(RecoveryMode.NEW_EXECUTION))
     runtime.load_execution_history = Mock(side_effect=OSError('database unavailable'))
     monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)

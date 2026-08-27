@@ -60,4 +60,38 @@ class PythonAgentGatewayTest {
                 () -> gateway.post("/agent/chat", new Object(), null,
                         String.class, "trace"));
     }
+
+    @Test
+    void mapsUpstream409ToConflictWithoutTurningItIntoBadGateway() {
+        RestTemplate rest = mock(RestTemplate.class);
+        PythonAgentGateway gateway = new PythonAgentGateway(
+                rest, new PythonAgentBulkhead(1, 10), "http://python");
+        when(rest.postForEntity(anyString(), any(), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.CONFLICT, "recovery conflict", HttpHeaders.EMPTY,
+                        new byte[0], null));
+
+        PythonAgentTransportException conflict = assertThrows(
+                PythonAgentTransportException.class,
+                () -> gateway.post("/agent/chat", new Object(), null,
+                        String.class, "trace"));
+        assertEquals(HttpStatus.CONFLICT, conflict.responseStatus());
+    }
+
+    @Test
+    void mapsUpstream500ToBadGateway() {
+        RestTemplate rest = mock(RestTemplate.class);
+        PythonAgentGateway gateway = new PythonAgentGateway(
+                rest, new PythonAgentBulkhead(1, 10), "http://python");
+        when(rest.postForEntity(anyString(), any(), eq(String.class)))
+                .thenThrow(HttpClientErrorException.create(
+                        HttpStatus.INTERNAL_SERVER_ERROR, "upstream error", HttpHeaders.EMPTY,
+                        new byte[0], null));
+
+        PythonAgentTransportException upstream = assertThrows(
+                PythonAgentTransportException.class,
+                () -> gateway.post("/agent/chat", new Object(), null,
+                        String.class, "trace"));
+        assertEquals(HttpStatus.BAD_GATEWAY, upstream.responseStatus());
+    }
 }

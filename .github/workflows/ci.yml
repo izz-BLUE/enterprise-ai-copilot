@@ -88,7 +88,10 @@ jobs:
           LANGGRAPH_CHECKPOINT_MODE: POSTGRES
           LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_ci:checkpoint_ci_password@localhost:5432/enterprise_ai_checkpoint_ci
           LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS: "3"
-        run: uv run python -m pytest -q tests/integration/test_langgraph_postgres_checkpoint.py
+        run: >
+          uv run python -m pytest -q
+          tests/integration/test_langgraph_postgres_checkpoint.py
+          tests/integration/test_langgraph_postgres_crash_resume.py
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python

@@ -28,6 +28,13 @@ public final class AgentResponseFactory {
                 .body(response(message, "error", "business_action", traceId));
     }
 
+    public static ResponseEntity<AgentChatResponse> recoveryConflict(String traceId) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).cacheControl(CacheControl.noStore())
+                .body(new AgentChatResponse(
+                        "当前会话存在未完成的 Agent 执行，请重试原请求或重新开始会话。",
+                        "error", true, "recovery_conflict", "", List.of(), false, traceId));
+    }
+
     public static ResponseEntity<AgentChatResponse> identityFailure(
             String traceId, ActionException exception) {
         String category = exception.errorCode().startsWith("DEMO_")

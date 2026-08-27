@@ -61,6 +61,12 @@ public class PythonAgentGateway {
                 if (exception.getStatusCode().value() == 429) {
                     throw new PythonAgentBusyException();
                 }
+                if (exception.getStatusCode().value() == 409) {
+                    throw new PythonAgentTransportException(
+                            HttpStatus.CONFLICT,
+                            "Python Agent recovery conflict",
+                            exception);
+                }
                 throw new PythonAgentTransportException(
                         HttpStatus.BAD_GATEWAY,
                         "Python Agent returned HTTP " + exception.getStatusCode().value(),

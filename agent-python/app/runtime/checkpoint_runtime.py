@@ -1,12 +1,12 @@
 """LangGraph PostgreSQL 执行快照的进程级 Runtime。
 
-本模块管理 Checkpointer 的生命周期、Graph 编译、轻量就绪探针，以及 P3-2
-execution_history 的最新快照读取与单进程 thread guard。它不参与 Planner、
-Memory、业务动作、HITL 或恢复执行；每一轮新 HTTP 请求仍由调用方提供完整
-初始 AgentState 并从 START 执行。
+本模块管理 Checkpointer 的生命周期、Graph 编译、轻量就绪探针、P3-2
+execution_history 的最新快照读取、P3-3 recovery inspection 与单进程
+thread guard。它不执行 Planner、Memory、业务动作或 HITL 恢复命令。
 """
 
 import re
+from datetime import date
 from threading import Lock
 from typing import Any
 
@@ -24,6 +24,8 @@ from app.core.config import (
     LANGGRAPH_CHECKPOINT_MODE,
     logger,
 )
+from app.runtime.execution_recovery import RecoveryDecision
+from app.runtime.execution_recovery import inspect_recovery as inspect_recovery_snapshot
 
 _RUNTIME_THREAD_ID_PATTERN = re.compile(r'rt_[0-9a-f]{64}')
 _PLANNER_THREAD_SUFFIX = ':planner-v1'
@@ -160,6 +162,28 @@ class CheckpointRuntime:
         # 再按当前 ACTIVE Memory 的 task_type 做任务隔离。
         history = merge_execution_history(values.get('execution_history', []), [])
         return [entry for entry in history if entry.get('task_type') == task_type]
+
+    def inspect_recovery(
+        self,
+        *,
+        graph: Any,
+        thread_id: str,
+        question: str,
+        business_date: date | None,
+        employee_id: str,
+        allow_eval: bool,
+        allow_business_actions: bool,
+    ) -> RecoveryDecision:
+        """Inspect only the latest head and classify automatic crash recovery."""
+        snapshot = graph.get_state({'configurable': {'thread_id': thread_id}})
+        return inspect_recovery_snapshot(
+            snapshot,
+            question=question,
+            business_date=business_date,
+            employee_id=employee_id,
+            allow_eval=allow_eval,
+            allow_business_actions=allow_business_actions,
+        )
 
     def build_thread_id(self, runtime_thread_id: str, use_planner: bool) -> str:
         """校验 Java 生成的基础 ID，并附加不可由客户端控制的拓扑后缀。"""

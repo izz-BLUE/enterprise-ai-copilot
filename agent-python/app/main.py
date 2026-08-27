@@ -6,7 +6,7 @@ from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.agents.langgraph_agent import run_langgraph_agent
+from app.agents.langgraph_agent import resume_langgraph_agent, run_langgraph_agent
 from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
 from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
@@ -37,6 +37,7 @@ from app.memory.memory_write_policy import MemoryWriteCommand
 from app.retrieval.chunk_store import chunk_store_status
 from app.retrieval.faiss_retriever import faiss_status
 from app.runtime.checkpoint_runtime import CheckpointRuntime
+from app.runtime.execution_recovery import RecoveryMode
 from app.schemas.chat_schema import (
     AgentMemoryProposal,
     AgentResponse,
@@ -348,29 +349,76 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
                 return _busy_response('/agent/langgraph/chat', trace_id)
             try:
-                try:
-                    execution_history = checkpoint_runtime.load_execution_history(
-                        graph=graph,
-                        thread_id=runtime_thread_id,
-                        memory_context=memory_context,
-                    )
-                except Exception:
-                    logger.exception('[%s] LangGraph execution history 读取失败', trace_id)
-                    return _checkpoint_failure_response(trace_id, status_code=503)
+                recovery = None
+                if AGENT_LOOP_ENABLED:
+                    try:
+                        recovery = checkpoint_runtime.inspect_recovery(
+                            graph=graph,
+                            thread_id=runtime_thread_id,
+                            question=request.message,
+                            business_date=business_date,
+                            employee_id=employee_id,
+                            allow_eval=allow_eval,
+                            allow_business_actions=allow_business_actions,
+                        )
+                    except Exception:
+                        logger.exception('[%s] LangGraph recovery inspection 读取失败', trace_id)
+                        return _checkpoint_failure_response(trace_id, status_code=503)
 
-                agent_kwargs = {
-                    'allow_eval': allow_eval,
-                    'allow_business_actions': allow_business_actions,
-                    'business_date': business_date,
-                    'trace_id': trace_id,
-                    'employee_id': employee_id,
-                    'use_planner': AGENT_LOOP_ENABLED,
-                    'memory_context': memory_context,
-                    'execution_history': execution_history,
-                    'graph': graph,
-                    'runtime_thread_id': runtime_thread_id,
-                }
-                result = run_langgraph_agent(request.message, **agent_kwargs)
+                    if recovery.is_conflict:
+                        logger.warning(
+                            '[%s] recovery_mode=CONFLICT reason=%s execution_id_prefix=%s pending_node=%s',
+                            trace_id,
+                            recovery.reason,
+                            (recovery.execution_id or '')[:11],
+                            recovery.pending_node or '-',
+                        )
+                        return _recovery_conflict_response(trace_id)
+
+                    logger.info(
+                        '[%s] recovery_mode=%s execution_id_prefix=%s pending_node=%s',
+                        trace_id,
+                        recovery.mode.value,
+                        (recovery.execution_id or '')[:11],
+                        recovery.pending_node or '-',
+                    )
+
+                if recovery is not None and recovery.mode is RecoveryMode.RESUME:
+                    # Resume 使用 Checkpoint 中同一次 execution 的 state；不 hydrate
+                    # P3-2 execution_history，也不重建 initial AgentState。
+                    result = resume_langgraph_agent(
+                        graph=graph,
+                        runtime_thread_id=runtime_thread_id,
+                        allow_eval=allow_eval,
+                        allow_business_actions=allow_business_actions,
+                        business_date=business_date,
+                        trace_id=trace_id,
+                        employee_id=employee_id,
+                    )
+                else:
+                    try:
+                        execution_history = checkpoint_runtime.load_execution_history(
+                            graph=graph,
+                            thread_id=runtime_thread_id,
+                            memory_context=memory_context,
+                        )
+                    except Exception:
+                        logger.exception('[%s] LangGraph execution history 读取失败', trace_id)
+                        return _checkpoint_failure_response(trace_id, status_code=503)
+
+                    result = run_langgraph_agent(
+                        request.message,
+                        allow_eval=allow_eval,
+                        allow_business_actions=allow_business_actions,
+                        business_date=business_date,
+                        trace_id=trace_id,
+                        employee_id=employee_id,
+                        use_planner=AGENT_LOOP_ENABLED,
+                        memory_context=memory_context,
+                        execution_history=execution_history,
+                        graph=graph,
+                        runtime_thread_id=runtime_thread_id,
+                    )
             finally:
                 # Memory Pipeline 在 guard 外运行；它不是 Checkpoint 的写入步骤。
                 checkpoint_runtime.release_thread(runtime_thread_id)
@@ -447,3 +495,18 @@ def _checkpoint_failure_response(trace_id: str, status_code: int) -> JSONRespons
         traceId=trace_id,
     )
     return JSONResponse(status_code=status_code, content=response.model_dump(mode='json'))
+
+
+def _recovery_conflict_response(trace_id: str) -> JSONResponse:
+    """Hide internal recovery reasons while exposing the stable 409 contract."""
+    response = AgentResponse(
+        answer='当前会话存在未完成的 Agent 执行，请重试原请求或重新开始会话。',
+        route='error',
+        safe=True,
+        category='recovery_conflict',
+        reason='',
+        sources=[],
+        success=False,
+        traceId=trace_id,
+    )
+    return JSONResponse(status_code=409, content=response.model_dump(mode='json'))

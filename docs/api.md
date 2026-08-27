@@ -312,7 +312,7 @@ React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公
 | answer | string | 回答内容 |
 | route | string | 公共路由分类：`rag` / `eval` / `action` / `agent` / `refuse` / `busy` / `error` |
 | safe | bool | 安全守卫是否通过 |
-| category | string | 公共分类：`normal` / `access_control` / `business_action` / `overloaded` / `error` / `input_error`；Safety Guard 命中时由 Safety 写入细分类别（`illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access`），公网消费方按需处理 |
+| category | string | 公共分类：`normal` / `access_control` / `business_action` / `recovery_conflict` / `overloaded` / `error` / `input_error`；Safety Guard 命中时由 Safety 写入细分类别（`illegal_or_policy_violation` / `policy_bypass` / `cybersecurity_attack` / `audit_tampering` / `unauthorized_access`），公网消费方按需处理 |
 | reason | string | 拒答原因（安全 / 权限场景）。正常完成 / 业务动作场景为空字符串；异常场景下为空字符串，异常详情不返回给用户，仅记录在服务端日志中 |
 | sources | list | 可读来源定位列表（领域/文件名 + chunk 序号） |
 | success | bool | 是否成功；语义：`route != 'error'` ⇒ `success=true`，合法拒绝 / 权限拒绝均视为成功（系统已正确处理），仅技术 / 规划失败返回 `false` |
@@ -368,6 +368,22 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
   "traceId": "xxx"
 }
 ```
+
+**未完成执行恢复冲突**（Planner-first latest Checkpoint 不允许自动 Resume，HTTP 409）
+```json
+{
+  "answer": "当前会话存在未完成的 Agent 执行，请重试原请求或重新开始会话。",
+  "route": "error",
+  "safe": true,
+  "category": "recovery_conflict",
+  "reason": "",
+  "sources": [],
+  "success": false,
+  "traceId": "xxx"
+}
+```
+
+该响应覆盖 exact request 不匹配、business date 改变、employee scope 改变、旧/不兼容 marker、interrupt、未知或多个 pending node、非 replay-safe Tool，以及当前权限已撤销但 Checkpoint 已物化对应 eval 或 business proposal 结果的情况。普通 Provider/Tool handled error 仍按原有 Agent error / 502 语义处理；完成的 Checkpoint 下一次相同请求仍 Fresh。
 
 **适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
 

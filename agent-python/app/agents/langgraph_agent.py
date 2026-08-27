@@ -25,6 +25,7 @@ from app.agents.tool_executor_node import tool_executor_node
 from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
 from app.guards.safety_guard import check_user_query_safety
 from app.retrieval.query_rewriter import rewrite_query
+from app.schemas.execution_recovery_schema import new_execution_recovery_marker
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -66,6 +67,9 @@ class AgentState(TypedDict):
     # 当前可见 Tool 集合或任何 trusted 系统字段（employee_id / business_date /
     # allow_eval / allow_business_actions）。
     memory_context: dict | None
+    # P3-3：当前未完成 Planner-first execution 的严格恢复控制标记；不承载
+    # user/employee/permission/date/trace/deadline 等可信 Runtime Context。
+    execution_recovery: dict | None
 
 
 def safety_node(state: AgentState) -> dict:
@@ -508,8 +512,8 @@ def run_langgraph_agent(
     execution_history 为调用方已按 Checkpoint + ACTIVE Memory 过滤并校验的历史；
     普通无 Checkpointer 单元测试缺省为空，确定性 Graph 始终不加载跨请求 history。
     runtime_thread_id 是已追加拓扑后缀的 LangGraph thread_id，只在 POSTGRES
-    Checkpoint 模式传入；新请求仍传入完整 initial AgentState 并从 START 执行，
-    不使用 Command(resume)、graph.invoke(None) 或 checkpoint resume。
+    Checkpoint 模式传入。该函数始终创建一次新的 AgentState；未完成执行的
+    继续运行由 resume_langgraph_agent 显式负责。
     """
     if graph is None:
         graph = build_agent_loop_graph() if use_planner else build_agent_graph()
@@ -527,8 +531,38 @@ def run_langgraph_agent(
         "planner_decision": None,
         "stop_reason": "",
         "memory_context": memory_context,
+        "execution_recovery": (
+            new_execution_recovery_marker(question, business_date, employee_id)
+            if use_planner else None
+        ),
     }
-    runtime_context: AgentRuntimeContext = {
+    runtime_context = _build_runtime_context(
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        business_date=business_date,
+        trace_id=trace_id,
+        employee_id=employee_id,
+    )
+    config = _build_graph_config(runtime_thread_id, trace_id)
+    if runtime_thread_id:
+        result = dict(
+            graph.invoke(initial, config=config, context=runtime_context, durability='sync')
+        )
+    else:
+        result = dict(graph.invoke(initial, config=config, context=runtime_context))
+    return result
+
+
+def _build_runtime_context(
+    *,
+    allow_eval: bool,
+    allow_business_actions: bool,
+    business_date: date | None,
+    trace_id: str,
+    employee_id: str,
+) -> AgentRuntimeContext:
+    """Build trusted context from the current request only."""
+    return {
         "employee_id": employee_id,
         "allow_eval": allow_eval,
         "allow_business_actions": allow_business_actions,
@@ -536,16 +570,39 @@ def run_langgraph_agent(
         "trace_id": trace_id,
         "deadline_monotonic": monotonic() + AGENT_REQUEST_TIMEOUT_SECONDS,
     }
-    # Observability metadata：业务 trace_id 仅用于关联定位，不覆盖 OTel Trace ID；
-    # 动态字段（step_count / tool_call_count / stop_reason）随最终 state 出现在 run output。
+
+
+def _build_graph_config(runtime_thread_id: str | None, trace_id: str) -> dict:
+    """Build config with only current-request observability and thread routing."""
     config: dict = {}
     if trace_id:
         config['metadata'] = {'business_trace_id': trace_id}
     if runtime_thread_id:
         config['configurable'] = {'thread_id': runtime_thread_id}
-        result = dict(
-            graph.invoke(initial, config=config, context=runtime_context, durability='sync')
-        )
-    else:
-        result = dict(graph.invoke(initial, config=config, context=runtime_context))
-    return result
+    return config
+
+
+def resume_langgraph_agent(
+    *,
+    graph: Any,
+    runtime_thread_id: str,
+    allow_eval: bool = False,
+    allow_business_actions: bool = False,
+    business_date: date | None = None,
+    trace_id: str = '',
+    employee_id: str = '',
+) -> dict:
+    """Resume the latest pending Planner-first checkpoint with fresh trusted context."""
+    runtime_context = _build_runtime_context(
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        business_date=business_date,
+        trace_id=trace_id,
+        employee_id=employee_id,
+    )
+    return dict(graph.invoke(
+        None,
+        config=_build_graph_config(runtime_thread_id, trace_id),
+        context=runtime_context,
+        durability='sync',
+    ))
