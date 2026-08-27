@@ -22,6 +22,9 @@ import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -35,6 +38,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,6 +50,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -200,8 +205,10 @@ class BusinessActionHitlCoordinatorTest {
         verify(threadGuard, never()).release(anyString());
     }
 
-    @Test
-    void deterministicRegistrationRejectionResumesCanonicalRejectedPayloadWithoutActionRow() {
+    @ParameterizedTest
+    @MethodSource("deterministicRegistrationRejections")
+    void deterministicRegistrationRejectionResumesCanonicalRejectedPayloadWithoutActionRow(
+            String errorCode) {
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
         when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
@@ -213,12 +220,12 @@ class BusinessActionHitlCoordinatorTest {
                 proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
                 .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
-                        "BUSINESS_RULE_VIOLATION", "业务规则不满足", null, null));
+                        errorCode, "业务规则不满足", null, null));
 
         ActionException exception = assertThrows(ActionException.class, () -> coordinator.registerWait(
                 proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
 
-        assertEquals("BUSINESS_RULE_VIOLATION", exception.errorCode());
+        assertEquals(errorCode, exception.errorCode());
         verify(actionService).abandonMemoryAfterHitlRejection(
                 IDENTITY.asDemoIdentity(), CONVERSATION_ID);
         ArgumentCaptor<HitlResumePayload> payload = ArgumentCaptor.forClass(HitlResumePayload.class);
@@ -242,22 +249,46 @@ class BusinessActionHitlCoordinatorTest {
         assertEquals(payload.getValue(), retryPayload.getAllValues().get(1));
         verify(actionService, times(2)).abandonMemoryAfterHitlRejection(
                 IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+        verifyNoInteractions(actions);
     }
 
-    @Test
-    void transientRegistrationRejectionDoesNotResumeOrCloseMemory() {
+    @ParameterizedTest
+    @MethodSource("transientRegistrationRejections")
+    void transientRegistrationRejectionDoesNotResumeOrCloseMemory(
+            HttpStatus status, String errorCode) {
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();
         when(actionService.createHitlPending(
                 proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
-                .thenThrow(new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "ACTION_CAPACITY_EXCEEDED", "容量已满", null, null));
+                .thenThrow(new ActionException(status, errorCode, "暂时不可用", null, null));
 
         assertThrows(ActionException.class, () -> coordinator.registerWait(
                 proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
 
         verify(actionService, never()).abandonMemoryAfterHitlRejection(any(), anyString());
+        verify(pythonAgentGateway, never()).post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), anyString());
+    }
+
+    @Test
+    void memoryFailureKeepsDeterministicRegistrationWaitingAndSkipsGraphResume() {
+        BusinessActionProposal proposal = registrationProposal();
+        HitlWaitMarker wait = registrationWait();
+        when(actionService.createHitlPending(
+                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                CONVERSATION_ID, wait.executionId(), wait.waitId()))
+                .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "EXPENSE_AMOUNT_INVALID", "费用明细金额必须为正数。", null, null));
+        doThrow(new RuntimeException("db unavailable")).when(actionService)
+                .abandonMemoryAfterHitlRejection(IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> coordinator.registerWait(
+                proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        assertEquals("db unavailable", exception.getMessage());
+        verify(actionService).abandonMemoryAfterHitlRejection(
+                IDENTITY.asDemoIdentity(), CONVERSATION_ID);
         verify(pythonAgentGateway, never()).post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), anyString());
     }
@@ -348,6 +379,21 @@ class BusinessActionHitlCoordinatorTest {
         return new HitlWaitMarker(
                 1, "BUSINESS_ACTION_CONFIRMATION", "wait_" + "a".repeat(64),
                 "ex_" + "b".repeat(32), BusinessActionType.ANNUAL_LEAVE_REQUEST);
+    }
+
+    private static Stream<String> deterministicRegistrationRejections() {
+        return Stream.of(
+                "BUSINESS_RULE_VIOLATION",
+                "EXPENSE_ITEMS_REQUIRED",
+                "EXPENSE_AMOUNT_INVALID",
+                "EXPENSE_INVOICES_REQUIRED");
+    }
+
+    private static Stream<Arguments> transientRegistrationRejections() {
+        return Stream.of(
+                Arguments.of(HttpStatus.SERVICE_UNAVAILABLE, "ACTION_CAPACITY_EXCEEDED"),
+                Arguments.of(HttpStatus.CONFLICT, "ACTION_CONVERSATION_IN_PROGRESS"),
+                Arguments.of(HttpStatus.FORBIDDEN, "ADMIN_REQUIRED"));
     }
 
     private static PendingAction terminalAction(ActionStatus status) {

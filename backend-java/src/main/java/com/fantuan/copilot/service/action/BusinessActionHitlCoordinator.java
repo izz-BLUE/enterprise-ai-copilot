@@ -78,17 +78,15 @@ public class BusinessActionHitlCoordinator {
             }
             return view;
         } catch (ActionException exception) {
-            if ("BUSINESS_RULE_VIOLATION".equals(exception.errorCode())) {
+            if (isDeterministicRegistrationRejection(exception)) {
                 // No PendingAction exists on this path.  Close only Java's
                 // existing ACTIVE task memory and reject the durable wait;
                 // never manufacture a fake action row for correlation.
-                try {
-                    actionService.abandonMemoryAfterHitlRejection(
-                            identity.asDemoIdentity(), conversationId);
-                } catch (RuntimeException memoryException) {
-                    log.warn("[{}] HITL rejection Memory 收口失败 errorType={}",
-                            originTraceId, memoryException.getClass().getSimpleName());
-                }
+                // Memory is the Java-owned lifecycle predecessor of Graph
+                // terminalization.  If it fails, keep the checkpoint waiting
+                // so a retry can perform Memory -> Graph in that order.
+                actionService.abandonMemoryAfterHitlRejection(
+                        identity.asDemoIdentity(), conversationId);
                 tryResumeRejected(wait, identity, conversationId,
                         presentedToken, originTraceId);
             }
@@ -336,6 +334,24 @@ public class BusinessActionHitlCoordinator {
     private static boolean isTerminal(ActionStatus status) {
         return status == ActionStatus.SUCCEEDED || status == ActionStatus.CANCELLED
                 || status == ActionStatus.EXPIRED || status == ActionStatus.FAILED;
+    }
+
+    /**
+     * Only explicit, deterministic proposal validation failures may close the
+     * durable wait.  New business error codes must be reviewed and added here
+     * deliberately; HTTP status alone is never sufficient classification.
+     */
+    private static boolean isDeterministicRegistrationRejection(ActionException exception) {
+        if (exception == null || exception.errorCode() == null) {
+            return false;
+        }
+        return switch (exception.errorCode()) {
+            case "BUSINESS_RULE_VIOLATION",
+                    "EXPENSE_ITEMS_REQUIRED",
+                    "EXPENSE_AMOUNT_INVALID",
+                    "EXPENSE_INVOICES_REQUIRED" -> true;
+            default -> false;
+        };
     }
 
     private static String boundedMessage(String message) {
