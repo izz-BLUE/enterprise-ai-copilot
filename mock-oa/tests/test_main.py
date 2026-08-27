@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 from decimal import Decimal
 
 import pytest
@@ -25,7 +28,11 @@ def _client(tmp_path, monkeypatch):
 
 def test_first_post_creates_pending_record_and_get_returns_it(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
-    created = client.post("/api/expense-approvals", json=_payload(), headers={"Idempotency-Key": "expense:EXP-20260827-000001"})
+    created = client.post(
+        "/api/expense-approvals",
+        json=_payload(),
+        headers={"Idempotency-Key": "expense:EXP-20260827-000001"},
+    )
     assert created.status_code == 200
     assert created.json()["status"] == "PENDING"
     fetched = client.get(f"/api/expense-approvals/{created.json()['requestId']}")
@@ -95,3 +102,167 @@ def test_sqlite_persists_idempotency_across_store_restart(tmp_path):
     restarted_store = main.MockOaStore(str(path))
     replay = restarted_store.submit("expense:EXP-20260827-000001", payload)
     assert replay == first
+
+
+def _create_approval(client):
+    response = client.post(
+        "/api/expense-approvals",
+        json=_payload(),
+        headers={"Idempotency-Key": "expense:EXP-20260827-000001"},
+    )
+    assert response.status_code == 200
+    return response.json()["requestId"]
+
+
+def test_pending_to_approved_and_webhook_has_no_status(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    events = []
+    monkeypatch.setattr(main, "send_approval_webhook", lambda value: events.append(value) or True)
+
+    response = client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    assert response.status_code == 200
+    assert response.json() == {"requestId": request_id, "status": "APPROVED"}
+    assert client.get(f"/api/expense-approvals/{request_id}").json()["status"] == "APPROVED"
+    assert events == [request_id]
+
+
+def test_pending_to_rejected(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+
+    response = client.post(f"/api/admin/expense-approvals/{request_id}/reject")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"
+
+
+def test_same_approved_replay_is_idempotent(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+    client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    replay = client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    assert replay.status_code == 200
+    assert replay.json()["status"] == "APPROVED"
+
+
+def test_approved_to_rejected_is_conflict(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+    client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    response = client.post(f"/api/admin/expense-approvals/{request_id}/reject")
+
+    assert response.status_code == 409
+    assert client.get(f"/api/expense-approvals/{request_id}").json()["status"] == "APPROVED"
+
+
+def test_same_rejected_replay_is_idempotent(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+    client.post(f"/api/admin/expense-approvals/{request_id}/reject")
+
+    replay = client.post(f"/api/admin/expense-approvals/{request_id}/reject")
+
+    assert replay.status_code == 200
+    assert replay.json()["status"] == "REJECTED"
+
+
+def test_rejected_to_approved_is_conflict(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+    client.post(f"/api/admin/expense-approvals/{request_id}/reject")
+
+    response = client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    assert response.status_code == 409
+    assert client.get(f"/api/expense-approvals/{request_id}").json()["status"] == "REJECTED"
+
+
+def test_terminal_status_persists_across_store_reopen(tmp_path):
+    path = tmp_path / "mock-oa.sqlite3"
+    first_store = main.MockOaStore(str(path))
+    payload = main.ExpenseApprovalSubmission(**_payload())
+    created = first_store.submit("expense:EXP-20260827-000001", payload)
+
+    assert first_store.decide(created.requestId, "APPROVED").status == "APPROVED"
+    reopened_store = main.MockOaStore(str(path))
+
+    assert reopened_store.get(created.requestId).status == "APPROVED"
+
+
+def test_webhook_signature_matches_exact_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOCK_OA_WEBHOOK_URL", "http://java.test/webhook")
+    monkeypatch.setenv("MOCK_OA_WEBHOOK_SECRET", "test-webhook-secret")
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def read(self):
+            return b""
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(main, "urlopen", fake_urlopen)
+
+    assert main.send_approval_webhook("OA-EXP-ABC") is True
+    request = captured["request"]
+    body = request.data
+    timestamp = request.get_header("X-mock-oa-timestamp")
+    signature = request.get_header("X-mock-oa-signature")
+    expected = hmac.new(
+        b"test-webhook-secret",
+        f"{timestamp}.".encode("utf-8") + body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    assert json.loads(body) == {
+        "eventId": json.loads(body)["eventId"],
+        "eventType": "EXPENSE_APPROVAL_CHANGED",
+        "requestId": "OA-EXP-ABC",
+    }
+    assert "status" not in json.loads(body)
+    assert signature == f"v1={expected}"
+    assert captured["timeout"] <= 30.0
+
+
+def test_webhook_is_sent_only_after_terminal_state_is_persisted(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    observed = []
+
+    def callback(value):
+        observed.append(main.store.get(value).status)
+        return True
+
+    monkeypatch.setattr(main, "send_approval_webhook", callback)
+
+    assert client.post(f"/api/admin/expense-approvals/{request_id}/approve").status_code == 200
+    assert observed == ["APPROVED"]
+
+
+def test_callback_failure_does_not_rollback_terminal_status(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: False)
+
+    response = client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    assert response.status_code == 200
+    assert client.get(f"/api/expense-approvals/{request_id}").json()["status"] == "APPROVED"

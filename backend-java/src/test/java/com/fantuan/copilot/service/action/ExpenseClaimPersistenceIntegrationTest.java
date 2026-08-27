@@ -229,6 +229,31 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     }
 
     @Test
+    void authoritativeExternalStatusIsTerminalAndCannotRegress() {
+        PendingActionView view = actionService.createPending(
+                proposal(), "origin-external-status", null, USER_A, null);
+        ActionExecutionResponse response = actionService.confirm(
+                view.actionId(), view.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "trace-external-status", USER_A);
+        String waitId = ExternalWaitMarker.expectedWaitId("ex_" + "a".repeat(32), response.requestId());
+
+        expenseClaims.bindExternalWait(response.requestId(), waitId);
+        expenseClaims.bindExternalRequest(response.requestId(), "MOCK_OA", "OA-EXP-STATUS");
+
+        assertEquals(response.requestId(), expenseClaims.findByExternalRequestId("OA-EXP-STATUS")
+                .orElseThrow().expenseId());
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-STATUS", ExpenseStatus.APPROVED);
+        expenseClaims.applyExternalApprovalStatus("OA-EXP-STATUS", ExpenseStatus.APPROVED);
+        assertEquals(ExpenseStatus.APPROVED,
+                expenseClaims.findByExpenseId(response.requestId()).orElseThrow().status());
+
+        assertThrows(IllegalStateException.class,
+                () -> expenseClaims.applyExternalApprovalStatus("OA-EXP-STATUS", ExpenseStatus.REJECTED));
+        assertEquals(ExpenseStatus.APPROVED,
+                expenseClaims.findByExpenseId(response.requestId()).orElseThrow().status());
+    }
+
+    @Test
     void concurrentConfirmCreatesOnlyOneExpenseClaim() throws Exception {
         PendingActionView view = actionService.createPending(
                 proposal(), "origin-exp-conc", null, USER_A, null);

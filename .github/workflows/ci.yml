@@ -35,6 +35,31 @@ jobs:
         working-directory: backend-java
         run: ./mvnw test -q
 
+  mock-oa-check:
+    name: Mock OA Webhook
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Mock OA dependencies
+        working-directory: mock-oa
+        run: pip install -r requirements.txt pytest ruff httpx2
+
+      - name: Run Mock OA tests
+        working-directory: mock-oa
+        run: python -m pytest -q
+
+      - name: Ruff relevant scope
+        run: ruff check --config agent-python/pyproject.toml mock-oa/app mock-oa/tests
+
+      - name: Validate local Compose configuration
+        run: docker compose -f deploy/docker-compose.local.yml config --quiet
+
   python-eval:
     name: Python RAG Evaluation
     runs-on: ubuntu-latest

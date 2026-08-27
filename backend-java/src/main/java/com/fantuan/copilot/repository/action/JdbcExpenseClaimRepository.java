@@ -90,6 +90,29 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
     }
 
     @Override
+    public Optional<ExpenseClaim> findByExternalRequestId(String requestId) {
+        return jdbc.query("""
+                SELECT expense_id, source_action_id, employee_id, trip_id, cost_center,
+                       claimed_amount, reimbursable_amount, status, created_at, updated_at,
+                       external_provider, external_request_id, external_wait_id
+                FROM expense_claim WHERE external_request_id = :requestId
+                """, Map.of("requestId", requestId), (rs, rowNum) -> new ExpenseClaim(
+                rs.getString("expense_id"),
+                rs.getString("source_action_id"),
+                rs.getString("employee_id"),
+                rs.getString("trip_id"),
+                rs.getString("cost_center"),
+                rs.getBigDecimal("claimed_amount"),
+                rs.getBigDecimal("reimbursable_amount"),
+                ExpenseStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("external_provider"), rs.getString("external_request_id"),
+                rs.getString("external_wait_id")))
+                .stream().findFirst();
+    }
+
+    @Override
     public void bindExternalWait(String expenseId, String waitId) {
         int changed = jdbc.update("""
                 UPDATE expense_claim
@@ -117,6 +140,31 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 "requestId", externalRequestId, "now", Timestamp.from(Instant.now())));
         if (changed != 1) {
             throw new IllegalStateException("External request correlation conflict");
+        }
+    }
+
+    @Override
+    public void applyExternalApprovalStatus(String externalRequestId, ExpenseStatus status) {
+        if (status != ExpenseStatus.APPROVED && status != ExpenseStatus.REJECTED) {
+            throw new IllegalArgumentException("Only terminal external approval statuses are supported");
+        }
+        int changed = jdbc.update("""
+                UPDATE expense_claim
+                SET status = :status, updated_at = :now
+                WHERE external_request_id = :requestId AND status = 'WAITING_APPROVAL'
+                """, Map.of("requestId", externalRequestId, "status", status.name(),
+                "now", Timestamp.from(Instant.now())));
+        if (changed == 1) {
+            return;
+        }
+        ExpenseStatus current = jdbc.query("""
+                SELECT status FROM expense_claim WHERE external_request_id = :requestId
+                """, Map.of("requestId", externalRequestId),
+                (rs, rowNum) -> ExpenseStatus.valueOf(rs.getString("status")))
+                .stream().findFirst().orElseThrow(
+                        () -> new IllegalStateException("External approval request not found"));
+        if (current != status) {
+            throw new IllegalStateException("External approval status transition conflict");
         }
     }
 
