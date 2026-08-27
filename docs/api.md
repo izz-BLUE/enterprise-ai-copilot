@@ -506,9 +506,9 @@ X-Mock-OA-Signature: v1=<lowercase hex HMAC-SHA256>
 Mock OA 权威状态，再将本地 `ExpenseClaim` 从 `WAITING_APPROVAL` 幂等更新为
 `APPROVED` 或 `REJECTED`；PENDING、重复通知和乱序通知不能使本地状态回退。未知本地
 request 会安全 no-op。P3-5B2b 另有默认关闭的 Java reconciliation worker，按
-`external_last_checked_at` 限批补查同一 Mock OA GET 权威状态；它不改变 webhook
-协议，也不调用 `/agent/langgraph/external/resume`。Graph 仍为 `WAITING_EXTERNAL`，
-后续接线属于 P3-5B3。
+`external_last_checked_at` 限批补查同一 Mock OA GET 权威状态；终态提交后由 B3
+从 Java 持久化 correlation 调用 `/agent/langgraph/external/resume`，失败只留下
+`external_resume_*` 投递标记并重试，不改变 webhook 协议或 Java 终态。
 
 ---
 
@@ -617,11 +617,10 @@ Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、corre
 
 ### POST /agent/langgraph/external/resume
 
-P3-5A 提供的 Python 内部恢复端点。P3-5B2a 已实现 Java → Mock OA **提交**、本地
-external correlation、HMAC webhook 接收和 Java authoritative GET；P3-5B2b 仅增加
-Java 侧 webhook-loss reconciliation，仍明确没有该
-external resume endpoint 的 Java production caller；external resume 接线属于后续
-B3。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、
+P3-5A 提供的 Python 内部恢复端点。P3-5B2a/B2b 已实现 Java → Mock OA 提交、HMAC
+webhook、authoritative GET 与 webhook-loss reconciliation；P3-5B3 增加 Java 终态
+ExpenseClaim 到该端点的可信恢复调用。请求必须带 Java 从持久化 ExpenseClaim 与
+PendingAction 反查恢复的 `X-Agent-Thread-Id`、
 `X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与
 `X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
 
@@ -634,11 +633,18 @@ B3。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Age
   "request_id": "EXP-...",
   "decision": "APPROVED",
   "status": "APPROVED",
-  "message": "外部审批已通过。"
+  "message": "报销申请已通过外部审批。"
 }
 ```
 
-`request_id` 是 Java 本地 ExpenseClaim id，不是 OA request id。Python 在 same-thread guard 内只读取 latest snapshot，要求 exactly one `ExternalWaitMarker` interrupt，并严格匹配 wait / execution / action / local request 与 actor scope；business date 可跨日，当前 eval / business permission 可以为 false。合法 pending 必须使用 `Command(resume=payload)`，external result 已落盘但 finalizer 未完成时才使用 `invoke(None)`，已完成且 payload 完全相同则 HTTP 200 no-op，不同 payload 或关联错误返回 409。该端点不调用 Planner、Tool、Java、OA 或 Memory pipeline。
+`request_id` 是 Java 本地 ExpenseClaim id，不是 OA request id。Java 只在
+`ExpenseClaim.status` 已提交为 `APPROVED` 或 `REJECTED` 后调用；Python 在 same-thread
+guard 内只读取 latest snapshot，要求 exactly one `ExternalWaitMarker` interrupt，并严格匹配
+wait / execution / action / local request 与 actor scope；business date 可跨日，当前 eval /
+business permission 固定为 false。合法 pending 必须使用 `Command(resume=payload)`，external
+result 已落盘但 finalizer 未完成时才使用 `invoke(None)`，已完成且 payload 完全相同则 HTTP 200
+no-op，不同 payload 或关联错误返回 409。Java 失败重试使用相同的终态 payload；该端点不调用
+Planner、Tool、Java、OA 或 Memory pipeline。
 
 ---
 

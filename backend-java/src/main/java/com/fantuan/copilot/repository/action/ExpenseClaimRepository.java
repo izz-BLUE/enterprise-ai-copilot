@@ -37,6 +37,12 @@ public interface ExpenseClaimRepository {
     boolean tryMarkExternalApprovalChecked(String expenseId, String externalRequestId,
                                            Instant cutoff, Instant checkedAt);
 
+    List<ExpenseClaim> findExternalResumeCandidates(Instant cutoff, int limit);
+
+    boolean tryMarkExternalResumeAttempt(String expenseId, Instant cutoff, Instant attemptedAt);
+
+    void markExternalResumeCompleted(String expenseId, Instant completedAt);
+
     List<ExpenseItem> findItemsByExpenseId(String expenseId);
 
     /** 按 employee_id 倒序拉取最近报销单（只读企业 Tool 用）。 */

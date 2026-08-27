@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -34,13 +35,14 @@ class MockOaWebhookProcessingServiceTest {
 
     @Mock ExpenseClaimRepository claims;
     @Mock ExpenseApprovalGateway gateway;
+    @Mock ExpenseExternalResumeCoordinator resumeCoordinator;
     private MockOaWebhookProcessingService service;
 
     @BeforeEach
     void setUp() {
         ExpenseExternalApprovalStatusSyncService statusSyncService =
                 new ExpenseExternalApprovalStatusSyncService(claims, gateway,
-                        new TransactionTemplate(new NoopTransactionManager()));
+                        new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator);
         service = new MockOaWebhookProcessingService(statusSyncService);
     }
 
@@ -86,6 +88,19 @@ class MockOaWebhookProcessingServiceTest {
         service.process(webhook());
 
         verify(claims).applyExternalApprovalStatus(REQUEST_ID, ExpenseStatus.REJECTED);
+    }
+
+    @Test
+    void terminalStatusCommitsBeforeBestEffortExternalResume() {
+        stubClaim(ExpenseStatus.WAITING_APPROVAL);
+        when(gateway.getStatus(REQUEST_ID))
+                .thenReturn(new ExternalApprovalSubmissionResult(REQUEST_ID, "APPROVED"));
+
+        service.process(webhook());
+
+        var order = inOrder(claims, resumeCoordinator);
+        order.verify(claims).applyExternalApprovalStatus(REQUEST_ID, ExpenseStatus.APPROVED);
+        order.verify(resumeCoordinator).tryResume("EXP-1");
     }
 
     @Test

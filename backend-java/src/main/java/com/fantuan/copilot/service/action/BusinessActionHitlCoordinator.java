@@ -109,7 +109,7 @@ public class BusinessActionHitlCoordinator {
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
                         traceId, identity.asDemoIdentity());
                 reconcileAfterCommittedAction(actionId, routing, response,
-                        identity, presentedToken, traceId);
+                        identity, presentedToken, traceId, guardKey);
                 return response;
             } catch (ActionExpiredAfterUpdateException exception) {
                 reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
@@ -146,7 +146,7 @@ public class BusinessActionHitlCoordinator {
                         actionId, confirmationNonce, presentedToken, traceId,
                         identity.asDemoIdentity());
                 reconcileAfterCommittedAction(actionId, routing, response,
-                        identity, presentedToken, traceId);
+                        identity, presentedToken, traceId, guardKey);
                 return response;
             } catch (ActionExpiredAfterUpdateException exception) {
                 reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
@@ -212,11 +212,12 @@ public class BusinessActionHitlCoordinator {
                                                ActionExecutionResponse response,
                                                VerifiedIdentity identity,
                                                String presentedToken,
-                                               String traceId) {
+                                               String traceId,
+                                               String guardKey) {
         PendingAction action = actions.find(actionId).orElse(routing);
         if (response.status() == ActionStatus.SUCCEEDED) {
             if (action.actionType() == com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM) {
-                reconcileConfirmedExpense(action, response, identity, presentedToken, traceId);
+                reconcileConfirmedExpense(action, response, identity, presentedToken, traceId, guardKey);
                 return;
             }
             reconcileTerminal(actionId, action, identity, presentedToken, traceId,
@@ -231,7 +232,7 @@ public class BusinessActionHitlCoordinator {
 
     private void reconcileConfirmedExpense(PendingAction action, ActionExecutionResponse response,
                                            VerifiedIdentity identity, String presentedToken,
-                                           String traceId) {
+                                           String traceId, String guardKey) {
         if (action.hitlWaitId() == null || action.agentExecutionId() == null
                 || action.ownerUserId() == null || action.conversationId() == null) {
             return;
@@ -243,6 +244,10 @@ public class BusinessActionHitlCoordinator {
         try {
             PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity.employeeId(),
                     action.conversationId(), presentedToken, traceId, payload);
+            // The HITL resume has returned and the graph is now durably waiting
+            // for OA.  Hand the same runtime thread boundary to the external
+            // resume coordinator before it performs its own guard acquisition.
+            threadGuard.release(guardKey);
             externalApprovalCoordinator.registerExternalWaitAndDispatch(action, response,
                     pythonResponse.externalWait(), traceId);
         } catch (RuntimeException exception) {
