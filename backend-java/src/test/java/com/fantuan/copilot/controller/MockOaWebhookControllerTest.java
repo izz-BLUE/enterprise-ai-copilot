@@ -1,5 +1,6 @@
 package com.fantuan.copilot.controller;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fantuan.copilot.dto.webhook.MockOaExpenseApprovalWebhook;
 import com.fantuan.copilot.security.MockOaWebhookVerifier;
@@ -42,8 +43,10 @@ class MockOaWebhookControllerTest {
     void setUp() {
         MockOaWebhookVerifier verifier = new MockOaWebhookVerifier(
                 SECRET, 300, Clock.fixed(NOW, ZoneOffset.UTC));
+        ObjectMapper globallyLenientMapper = new ObjectMapper()
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         mockMvc = MockMvcBuilders.standaloneSetup(new MockOaWebhookController(
-                new ObjectMapper(), verifier, processingService)).build();
+                globallyLenientMapper, verifier, processingService)).build();
     }
 
     @Test
@@ -103,7 +106,7 @@ class MockOaWebhookControllerTest {
     }
 
     @Test
-    void webhookStatusFieldIsNotAcceptedAsAuthority() throws Exception {
+    void unknownStatusFieldIsRejectedEvenWhenGlobalMapperIgnoresUnknownProperties() throws Exception {
         String body = BODY.replace("}", ",\"status\":\"APPROVED\"}");
 
         mockMvc.perform(signedPost(body, NOW.getEpochSecond()))

@@ -1,6 +1,8 @@
 package com.fantuan.copilot.controller;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.fantuan.copilot.dto.webhook.MockOaExpenseApprovalWebhook;
 import com.fantuan.copilot.security.MockOaWebhookAuthenticationException;
 import com.fantuan.copilot.security.MockOaWebhookVerifier;
@@ -27,14 +29,15 @@ public class MockOaWebhookController {
 
     private static final Logger log = LoggerFactory.getLogger(MockOaWebhookController.class);
 
-    private final ObjectMapper objectMapper;
+    private final ObjectReader strictWebhookReader;
     private final MockOaWebhookVerifier verifier;
     private final MockOaWebhookProcessingService processingService;
 
     public MockOaWebhookController(ObjectMapper objectMapper,
                                    MockOaWebhookVerifier verifier,
                                    MockOaWebhookProcessingService processingService) {
-        this.objectMapper = objectMapper;
+        this.strictWebhookReader = objectMapper.readerFor(MockOaExpenseApprovalWebhook.class)
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         this.verifier = verifier;
         this.processingService = processingService;
     }
@@ -71,8 +74,7 @@ public class MockOaWebhookController {
 
     private MockOaExpenseApprovalWebhook parse(byte[] rawBody) {
         try {
-            MockOaExpenseApprovalWebhook webhook = objectMapper.readValue(rawBody,
-                    MockOaExpenseApprovalWebhook.class);
+            MockOaExpenseApprovalWebhook webhook = strictWebhookReader.readValue(rawBody);
             webhook.validate();
             return webhook;
         } catch (IOException | IllegalArgumentException exception) {
