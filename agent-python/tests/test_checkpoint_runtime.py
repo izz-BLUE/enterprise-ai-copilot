@@ -1,8 +1,12 @@
+from datetime import date
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.runtime.checkpoint_runtime import CheckpointRuntime
+from app.runtime.execution_recovery import RecoveryMode
+from app.schemas.execution_recovery_schema import new_execution_recovery_marker
 
 
 def _runtime(mode='POSTGRES', dsn='postgresql://runtime-test'):
@@ -93,3 +97,32 @@ def test_readiness_uses_lightweight_select_one_without_exposing_dsn():
 
     assert runtime.readiness() == {'enabled': True, 'ready': True}
     connection.execute.assert_called_once_with('SELECT 1')
+
+
+def test_inspect_recovery_reads_latest_state_only_without_history_scan():
+    runtime = _runtime()
+    graph = MagicMock()
+    graph.get_state.return_value = SimpleNamespace(
+        next=('planner_node',),
+        values={
+            'question': 'Q',
+            'execution_recovery': new_execution_recovery_marker(
+                'Q', date(2026, 8, 27),
+            ),
+        },
+        interrupts=(),
+        tasks=(),
+    )
+
+    decision = runtime.inspect_recovery(
+        graph=graph,
+        thread_id='rt_' + ('a' * 64) + ':planner-v1',
+        question='Q',
+        business_date=date(2026, 8, 27),
+    )
+
+    assert decision.mode is RecoveryMode.RESUME
+    graph.get_state.assert_called_once_with({
+        'configurable': {'thread_id': 'rt_' + ('a' * 64) + ':planner-v1'},
+    })
+    graph.get_state_history.assert_not_called()
