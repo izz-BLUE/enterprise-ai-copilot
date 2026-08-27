@@ -1,20 +1,31 @@
-"""Independent, durable Mock OA expense-submission boundary for P3-5B1."""
+"""Independent, durable Mock OA expense-submission boundary for P3-5B2a."""
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import logging
 import os
 import sqlite3
 import threading
+import time
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
+
+WEBHOOK_EVENT_TYPE = "EXPENSE_APPROVAL_CHANGED"
+TERMINAL_STATUSES = frozenset({"APPROVED", "REJECTED"})
 
 Money = Annotated[Decimal, Field(strict=False, ge=Decimal(0), decimal_places=2)]
 
@@ -110,12 +121,86 @@ class MockOaStore:
             ).fetchone()
         return None if row is None else ExpenseApprovalResponse(requestId=row[0], status=row[1])
 
+    def decide(self, request_id: str, decision: str) -> ExpenseApprovalResponse | None:
+        if decision not in TERMINAL_STATUSES:
+            raise ValueError("unsupported approval decision")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT request_id, status FROM expense_approval WHERE request_id = ?", (request_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            current_status = row[1]
+            if current_status == decision:
+                return ExpenseApprovalResponse(requestId=row[0], status=current_status)
+            if current_status != "PENDING":
+                raise ValueError("opposite terminal approval decision is not allowed")
+            connection.execute(
+                """
+                UPDATE expense_approval
+                SET status = ?
+                WHERE request_id = ? AND status = 'PENDING'
+                """,
+                (decision, request_id),
+            )
+            return ExpenseApprovalResponse(requestId=row[0], status=decision)
+
 
 def _store() -> MockOaStore:
     return MockOaStore(os.getenv("MOCK_OA_DB_PATH", "/tmp/mock-oa.sqlite3"))
 
 
-app = FastAPI(title="enterprise-ai-copilot Mock OA", version="P3-5B1")
+def _webhook_timeout_seconds() -> float:
+    try:
+        configured = float(os.getenv("MOCK_OA_WEBHOOK_TIMEOUT_SECONDS", "5"))
+    except ValueError:
+        configured = 5.0
+    return max(0.1, min(configured, 30.0))
+
+
+def send_approval_webhook(request_id: str) -> bool:
+    callback_url = os.getenv("MOCK_OA_WEBHOOK_URL", "").strip()
+    secret = os.getenv("MOCK_OA_WEBHOOK_SECRET", "")
+    if not callback_url or not secret:
+        logger.warning("Mock OA webhook unavailable: callback URL or secret is not configured")
+        return False
+
+    timestamp = str(int(time.time()))
+    body = json.dumps(
+        {
+            "eventId": str(uuid.uuid4()),
+            "eventType": WEBHOOK_EVENT_TYPE,
+            "requestId": request_id,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    signing_input = timestamp.encode("utf-8") + b"." + body
+    signature = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).hexdigest()
+    request = Request(
+        callback_url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Mock-OA-Timestamp": timestamp,
+            "X-Mock-OA-Signature": f"v1={signature}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=_webhook_timeout_seconds()) as response:
+            response.read()
+        logger.info("Mock OA webhook delivered requestId=%s", request_id)
+        return True
+    except (OSError, URLError, TimeoutError, ValueError) as exception:
+        logger.warning(
+            "Mock OA webhook delivery failed requestId=%s errorType=%s",
+            request_id,
+            type(exception).__name__,
+        )
+        return False
+
+
+app = FastAPI(title="enterprise-ai-copilot Mock OA", version="P3-5B2a")
 store = _store()
 
 
@@ -138,3 +223,34 @@ def get_expense_approval(request_id: str) -> ExpenseApprovalResponse:
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval request not found")
     return record
+
+
+def _decide_expense_approval(request_id: str, decision: str) -> ExpenseApprovalResponse:
+    try:
+        record = store.decide(request_id, decision)
+    except ValueError as exception:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exception)) from exception
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval request not found")
+
+    # Mock OA commits the terminal state before this best-effort notification.
+    send_approval_webhook(record.requestId)
+    return record
+
+
+@app.post(
+    "/api/admin/expense-approvals/{request_id}/approve",
+    response_model=ExpenseApprovalResponse,
+    status_code=status.HTTP_200_OK,
+)
+def approve_expense_approval(request_id: str) -> ExpenseApprovalResponse:
+    return _decide_expense_approval(request_id, "APPROVED")
+
+
+@app.post(
+    "/api/admin/expense-approvals/{request_id}/reject",
+    response_model=ExpenseApprovalResponse,
+    status_code=status.HTTP_200_OK,
+)
+def reject_expense_approval(request_id: str) -> ExpenseApprovalResponse:
+    return _decide_expense_approval(request_id, "REJECTED")

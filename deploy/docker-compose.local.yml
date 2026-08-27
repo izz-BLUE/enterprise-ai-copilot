@@ -28,6 +28,9 @@ services:
     restart: unless-stopped
     environment:
       MOCK_OA_DB_PATH: /data/mock-oa.sqlite3
+      MOCK_OA_WEBHOOK_URL: ${MOCK_OA_WEBHOOK_URL:-http://host.docker.internal:8080/api/webhooks/mock-oa/expense-approval}
+      MOCK_OA_WEBHOOK_SECRET: ${MOCK_OA_WEBHOOK_SECRET:-local-mock-oa-webhook-secret}
+      MOCK_OA_WEBHOOK_TIMEOUT_SECONDS: ${MOCK_OA_WEBHOOK_TIMEOUT_SECONDS:-5}
     ports:
       - "127.0.0.1:8010:8010"
     volumes:
