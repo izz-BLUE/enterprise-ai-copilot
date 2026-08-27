@@ -31,6 +31,7 @@ from app.schemas.execution_recovery_schema import (
     ExecutionRecoveryMarker,
     new_execution_recovery_marker,
 )
+from app.schemas.external_wait_schema import ExternalResumePayload, ExternalWaitMarker
 from app.schemas.hitl_schema import HitlResumePayload, HitlWaitMarker, proposal_action_type
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
@@ -77,6 +78,9 @@ class AgentState(TypedDict):
     # P3-4: persisted correlation for the single user-confirmation wait.
     hitl_wait: dict | None
     hitl_result: dict | None
+    # P3-5A: one durable external expense approval wait and its terminal result.
+    external_wait: dict | None
+    external_result: dict | None
 
 
 def safety_node(state: AgentState) -> dict:
@@ -359,6 +363,83 @@ def approval_node(state: AgentState) -> dict:
     }
 
 
+def _should_wait_for_external_approval(state: AgentState) -> bool:
+    """Route only a confirmed expense with its Java ExpenseClaim id."""
+    try:
+        result = HitlResumePayload.model_validate(state.get('hitl_result'))
+    except Exception:
+        raise RuntimeError('HITL result 无效，禁止进入 external wait 路由') from None
+    if result.decision != 'CONFIRMED' or result.action_type != 'EXPENSE_CLAIM':
+        return False
+    if not result.request_id:
+        raise RuntimeError('已确认的报销动作缺少本地 ExpenseClaim request_id')
+    return True
+
+
+def prepare_external_wait_node(state: AgentState) -> dict:
+    """Persist deterministic correlation without calling any external system."""
+    if not _should_wait_for_external_approval(state):
+        raise RuntimeError('当前状态不允许进入 external approval wait')
+    try:
+        recovery = ExecutionRecoveryMarker.model_validate(state.get('execution_recovery'))
+        hitl_result = HitlResumePayload.model_validate(state.get('hitl_result'))
+        if hitl_result.request_id is None:
+            raise ValueError('request_id missing')
+        wait = ExternalWaitMarker.for_execution(
+            recovery.execution_id,
+            hitl_result.request_id,
+        )
+    except Exception as exc:
+        logger.error('External wait marker 构造失败 error_type=%s', type(exc).__name__)
+        raise RuntimeError('External wait marker 无效') from None
+    return {
+        'external_wait': wait.model_dump(),
+        'external_result': None,
+        'answer': '报销申请已提交，正在等待外部审批。',
+        'route': 'action',
+        'category': 'business_action',
+        'reason': '',
+    }
+
+
+def external_wait_node(state: AgentState) -> dict:
+    """Consume exactly one correlated Java-authoritative OA terminal decision."""
+    try:
+        wait = ExternalWaitMarker.model_validate(state.get('external_wait'))
+    except Exception:
+        logger.error('External approval marker 校验失败')
+        raise RuntimeError('External wait marker 无效') from None
+
+    # LangGraph 1.2.9 re-enters this node from the beginning on resume.  Keep
+    # everything before interrupt() deterministic and side-effect free.
+    resumed = interrupt(wait.model_dump())
+    try:
+        payload = ExternalResumePayload.model_validate(resumed)
+    except Exception:
+        logger.warning('External authoritative resume payload 校验失败')
+        raise RuntimeError('External resume payload 无效') from None
+    if (
+        payload.wait_id != wait.wait_id
+        or payload.execution_id != wait.execution_id
+        or payload.action_type != wait.action_type
+        or payload.request_id != wait.request_id
+    ):
+        logger.warning('External authoritative resume correlation mismatch')
+        raise RuntimeError('External resume correlation 不匹配')
+    return {
+        'external_result': payload.model_dump(),
+        'action_proposal': None,
+        'missing_fields': [],
+        'answer': payload.message,
+        'route': 'action',
+        'category': 'business_action',
+        'reason': '',
+        'stop_reason': (
+            'external_approved' if payload.decision == 'APPROVED' else 'external_rejected'
+        ),
+    }
+
+
 def compile_agent_loop_graph(
     checkpointer: Any | None = None,
     *,
@@ -382,6 +463,8 @@ def compile_agent_loop_graph(
     if enable_hitl:
         graph.add_node("prepare_hitl_node", prepare_hitl_node)
         graph.add_node("approval_node", approval_node)
+        graph.add_node("prepare_external_wait_node", prepare_external_wait_node)
+        graph.add_node("external_wait_node", external_wait_node)
     graph.add_node("finalize_node", finalize_node)
 
     graph.add_edge(START, "safety_node")
@@ -413,7 +496,20 @@ def compile_agent_loop_graph(
     graph.add_edge("tool_executor_node", "planner_node")
     if enable_hitl:
         graph.add_edge("prepare_hitl_node", "approval_node")
-        graph.add_edge("approval_node", "finalize_node")
+        graph.add_conditional_edges(
+            "approval_node",
+            lambda state: (
+                "prepare_external_wait_node"
+                if _should_wait_for_external_approval(state)
+                else "finalize_node"
+            ),
+            {
+                "prepare_external_wait_node": "prepare_external_wait_node",
+                "finalize_node": "finalize_node",
+            },
+        )
+        graph.add_edge("prepare_external_wait_node", "external_wait_node")
+        graph.add_edge("external_wait_node", "finalize_node")
     graph.add_edge("finalize_node", END)
 
     return graph.compile(checkpointer=checkpointer)
@@ -503,6 +599,7 @@ def _finalize_response_contract(state: dict) -> dict:
     # LLM to reinterpret that result during finalization.
     if stop_reason in {
         'hitl_confirmed', 'hitl_cancelled', 'hitl_expired', 'hitl_rejected',
+        'external_approved', 'external_rejected',
     }:
         state['route'] = 'action'
         state['category'] = 'business_action'
@@ -638,6 +735,8 @@ def run_langgraph_agent(
         ),
         "hitl_wait": None,
         "hitl_result": None,
+        "external_wait": None,
+        "external_result": None,
     }
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
@@ -723,6 +822,33 @@ def resume_hitl_langgraph_agent(
     employee_id: str = '',
 ) -> dict:
     """Resume the active approval interrupt with Java's validated result."""
+    runtime_context = _build_runtime_context(
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        business_date=business_date,
+        trace_id=trace_id,
+        employee_id=employee_id,
+    )
+    return dict(graph.invoke(
+        Command(resume=payload.model_dump()),
+        config=_build_graph_config(runtime_thread_id, trace_id),
+        context=runtime_context,
+        durability='sync',
+    ))
+
+
+def resume_external_langgraph_agent(
+    *,
+    graph: Any,
+    runtime_thread_id: str,
+    payload: ExternalResumePayload,
+    allow_eval: bool = False,
+    allow_business_actions: bool = False,
+    business_date: date | None = None,
+    trace_id: str = '',
+    employee_id: str = '',
+) -> dict:
+    """Resume the active external interrupt with fresh trusted Runtime Context."""
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
         allow_business_actions=allow_business_actions,

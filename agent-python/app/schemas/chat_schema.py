@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.action_schema import AnnualLeaveActionProposal
 from app.schemas.expense_schema import ExpenseActionProposal
+from app.schemas.external_wait_schema import ExternalWaitMarker
 from app.schemas.hitl_schema import HitlWaitMarker
 
 
@@ -74,3 +75,6 @@ class AgentResponse(BaseModel):
     # Internal Java-only field.  It is deliberately not copied into the
     # public AgentChatResponse DTO.
     hitl_wait: HitlWaitMarker | None = None
+    # Internal Java-only external approval correlation.  P3-5B will decide
+    # how Java stores it and keeps it out of the browser contract.
+    external_wait: ExternalWaitMarker | None = None

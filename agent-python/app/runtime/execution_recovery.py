@@ -13,6 +13,7 @@ from app.schemas.execution_recovery_schema import (
     fingerprint_actor_scope,
     fingerprint_request,
 )
+from app.schemas.external_wait_schema import ExternalResumePayload, ExternalWaitMarker
 from app.schemas.hitl_schema import HitlResumePayload, HitlWaitMarker
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
@@ -43,6 +44,9 @@ class RecoveryMode(str, Enum):
     WAITING_USER = 'WAITING_USER'
     HITL_CONTINUATION = 'HITL_CONTINUATION'
     HITL_COMPLETED = 'HITL_COMPLETED'
+    WAITING_EXTERNAL = 'WAITING_EXTERNAL'
+    EXTERNAL_CONTINUATION = 'EXTERNAL_CONTINUATION'
+    EXTERNAL_COMPLETED = 'EXTERNAL_COMPLETED'
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,7 @@ class RecoveryDecision:
     pending_node: str | None = None
     execution_id: str | None = None
     hitl_wait: dict | None = None
+    external_wait: dict | None = None
 
     @property
     def is_conflict(self) -> bool:
@@ -61,6 +66,9 @@ class RecoveryDecision:
             RecoveryMode.WAITING_USER,
             RecoveryMode.HITL_CONTINUATION,
             RecoveryMode.HITL_COMPLETED,
+            RecoveryMode.WAITING_EXTERNAL,
+            RecoveryMode.EXTERNAL_CONTINUATION,
+            RecoveryMode.EXTERNAL_COMPLETED,
         )
 
 
@@ -82,6 +90,37 @@ def _pending_interrupts(snapshot: Any) -> list[Any]:
 
 def _has_pending_interrupt(snapshot: Any) -> bool:
     return bool(_pending_interrupts(snapshot))
+
+
+def _validate_external_wait_state(
+    values: dict,
+    interrupts: list[Any],
+    next_nodes: tuple,
+) -> tuple[ExecutionRecoveryMarker, ExternalWaitMarker] | None:
+    """Strictly validate the one active external interrupt and its provenance."""
+    if len(interrupts) != 1 or next_nodes != ('external_wait_node',):
+        return None
+    try:
+        marker = ExecutionRecoveryMarker.model_validate(values.get('execution_recovery'))
+        wait = ExternalWaitMarker.model_validate(values.get('external_wait'))
+        interrupt_wait = ExternalWaitMarker.model_validate(
+            getattr(interrupts[0], 'value', None),
+        )
+        hitl_result = HitlResumePayload.model_validate(values.get('hitl_result'))
+    except (TypeError, ValidationError):
+        return None
+    if (
+        wait != interrupt_wait
+        or wait.execution_id != marker.execution_id
+        or hitl_result.decision != 'CONFIRMED'
+        or hitl_result.action_type != 'EXPENSE_CLAIM'
+        or hitl_result.execution_id != marker.execution_id
+        or hitl_result.request_id != wait.request_id
+        or values.get('action_proposal') is not None
+        or values.get('external_result') is not None
+    ):
+        return None
+    return marker, wait
 
 
 def _current_date_anchor(business_date: date | None) -> str | None:
@@ -152,6 +191,22 @@ def inspect_recovery(
             return RecoveryDecision(
                 RecoveryMode.UNSUPPORTED_INTERRUPT,
                 reason='multiple_pending_interrupts',
+            )
+        external = _validate_external_wait_state(values, interrupts, next_nodes)
+        if external is not None:
+            marker, wait = external
+            if marker.actor_scope_fingerprint != fingerprint_actor_scope(employee_id):
+                return RecoveryDecision(
+                    RecoveryMode.CONFLICT_ACTOR_SCOPE,
+                    reason='actor_scope_changed',
+                    execution_id=marker.execution_id,
+                )
+            return RecoveryDecision(
+                RecoveryMode.WAITING_EXTERNAL,
+                reason='external_expense_approval_pending',
+                pending_node='external_wait_node',
+                execution_id=marker.execution_id,
+                external_wait=wait.model_dump(),
             )
         try:
             marker = ExecutionRecoveryMarker.model_validate(
@@ -341,6 +396,33 @@ def inspect_hitl_resume(
         )
 
     next_nodes = tuple(getattr(snapshot, 'next', ()) or ())
+    interrupts = _pending_interrupts(snapshot)
+    external = _validate_external_wait_state(values, interrupts, next_nodes)
+    if external is not None:
+        _, external_wait = external
+        try:
+            consumed = HitlResumePayload.model_validate(values.get('hitl_result'))
+        except (TypeError, ValidationError):
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='external_wait_hitl_result_invalid',
+                execution_id=marker.execution_id,
+            )
+        if consumed != payload:
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='external_wait_hitl_result_mismatch',
+                execution_id=marker.execution_id,
+            )
+        return RecoveryDecision(
+            RecoveryMode.WAITING_EXTERNAL,
+            reason='hitl_response_lost_external_wait_persisted',
+            pending_node='external_wait_node',
+            execution_id=marker.execution_id,
+            hitl_wait=wait.model_dump(),
+            external_wait=external_wait.model_dump(),
+        )
+
     if not next_nodes:
         try:
             completed = HitlResumePayload.model_validate(values.get('hitl_result'))
@@ -363,7 +445,6 @@ def inspect_hitl_resume(
             hitl_wait=wait.model_dump(),
         )
 
-    interrupts = _pending_interrupts(snapshot)
     if len(interrupts) == 1 and next_nodes == ('approval_node',):
         try:
             pending_wait = HitlWaitMarker.model_validate(
@@ -415,5 +496,110 @@ def inspect_hitl_resume(
     return RecoveryDecision(
         RecoveryMode.UNSAFE_REPLAY,
         reason='unknown_hitl_pending_node',
+        execution_id=marker.execution_id,
+    )
+
+
+def inspect_external_resume(
+    snapshot: Any | None,
+    payload: ExternalResumePayload,
+    *,
+    employee_id: str,
+) -> RecoveryDecision:
+    """Validate one authoritative external resume against the latest head only."""
+    if snapshot is None:
+        return RecoveryDecision(RecoveryMode.INCOMPATIBLE_CHECKPOINT, reason='no_snapshot')
+    values = getattr(snapshot, 'values', None)
+    if not isinstance(values, dict):
+        return RecoveryDecision(
+            RecoveryMode.INCOMPATIBLE_CHECKPOINT,
+            reason='state_values_missing',
+        )
+    try:
+        marker = ExecutionRecoveryMarker.model_validate(values.get('execution_recovery'))
+        wait = ExternalWaitMarker.model_validate(values.get('external_wait'))
+    except (TypeError, ValidationError):
+        return RecoveryDecision(
+            RecoveryMode.INCOMPATIBLE_CHECKPOINT,
+            reason='external_marker_invalid',
+        )
+    if marker.actor_scope_fingerprint != fingerprint_actor_scope(employee_id):
+        return RecoveryDecision(
+            RecoveryMode.CONFLICT_ACTOR_SCOPE,
+            reason='actor_scope_changed',
+            execution_id=marker.execution_id,
+        )
+    if (
+        payload.wait_id != wait.wait_id
+        or payload.execution_id != marker.execution_id
+        or payload.action_type != wait.action_type
+        or payload.request_id != wait.request_id
+    ):
+        return RecoveryDecision(
+            RecoveryMode.UNSAFE_REPLAY,
+            reason='external_resume_correlation_mismatch',
+            execution_id=marker.execution_id,
+        )
+
+    next_nodes = tuple(getattr(snapshot, 'next', ()) or ())
+    interrupts = _pending_interrupts(snapshot)
+    if not next_nodes:
+        try:
+            completed = ExternalResumePayload.model_validate(values.get('external_result'))
+        except (TypeError, ValidationError):
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='completed_external_result_missing',
+                execution_id=marker.execution_id,
+            )
+        if completed != payload:
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='completed_external_result_mismatch',
+                execution_id=marker.execution_id,
+            )
+        return RecoveryDecision(
+            RecoveryMode.EXTERNAL_COMPLETED,
+            reason='completed',
+            execution_id=marker.execution_id,
+            external_wait=wait.model_dump(),
+        )
+
+    external = _validate_external_wait_state(values, interrupts, next_nodes)
+    if external is not None:
+        return RecoveryDecision(
+            RecoveryMode.WAITING_EXTERNAL,
+            reason='external_expense_approval_pending',
+            pending_node='external_wait_node',
+            execution_id=marker.execution_id,
+            external_wait=wait.model_dump(),
+        )
+
+    if next_nodes == ('finalize_node',) and not interrupts:
+        try:
+            result = ExternalResumePayload.model_validate(values.get('external_result'))
+        except (TypeError, ValidationError):
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='external_continuation_result_invalid',
+                execution_id=marker.execution_id,
+            )
+        if result != payload:
+            return RecoveryDecision(
+                RecoveryMode.UNSAFE_REPLAY,
+                reason='external_continuation_result_mismatch',
+                execution_id=marker.execution_id,
+            )
+        return RecoveryDecision(
+            RecoveryMode.EXTERNAL_CONTINUATION,
+            reason='finalization_pending',
+            pending_node='finalize_node',
+            execution_id=marker.execution_id,
+            external_wait=wait.model_dump(),
+        )
+
+    return RecoveryDecision(
+        RecoveryMode.UNSAFE_REPLAY,
+        reason='unknown_external_pending_node',
         execution_id=marker.execution_id,
     )

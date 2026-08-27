@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.agents.langgraph_agent import (
+    resume_external_langgraph_agent,
     resume_hitl_langgraph_agent,
     resume_langgraph_agent,
     run_langgraph_agent,
@@ -41,13 +42,18 @@ from app.memory.memory_write_policy import MemoryWriteCommand
 from app.retrieval.chunk_store import chunk_store_status
 from app.retrieval.faiss_retriever import faiss_status
 from app.runtime.checkpoint_runtime import CheckpointRuntime
-from app.runtime.execution_recovery import RecoveryMode, inspect_hitl_resume
+from app.runtime.execution_recovery import (
+    RecoveryMode,
+    inspect_external_resume,
+    inspect_hitl_resume,
+)
 from app.schemas.chat_schema import (
     AgentMemoryProposal,
     AgentResponse,
     ChatRequest,
     ChatResponse,
 )
+from app.schemas.external_wait_schema import ExternalResumePayload
 from app.schemas.hitl_schema import HitlResumePayload
 from app.schemas.version_schema import VersionResponse
 from app.services.llm_service import call_llm
@@ -73,6 +79,7 @@ _BOUNDED_AI_PATHS = {
     '/agent/chat',
     '/agent/langgraph/chat',
     '/agent/langgraph/hitl/resume',
+    '/agent/langgraph/external/resume',
 }
 
 # 配置在 import 时 fail-closed 校验；模式不在白名单时服务不应静默运行。
@@ -131,7 +138,11 @@ def _build_memory_runtime_hook(
 
 def _busy_response(path: str, trace_id: str) -> JSONResponse:
     common_headers = {'X-Trace-Id': trace_id, 'Retry-After': '1'}
-    if path in {'/agent/langgraph/chat', '/agent/langgraph/hitl/resume'}:
+    if path in {
+        '/agent/langgraph/chat',
+        '/agent/langgraph/hitl/resume',
+        '/agent/langgraph/external/resume',
+    }:
         content = {
             'answer': '当前请求较多，请稍后重试。',
             'route': 'busy',
@@ -334,6 +345,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     graph = None
     runtime_thread_id = None
     execution_history: list[dict] = []
+    skip_memory_pipeline = False
     if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES':
         checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
         if checkpoint_runtime is None:
@@ -422,6 +434,25 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         'success': True,
                         'hitl_wait': recovery.hitl_wait,
                     })
+                elif recovery is not None and recovery.mode is RecoveryMode.WAITING_EXTERNAL:
+                    # An external OA wait outranks a new user question and is
+                    # never crossed by ordinary crash recovery.
+                    snapshot = graph.get_state(
+                        {'configurable': {'thread_id': runtime_thread_id}},
+                    )
+                    values = getattr(snapshot, 'values', None)
+                    if not isinstance(values, dict):
+                        return _checkpoint_failure_response(trace_id, status_code=503)
+                    result = dict(values)
+                    result.update({
+                        'answer': '报销申请已提交，正在等待外部审批。',
+                        'route': 'action',
+                        'category': 'business_action',
+                        'safe': True,
+                        'success': True,
+                        'external_wait': recovery.external_wait,
+                    })
+                    skip_memory_pipeline = True
                 else:
                     try:
                         execution_history = checkpoint_runtime.load_execution_history(
@@ -465,7 +496,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
         # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
         conversation_id = req.headers.get('x-conversation-id', '')
         memory_proposal = None
-        if _memory_execution_policy.mode != 'DISABLED':
+        if not skip_memory_pipeline and _memory_execution_policy.mode != 'DISABLED':
             runtime = _build_memory_runtime_hook(trace_id=trace_id)
             if runtime is not None:
                 memory_hook, response_writer = runtime
@@ -491,6 +522,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             missing_fields=result.get('missing_fields', []),
             memory_proposal=memory_proposal,
             hitl_wait=result.get('hitl_wait'),
+            external_wait=result.get('external_wait'),
         )
         if not response.success:
             return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
@@ -590,6 +622,14 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
                 {'configurable': {'thread_id': runtime_thread_id}},
             )
             result = dict(snapshot.values)
+        elif decision.mode is RecoveryMode.WAITING_EXTERNAL:
+            # P3-4 response-loss recovery: the CONFIRMED decision was already
+            # consumed and the second interrupt is durable.  Return it without
+            # re-running approval, Planner, Tool, or any resume command.
+            snapshot = graph.get_state(
+                {'configurable': {'thread_id': runtime_thread_id}},
+            )
+            result = dict(snapshot.values)
         else:
             logger.warning(
                 '[%s] HITL resume rejected mode=%s reason=%s',
@@ -615,6 +655,113 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
         missing_fields=[],
         memory_proposal=None,
         hitl_wait=result.get('hitl_wait'),
+        external_wait=result.get('external_wait'),
+    )
+    if not response.success:
+        return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+    return response
+
+
+@app.post('/agent/langgraph/external/resume', response_model=AgentResponse)
+def langgraph_external_resume(
+    payload: ExternalResumePayload,
+    req: Request,
+) -> AgentResponse | JSONResponse:
+    """Resume one durable external expense approval with Java authority."""
+    trace_id = req.state.trace_id
+    if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
+        return _checkpoint_failure_response(trace_id, status_code=503)
+
+    allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
+    allow_business_actions = (
+        req.headers.get('x-allow-business-actions', 'false').lower() == 'true'
+    )
+    business_date = None
+    business_date_header = req.headers.get('x-business-date')
+    if business_date_header:
+        try:
+            business_date = date.fromisoformat(business_date_header)
+        except ValueError:
+            return _external_resume_conflict_response(trace_id)
+    employee_id = (req.headers.get('x-employee-id') or '').strip()
+
+    checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
+    if checkpoint_runtime is None:
+        return _checkpoint_failure_response(trace_id, status_code=503)
+    try:
+        runtime_thread_id = checkpoint_runtime.build_thread_id(
+            (req.headers.get('x-agent-thread-id') or '').strip(),
+            use_planner=True,
+        )
+        graph = checkpoint_runtime.get_graph(use_planner=True)
+    except (RuntimeError, ValueError):
+        return _checkpoint_failure_response(trace_id, status_code=400)
+
+    if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
+        return _busy_response('/agent/langgraph/external/resume', trace_id)
+    try:
+        try:
+            decision = inspect_external_resume(
+                graph.get_state({'configurable': {'thread_id': runtime_thread_id}}),
+                payload,
+                employee_id=employee_id,
+            )
+        except Exception:
+            logger.exception('[%s] External resume inspection 读取失败', trace_id)
+            return _checkpoint_failure_response(trace_id, status_code=503)
+
+        if decision.mode is RecoveryMode.WAITING_EXTERNAL:
+            result = resume_external_langgraph_agent(
+                graph=graph,
+                runtime_thread_id=runtime_thread_id,
+                payload=payload,
+                allow_eval=allow_eval,
+                allow_business_actions=allow_business_actions,
+                business_date=business_date,
+                trace_id=trace_id,
+                employee_id=employee_id,
+            )
+        elif decision.mode is RecoveryMode.EXTERNAL_CONTINUATION:
+            result = resume_langgraph_agent(
+                graph=graph,
+                runtime_thread_id=runtime_thread_id,
+                allow_eval=allow_eval,
+                allow_business_actions=allow_business_actions,
+                business_date=business_date,
+                trace_id=trace_id,
+                employee_id=employee_id,
+            )
+        elif decision.mode is RecoveryMode.EXTERNAL_COMPLETED:
+            snapshot = graph.get_state(
+                {'configurable': {'thread_id': runtime_thread_id}},
+            )
+            result = dict(snapshot.values)
+        else:
+            logger.warning(
+                '[%s] External resume rejected mode=%s reason=%s',
+                trace_id, decision.mode.value, decision.reason,
+            )
+            return _external_resume_conflict_response(trace_id)
+    except Exception:
+        logger.exception('[%s] External resume 执行失败', trace_id)
+        return _checkpoint_failure_response(trace_id, status_code=502)
+    finally:
+        checkpoint_runtime.release_thread(runtime_thread_id)
+
+    response = AgentResponse(
+        answer=result.get('answer', ''),
+        route=result.get('route', 'action'),
+        safe=result.get('safe', True),
+        category=result.get('category', 'business_action'),
+        reason='',
+        sources=result.get('sources', []),
+        success=result.get('route', 'action') != 'error',
+        traceId=trace_id,
+        action_proposal=None,
+        missing_fields=[],
+        memory_proposal=None,
+        hitl_wait=result.get('hitl_wait'),
+        external_wait=result.get('external_wait'),
     )
     if not response.success:
         return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
@@ -654,6 +801,20 @@ def _recovery_conflict_response(trace_id: str) -> JSONResponse:
 def _hitl_resume_conflict_response(trace_id: str) -> JSONResponse:
     response = AgentResponse(
         answer='当前确认请求与执行快照不匹配，未恢复该业务动作。',
+        route='error',
+        safe=True,
+        category='recovery_conflict',
+        reason='',
+        sources=[],
+        success=False,
+        traceId=trace_id,
+    )
+    return JSONResponse(status_code=409, content=response.model_dump(mode='json'))
+
+
+def _external_resume_conflict_response(trace_id: str) -> JSONResponse:
+    response = AgentResponse(
+        answer='当前外部审批结果与执行快照不匹配，未恢复该业务动作。',
         route='error',
         safe=True,
         category='recovery_conflict',
