@@ -2,6 +2,7 @@ package com.fantuan.copilot.config;
 
 import com.fantuan.copilot.auth.AuthProperties;
 import com.fantuan.copilot.auth.AppUserDetailsService;
+import com.fantuan.copilot.controller.MockOaWebhookController;
 import com.fantuan.copilot.security.DemoIdentityFallbackAuthenticationFilter;
 import com.fantuan.copilot.security.JwtPrincipalConverter;
 import com.fantuan.copilot.security.SecurityErrorHandlers;
@@ -100,6 +101,7 @@ public class SecurityConfig {
                                 "/api/agent/health", "/api/agent/ready").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo/identities").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, MockOaWebhookController.PATH).permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
                         .requestMatchers("/api/internal/expense/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

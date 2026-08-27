@@ -475,6 +475,60 @@ HITL 注册只有显式确定性 Proposal 校验错误（`BUSINESS_RULE_VIOLATIO
 
 `X-Demo-User-Id` 仅是默认关闭的本地/受控兼容 fallback，不是登录凭证；任何公开生产环境都不得依赖它建立用户身份。
 
+### POST /api/webhooks/mock-oa/expense-approval（P3-5B2a）
+
+Mock OA 的唯一 Java webhook 接收路径。该路径在 Spring Security 中仅对这个精确的
+`POST` permitAll；真实认证边界是 HMAC，不使用浏览器 JWT。
+
+请求头：
+
+```text
+X-Mock-OA-Timestamp: <unix epoch seconds>
+X-Mock-OA-Signature: v1=<lowercase hex HMAC-SHA256>
+```
+
+签名输入为 `timestamp + "." + exact raw HTTP request body bytes`，共享密钥由
+`MOCK_OA_WEBHOOK_SECRET` 配置。Java 要求时间戳可解析且与当前服务器时间相差不超过
+5 分钟，并使用 constant-time 比较签名；校验顺序是原始字节、HMAC/时间戳、严格 DTO、
+业务处理。
+
+请求体只允许以下字段，不接受 `status` 或其他未知字段：
+
+```json
+{
+  "eventId": "evt-...",
+  "eventType": "EXPENSE_APPROVAL_CHANGED",
+  "requestId": "OA-EXP-..."
+}
+```
+
+`status` 不来自 webhook。Java 通过 `GET /api/expense-approvals/{requestId}` 重新读取
+Mock OA 权威状态，再将本地 `ExpenseClaim` 从 `WAITING_APPROVAL` 幂等更新为
+`APPROVED` 或 `REJECTED`；PENDING、重复通知和乱序通知不能使本地状态回退。未知本地
+request 会安全 no-op。P3-5B2a 不调用 `/agent/langgraph/external/resume`，Graph 仍为
+`WAITING_EXTERNAL`。后续接线属于 P3-5B3。
+
+---
+
+## Mock OA API（端口 8010）
+
+Mock OA 是独立的演示外部系统，使用 SQLite 持久化 approval request。提交接口
+`POST /api/expense-approvals` 通过 `Idempotency-Key` 创建或重放请求，返回
+`requestId` 与 `PENDING` / `APPROVED` / `REJECTED` 状态；查询接口为
+`GET /api/expense-approvals/{requestId}`。
+
+P3-5B2a 新增 Demo OA operator 接口：
+
+```text
+POST /api/admin/expense-approvals/{requestId}/approve
+POST /api/admin/expense-approvals/{requestId}/reject
+```
+
+它们属于 Mock OA 的隔离演示操作面，不是 Enterprise-AI-Copilot 浏览器 API。
+`PENDING → APPROVED/REJECTED`，同终态重放幂等，反向终态返回 `409`，未知 request
+返回 `404`；不实现 `PAID`。终态 SQLite 提交后，Mock OA 才向 Java webhook 发送
+不含 status 的 HMAC 签名通知；回调失败不回滚已提交的 OA 状态。
+
 ---
 
 ## Python AI Service API（端口 8000）
@@ -561,7 +615,12 @@ Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、corre
 
 ### POST /agent/langgraph/external/resume
 
-P3-5A 提供的 Python 内部恢复端点。P3-5B1 已实现 Java → Mock OA **提交**与本地 external correlation，但仍没有该 external resume endpoint 的 Java production caller：Webhook / 审批结果接线属于后续 B2。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与 `X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
+P3-5A 提供的 Python 内部恢复端点。P3-5B2a 已实现 Java → Mock OA **提交**、本地
+external correlation、HMAC webhook 接收和 Java authoritative GET，但仍明确没有该
+external resume endpoint 的 Java production caller；external resume 接线属于后续
+B3。请求必须带 Java 未来从本地 ExpenseClaim 反查并恢复的 `X-Agent-Thread-Id`、
+`X-Employee-Id`、`X-Business-Date`、`X-Trace-Id`、`X-Allow-Eval` 与
+`X-Allow-Business-Actions`。body 只接受真正 terminal 的 OA decision：
 
 ```json
 {

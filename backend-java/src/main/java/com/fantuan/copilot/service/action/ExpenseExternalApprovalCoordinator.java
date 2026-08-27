@@ -116,15 +116,23 @@ public class ExpenseExternalApprovalCoordinator {
         try {
             ExternalApprovalSubmissionResult result = approvalGateway.submit(claim);
             if (result == null || result.requestId() == null || result.requestId().isBlank()
-                    || !"PENDING".equals(result.status())) {
+                    || !result.isSupportedStatus()) {
                 throw new IllegalStateException("Unexpected external approval submission result");
             }
             transactions.executeWithoutResult(ignored -> claims.bindExternalRequest(
                     claim.expenseId(), MockOaExpenseApprovalGateway.PROVIDER, result.requestId()));
+            if (result.isTerminal()) {
+                transactions.executeWithoutResult(ignored -> claims.applyExternalApprovalStatus(
+                        result.requestId(), terminalStatus(result.status())));
+            }
         } catch (RuntimeException exception) {
             log.warn("[{}] EXTERNAL_SUBMISSION_PENDING expenseIdPrefix={} errorType={}", traceId,
                     BusinessActionService.auditRef(claim.expenseId()),
                     exception.getClass().getSimpleName());
         }
+    }
+
+    private ExpenseStatus terminalStatus(String status) {
+        return "APPROVED".equals(status) ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED;
     }
 }
