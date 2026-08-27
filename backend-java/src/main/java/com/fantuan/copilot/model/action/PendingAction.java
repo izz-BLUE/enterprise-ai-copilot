@@ -11,6 +11,8 @@ public final class PendingAction {
     private final String originTraceId;
     private final String ownerUserId;
     private final String conversationId;
+    private final String agentExecutionId;
+    private final String hitlWaitId;
     private final String employeeId;
     private final String displayName;
     private final LocalDate startDate;
@@ -46,7 +48,7 @@ public final class PendingAction {
                 employeeId, displayName, startDate, endDate, halfDay, reason, days,
                 balanceBefore, balanceAfter, confirmationNonceDigest, status,
                 idempotencyKey, requestId, executionMessage, failureCode,
-                createdAt, expiresAt, completedAt, null);
+                createdAt, expiresAt, completedAt, null, null, null);
     }
 
     public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
@@ -57,12 +59,15 @@ public final class PendingAction {
                          byte[] confirmationNonceDigest, ActionStatus status,
                          UUID idempotencyKey, String requestId, String executionMessage,
                          String failureCode, Instant createdAt, Instant expiresAt,
-                         Instant completedAt, String actionPayloadJson) {
+                         Instant completedAt, String actionPayloadJson,
+                         String agentExecutionId, String hitlWaitId) {
         this.actionId = actionId;
         this.actionType = actionType;
         this.originTraceId = originTraceId;
         this.ownerUserId = ownerUserId;
         this.conversationId = conversationId;
+        this.agentExecutionId = agentExecutionId;
+        this.hitlWaitId = hitlWaitId;
         this.employeeId = employeeId;
         this.displayName = displayName;
         this.startDate = startDate;
@@ -82,6 +87,22 @@ public final class PendingAction {
         this.expiresAt = expiresAt;
         this.completedAt = completedAt;
         this.actionPayloadJson = actionPayloadJson;
+    }
+
+    public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
+                         String ownerUserId, String conversationId,
+                         String employeeId, String displayName, LocalDate startDate,
+                         LocalDate endDate, HalfDay halfDay, String reason, BigDecimal days,
+                         BigDecimal balanceBefore, BigDecimal balanceAfter,
+                         byte[] confirmationNonceDigest, ActionStatus status,
+                         UUID idempotencyKey, String requestId, String executionMessage,
+                         String failureCode, Instant createdAt, Instant expiresAt,
+                         Instant completedAt, String actionPayloadJson) {
+        this(actionId, actionType, originTraceId, ownerUserId, conversationId,
+                employeeId, displayName, startDate, endDate, halfDay, reason, days,
+                balanceBefore, balanceAfter, confirmationNonceDigest, status,
+                idempotencyKey, requestId, executionMessage, failureCode,
+                createdAt, expiresAt, completedAt, actionPayloadJson, null, null);
     }
 
     /**
@@ -104,7 +125,25 @@ public final class PendingAction {
         return new PendingAction(actionId, actionType, originTraceId, ownerUserId, conversationId,
                 employeeId, displayName, startDate, endDate, halfDay, reason, days, balanceBefore,
                 balanceAfter, nonceDigest, ActionStatus.PENDING_CONFIRMATION, null, null, null, null,
-                createdAt, expiresAt, null, actionPayloadJson);
+                createdAt, expiresAt, null, actionPayloadJson, null, null);
+    }
+
+    /** P3-4 factory with immutable LangGraph wait correlation metadata. */
+    public static PendingAction pending(String actionId, BusinessActionType actionType,
+                                        String originTraceId, String ownerUserId,
+                                        String conversationId, String employeeId,
+                                        String displayName, LocalDate startDate,
+                                        LocalDate endDate, HalfDay halfDay, String reason,
+                                        BigDecimal days, BigDecimal balanceBefore,
+                                        BigDecimal balanceAfter, byte[] nonceDigest,
+                                        Instant createdAt, Instant expiresAt,
+                                        String actionPayloadJson, String agentExecutionId,
+                                        String hitlWaitId) {
+        return new PendingAction(actionId, actionType, originTraceId, ownerUserId,
+                conversationId, employeeId, displayName, startDate, endDate, halfDay,
+                reason, days, balanceBefore, balanceAfter, nonceDigest,
+                ActionStatus.PENDING_CONFIRMATION, null, null, null, null,
+                createdAt, expiresAt, null, actionPayloadJson, agentExecutionId, hitlWaitId);
     }
 
     public String actionId() { return actionId; }
@@ -114,6 +153,8 @@ public final class PendingAction {
     public String ownerUserId() { return ownerUserId; }
     /** Memory 收口会话：ai_task_memory.conversation_id 维度；null = 无关联（历史数据）。 */
     public String conversationId() { return conversationId; }
+    public String agentExecutionId() { return agentExecutionId; }
+    public String hitlWaitId() { return hitlWaitId; }
     public String employeeId() { return employeeId; }
     public String displayName() { return displayName; }
     public LocalDate startDate() { return startDate; }

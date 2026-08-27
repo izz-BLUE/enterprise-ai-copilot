@@ -252,7 +252,7 @@ Java 代理 Python 存活检查。Python 依赖就绪状态使用 `/api/agent/re
 
 Agent 模式需要已认证身份：公网/正常登录链路携带 `Authorization: Bearer <access-token>`；仅在显式启用 Demo fallback 且完全没有 Bearer 时，才可携带来自服务端演示身份目录的 `X-Demo-User-Id`。Java 不会把用户提交的 employeeId、角色、余额或申请历史发送给 Python/模型。
 
-Python `leave_proposal_tool` 只在 Planner-first 下被 Planner 决策调用，生成 `action_proposal`（完整字段）或 `missing_fields`（Clarification），**不执行写操作**。Java 在 `LangGraphAgentController` 内重新执行权限、日期、工作日、余额和冲突校验后，调用 `BusinessActionService.createPending` 创建 PendingAction；`confirmationNonce` 由 Java 生成，DB 仅存 SHA-256 摘要。校验通过后，公网响应只暴露可确认的 `pendingAction`：
+Python `leave_proposal_tool` 只在 Planner-first 下被 Planner 决策调用，生成 `action_proposal`（完整字段）或 `missing_fields`（Clarification），**不执行写操作**。完整 Proposal 会先在 Python PostgreSQL Checkpoint 中持久化一次 `HitlWaitMarker`，再由 Java `LangGraphAgentController` / `BusinessActionHitlCoordinator` 重新执行权限、日期、工作日、余额和冲突校验，以 `agent_execution_id + hitl_wait_id` 唯一注册 PendingAction；`confirmationNonce` 由 Java 生成，DB 仅存 SHA-256 摘要。相同 wait 的请求重试复用原 action 行并轮换未确认 nonce，归属或 correlation 不一致时拒绝。校验通过后，公网响应仍只暴露可确认的 `pendingAction`：
 
 ```json
 {
@@ -286,7 +286,7 @@ Python `leave_proposal_tool` 只在 Planner-first 下被 Planner 决策调用，
 }
 ```
 
-该响应使用 `Cache-Control: no-store`。`traceId` 来自 Java 入口；它同时作为 PendingAction 的权威 `originTraceId`，不采用 Python 响应中的 traceId。
+该响应使用 `Cache-Control: no-store`。`traceId` 来自 Java 入口；它同时作为 PendingAction 的权威 `originTraceId`，不采用 Python 响应中的 traceId。`hitl_wait`、`agent_execution_id` 和 `hitl_result` 都是 Java-Python 内部契约，不出现在公网 `AgentChatResponse`。
 
 React 收到响应后立即从 PendingAction 中拆出 `confirmationNonce`。公开消息状态和确认卡只保留草稿摘要；nonce 仅保存在页面内存 `Map` 中，不进入 DOM、日志或浏览器持久化存储。
 
@@ -383,7 +383,7 @@ Planner-first 还存在独立的 Planner contract 语义：若 Planner 输出当
 }
 ```
 
-该响应覆盖 exact request 不匹配、business date 改变、employee scope 改变、旧/不兼容 marker、interrupt、未知或多个 pending node、非 replay-safe Tool，以及当前权限已撤销但 Checkpoint 已物化对应 eval 或 business proposal 结果的情况。普通 Provider/Tool handled error 仍按原有 Agent error / 502 语义处理；完成的 Checkpoint 下一次相同请求仍 Fresh。
+该响应覆盖 exact request 不匹配、business date 改变、employee scope 改变、旧/不兼容 marker、interrupt、未知或多个 pending node、非 replay-safe Tool，以及当前权限已撤销但 Checkpoint 已物化对应 eval 或 business proposal 结果的情况。普通 Provider/Tool handled error 仍按原有 Agent error / 502 语义处理；完成的 Checkpoint 下一次相同请求仍 Fresh。若 latest Checkpoint 正在等待业务确认，普通 Chat 只返回原 Proposal/wait 状态，不重新规划；用户决定只能由 Java 事务提交后调用下述内部 resume endpoint。
 
 **适用场景**：需要安全边界的知识库问答，支持自动区分 RAG 问答、评估查询和安全拒答。
 
@@ -528,6 +528,26 @@ Python 内部响应可能在 `route=action` 时携带 `action_proposal`：
 ```
 
 缺字段时 `action_proposal=null`，`missing_fields` 按 `start_date`、`end_date`、`reason` 的固定顺序返回。`action_proposal` 是 Java/Python 内部契约，不能绕过 Java 权威校验直接执行。
+
+### POST /agent/langgraph/hitl/resume
+
+仅供 Java `BusinessActionHitlCoordinator` 的服务间调用，不是浏览器或公网 API。请求必须带 Java 根据可信身份和会话生成的 `X-Agent-Thread-Id`、当前 `X-Employee-Id`、`X-Allow-Business-Actions`、`X-Business-Date` 与 `X-Conversation-Id`，body 只能是严格的 Java-authoritative HITL decision：
+
+```json
+{
+  "schema_version": 1,
+  "wait_id": "wait_<sha256>",
+  "execution_id": "ex_<id>",
+  "decision": "CONFIRMED",
+  "action_id": "...",
+  "action_type": "ANNUAL_LEAVE_REQUEST",
+  "action_status": "SUCCEEDED",
+  "request_id": "...",
+  "message": "模拟年假申请已提交。"
+}
+```
+
+Python 只校验 latest Checkpoint 中的 wait、execution、actor scope、能力与 pending node，然后用 `Command(resume=...)` 继续 `approval_node → finalize_node`；不运行 Planner、Tool 或 Memory proposal pipeline。`CANCELLED`、`EXPIRED`、`REJECTED` 分别对应 `CANCELLED`、`EXPIRED`、`FAILED`，完成的 HITL 执行重复调用为 no-op。关联不匹配、权限撤销或不安全 checkpoint 返回稳定的 recovery conflict，不改变 Checkpoint。
 
 ---
 

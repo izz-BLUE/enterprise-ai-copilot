@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.action_schema import AnnualLeaveActionProposal
 from app.schemas.expense_schema import ExpenseActionProposal
+from app.schemas.hitl_schema import HitlWaitMarker
 
 
 class MemoryContext(BaseModel):
@@ -70,3 +71,6 @@ class AgentResponse(BaseModel):
     action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
     memory_proposal: AgentMemoryProposal | None = None
+    # Internal Java-only field.  It is deliberately not copied into the
+    # public AgentChatResponse DTO.
+    hitl_wait: HitlWaitMarker | None = None

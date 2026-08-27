@@ -7,12 +7,14 @@ import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.InternalAgentChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.gateway.python.PythonAgentBusyException;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.gateway.python.PythonAgentTransportException;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
 import com.fantuan.copilot.service.agent.AgentMemoryCoordinator;
@@ -95,6 +97,7 @@ public class LangGraphAgentController {
     private final AgentEventRecorder eventRecorder;
     private final AgentRuntimeThreadIdService runtimeThreadIdService;
     private final AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard;
+    private final BusinessActionHitlCoordinator hitlCoordinator;
 
     @Autowired
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
@@ -104,7 +107,8 @@ public class LangGraphAgentController {
                                     AiTaskMemoryService memoryService,
                                     AdminLogBuffer adminLogBuffer,
                                     AgentRuntimeThreadIdService runtimeThreadIdService,
-                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard) {
+                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
+                                    BusinessActionHitlCoordinator hitlCoordinator) {
         this.pythonAgentGateway = pythonAgentGateway;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
@@ -113,6 +117,7 @@ public class LangGraphAgentController {
         this.eventRecorder = new AgentEventRecorder(adminLogBuffer);
         this.runtimeThreadIdService = runtimeThreadIdService;
         this.runtimeThreadExecutionGuard = runtimeThreadExecutionGuard;
+        this.hitlCoordinator = hitlCoordinator;
     }
 
     /**
@@ -126,7 +131,21 @@ public class LangGraphAgentController {
                                     AdminLogBuffer adminLogBuffer) {
         this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
                 memoryService, adminLogBuffer, new AgentRuntimeThreadIdService(),
-                new AgentRuntimeThreadExecutionGuard());
+                new AgentRuntimeThreadExecutionGuard(), null);
+    }
+
+    /** Production-shaped constructor useful for tests that provide the guard but not HITL. */
+    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
+                                    AdminAccessService adminAccessService,
+                                    BusinessActionService businessActionService,
+                                    IdentityContext identityContext,
+                                    AiTaskMemoryService memoryService,
+                                    AdminLogBuffer adminLogBuffer,
+                                    AgentRuntimeThreadIdService runtimeThreadIdService,
+                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard) {
+        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
+                memoryService, adminLogBuffer, runtimeThreadIdService,
+                runtimeThreadExecutionGuard, null);
     }
 
     /**
@@ -241,6 +260,19 @@ public class LangGraphAgentController {
                     .body(AgentResponseFactory.fallback(traceId));
         }
         PendingActionView pendingAction = null;
+        if (pythonResponse.hitlWait() != null && pythonResponse.actionProposal() == null) {
+            eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_WARN, started);
+            return AgentResponseFactory.actionFailure(traceId,
+                    "HITL wait 缺少可确认的业务 Proposal。");
+        }
+        if (pythonResponse.hitlWait() != null
+                && !pythonResponse.hitlWait().structurallyValid()) {
+            eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_WARN, started);
+            return AgentResponseFactory.actionFailure(traceId,
+                    "HITL wait 上下文无效。");
+        }
         if (pythonResponse.actionProposal() != null) {
             if (!allowBusinessActions) {
                 eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
@@ -248,9 +280,21 @@ public class LangGraphAgentController {
                 return AgentResponseFactory.actionFailure(traceId, "业务动作功能未启用或当前请求无权限。");
             }
             try {
-                pendingAction = businessActionService.createPending(
-                        pythonResponse.actionProposal(), traceId, presentedToken,
-                        identity.asDemoIdentity(), conversationId);
+                HitlWaitMarker wait = pythonResponse.hitlWait();
+                if (wait != null && hitlCoordinator != null) {
+                    pendingAction = hitlCoordinator.registerWait(
+                            pythonResponse.actionProposal(), wait, traceId, presentedToken,
+                            identity, conversationId);
+                } else if (wait != null) {
+                    pendingAction = businessActionService.createHitlPending(
+                            pythonResponse.actionProposal(), traceId, presentedToken,
+                            identity.asDemoIdentity(), conversationId,
+                            wait.executionId(), wait.waitId());
+                } else {
+                    pendingAction = businessActionService.createPending(
+                            pythonResponse.actionProposal(), traceId, presentedToken,
+                            identity.asDemoIdentity(), conversationId);
+                }
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());
