@@ -1,128 +1,88 @@
-# Scoped Conversation Memory P0 架构说明
+# Scoped Conversation Memory Architecture
 
-本文是当前运行时基线。Memory 只保存同一用户、同一会话中的未完成任务状态，
-不是用户画像、偏好库、权限缓存或业务事实来源。
+Memory 在本项目中的准确含义是 **Conversation Scoped Task State Persistence**：保存同一用户、同一 conversation 中的当前任务连续性。它不是 Profile/Preference/Vector Memory，也不是业务事实、权限缓存或自动化触发器。
 
-## 1. 核心边界
+## 1. Scope and authority
 
-- 唯一作用域是 Java 认证上下文派生的 `(user_id, conversation_id)`。
-- `user_id` 只来自 `VerifiedIdentity`；Python、LLM、前端和 Memory 内容都不能提供 owner。
-- `conversation_id` 由 Java 校验客户端分组 hint，非法或缺失时生成 UUID。
-- Python 只生成非权威内容提案；Java 固定按 `UPSERT + ACTIVE` 落库。
-- `COMPLETED / ABANDONED` 只由 Java `PendingAction` 生命周期收口。
-- MemoryContext 是不可信历史数据，不扩大 Tool 可见集合，不进入受信任 Tool 参数。
-
-## 2. Read Path
+Memory key 是：
 
 ```text
-Frontend conversationId
-  → Java LangGraphAgentController
-  → IdentityContext.require(request)
-  → AiTaskMemoryService.find(trustedUserId, conversationId)
-  → 仅 ACTIVE 转为 InternalAgentChatRequest.MemoryContextView
-  → Python /agent/langgraph/chat
-  → Planner prompt 的“不可信历史任务上下文”区块
+(VerifiedIdentity.userId(), resolved conversationId)
 ```
 
-Java 在调用 Python 之前读取数据库。读库失败按“无 Memory”继续，终态记录不会注入
-Planner。公共 `ChatRequest` 不暴露 `memoryContext` 字段。
+`user_id` 只来自 Java 当前认证上下文；前端 body、Python、LLM、Tool arguments 和 Memory 内容都不能指定 owner。`conversationId` 只是 Java 校验后的 namespace；缺失时 Java 生成新的 scope。
 
-## 3. Write Path
+Java PostgreSQL `ai_task_memory` 是 Memory lifecycle 的唯一 authority。Python 只返回非权威提案；Java 只在当前认证请求中决定 owner、scope、生命周期和持久化。
+
+## 2. Read path
 
 ```text
-run_langgraph_agent result
+React conversationId hint
+  → Java resolves identity + conversation scope
+  → read ai_task_memory WHERE status = ACTIVE
+  → body.memoryContext → Python Runtime Context
+  → Planner receives untrusted task context
+```
+
+Read path 只注入 `ACTIVE` Memory；`COMPLETED`/`ABANDONED` 不进入新的 Planner context。Memory 内容按不可信历史处理，不能覆盖 `employee_id`、`business_date`、`trace_id`、权限或 Tool capability。
+
+## 3. Trigger and write path
+
+```text
+Agent result
   → MemoryTriggerPolicy
-  → MemoryExtractor
-  → MemoryWritePolicy
-      - trusted key 递归剥离
-      - 敏感字符串脱敏
-      - task state 16 KiB / summary 500 字符
-      - 只允许 UPSERT + ACTIVE
-  → MEMORY_WRITE_MODE
-      - DISABLED: 入口短路，不构造 Pipeline
-      - AUDIT_ONLY: 运行并审计，不输出提案
-      - ENABLED: 写入 AgentResponse.memory_proposal
-  → Java LangGraphAgentController
-      - 有 action_proposal: 先成功创建 PendingAction
-      - 再用当前 VerifiedIdentity + conversationId 持久化 ACTIVE Memory
-      - 无 action_proposal: 直接持久化 ACTIVE Memory
+  → Extractor
+  → WritePolicy
+  → Python response memory_proposal
+  → Java authenticated persistence
 ```
 
-`memory_proposal` 只有以下字段：
+触发规则是显式白名单：
 
-```json
-{
-  "task_type": "LEAVE_REQUEST",
-  "task_state": {"waiting_for": "date"},
-  "summary": "等待用户补充请假日期"
-}
-```
+| 结果 | 是否触发 Extractor |
+|---|---:|
+| `action_proposal` | 是 |
+| Memory-eligible Tool 成功（当前如受控 Proposal） | 是 |
+| 纯 `rag_answer_tool` | 否 |
+| eval、余额、leave request、expense status、travel/invoice read 成功 | 否 |
+| Safety refusal、Tool error、LLM/provider error、预算耗尽 | 否 |
+| 已存在的 ACTIVE Memory | **否；不能单独触发** |
 
-它不包含 `user_id`、`conversation_id`、`action` 或 `status`。Java 的
-`AiTaskMemoryService.upsertActiveFromAgent` 再做 trusted-key、生命周期字段、敏感内容
-和大小校验，然后以固定 `TaskStatus.ACTIVE` 执行单条条件 UPSERT。
+Python write policy 只允许 `UPSERT + ACTIVE` 的提案；Python 不提交 `COMPLETE`、`ABANDONED` 或其他 terminal Memory state，不直接访问 Java DB。`MEMORY_WRITE_MODE`：
 
-## 4. 与 PendingAction 的顺序
+- `DISABLED`：默认关闭，不调用 Extractor；
+- `AUDIT_ONLY`：生成提案并记录元数据，不落库；
+- `ENABLED`：返回 `UPSERT + ACTIVE` 提案，由 Java 在当前认证上下文落库。
 
-带业务动作的响应严格按以下顺序处理：
+如果有 action proposal，Java 先成功创建 PendingAction，再持久化 Memory；Java Confirm/Cancel/Expire/Stale/Failure 负责将 Memory 收口。Memory terminal status 与 `ExpenseStatus`、`BusinessAction` status 完全分离。
 
-1. Java 验证当前请求是否允许业务动作；
-2. `BusinessActionService.createPending` 重新执行权限、字段、余额、冲突、容量和同会话活动动作校验；
-3. PendingAction 成功持久化；
-4. Java 才接受本次 `memory_proposal`。
+## 4. State comparison
 
-因此，权限拒绝、业务规则失败、容量失败或 `ACTION_CONVERSATION_IN_PROGRESS` 都不会把
-本次提案覆盖到既有会话 Memory。Memory 持久化是主响应旁路：失败会记录安全日志，
-不会撤销已经创建的 PendingAction，也不会把 Python 内容提升为业务事实。
+| 状态 | 作用域/生命周期 | 权威来源 | 明确禁止 |
+|---|---|---|---|
+| Memory | `(user_id, conversation_id)`；ACTIVE→Java terminal | Java PostgreSQL | 不能充当权限、金额、当前 trip/invoice 事实 |
+| `tool_history` | 当前 Agent execution | AgentState | 不能跨请求复用为历史事实；新请求清空 |
+| `execution_history` | 有界成功步骤摘要 | LangGraph Checkpoint | 不能做 Tool 去重、ExpenseProposalContext、Memory trigger 或业务查询 |
+| LangGraph Checkpoint | runtime thread 的执行现场 | `PostgresSaver` | 不能作为身份、权限或业务数据库 |
+| Java business DB | PendingAction、LeaveRequest、ExpenseClaim、Memory lifecycle | Java PostgreSQL | Python/LLM 不能直接写 |
 
-## 5. 终态收口
+`execution_history` 只在读取到 ACTIVE Memory 且 task type 匹配时 hydrate，所有条目都归一为 `CONTEXT_ONLY`。它可以帮助 Planner 理解已完成的 travel/invoice 步骤，但当前决策仍必须刷新业务事实，不能直接复用历史 `valid`、`duplicate` 或 trip status。
 
-`BusinessActionService` 在 PendingAction 状态变化的同一事务内调用：
+## 5. Checkpoint relationship
 
-- 确认并执行成功：`AiTaskMemoryService.complete`；
-- 用户取消、TTL 过期或已创建动作处理失败：`AiTaskMemoryService.abandon`。
+Checkpoint 记录 Agent execution state，包括 `tool_history`、bounded `execution_history`、planner counters、execution marker 和 interrupt marker。它支持 crash recovery/HITL/external approval，但不拥有业务授权。
 
-无 Memory 或已经进入另一终态时，收口调用无副作用。终态记录不能被后续 Agent 提案
-重新激活。
+`LANGGRAPH_CHECKPOINT_MODE=DISABLED` 时没有持久化 execution snapshot；`POSTGRES` 时使用 `ConnectionPool + PostgresSaver`，节点以同步 durability 落盘。普通新请求只在 Memory/task gate 通过后 hydrate history；同一次 Resume 保留原 execution state，不重新 hydrate history、不重跑 Planner。
 
-## 6. 模块职责
+Memory proposal pipeline 不在 HITL resume、external resume 或普通 `WAITING_EXTERNAL` response 中运行。这样避免外部 webhook、resume replay 或单纯业务查询产生意外 Memory trigger。
 
-| 侧 | 模块 | 职责 |
-| --- | --- | --- |
-| Python | `memory_trigger_policy.py` | 确定性判断本次 Agent Execution 是否产生业务状态变化信号（`action_proposal` 或 Memory-eligible Tool 成功调用，白名单由 `MemoryTaskTypePolicy` / `MemoryCapabilityRegistry` 提供）。`memory_context` 不再作为 Trigger 触发信号 |
-| Python | `memory_extractor.py` | 将白名单输入解析为 `MemoryProposal` |
-| Python | `memory_write_policy.py` | trusted-key 清洗、脱敏、大小和 ACTIVE-only 约束 |
-| Python | `memory_pipeline.py` | Trigger → Extractor → Policy 编排 |
-| Python | `memory_runtime_hook.py` | 出口旁路、审计、fail-safe |
-| Python | `chat_schema.py` | `AgentMemoryProposal` 响应契约 |
-| Java | `LangGraphAgentController` | 当前认证作用域、动作优先顺序、提案持久化编排 |
-| Java | `AiTaskMemoryService` | Java 独立内容校验与固定 ACTIVE 写入 |
-| Java | `BusinessActionService` | PendingAction 权威状态机与 Memory 终态收口 |
-| Java | `JdbcAiTaskMemoryRepository` | 复合 key 隔离与原子状态机 SQL |
+## 6. Security invariants
 
-已删除 Python→Java Memory 反向 HTTP 客户端、HMAC write scope 和内部 Memory Write
-Endpoint。`JAVA_BASE_URL / JAVA_INTERNAL_TOKEN` 仅服务于 Python 的企业只读 Tool，
-不再是 Memory 写入前置条件。
+- owner 从 `VerifiedIdentity` 派生，不能从请求体、Memory 或模型输出派生；
+- Java 是 Memory lifecycle authority，Python 只能提出 `UPSERT + ACTIVE`；
+- action proposal 必须先建立 Java PendingAction，不能因 Memory proposal 直接写业务表；
+- Memory 不进入 LLM arguments 的 trusted system fields；
+- terminal Memory transition 和业务 action result 在 Java 控制下保持可重试、幂等和可审计；
+- Python Memory/Extractor/Writer 失败不阻断主 Agent response，但 Java 不会据此伪造成功。
 
-## 7. 配置与失败语义
-
-| 配置 | 默认值 | 行为 |
-| --- | --- | --- |
-| `MEMORY_WRITE_MODE` | `DISABLED` | `DISABLED` / `AUDIT_ONLY` / `ENABLED` |
-| `MEMORY_EXTRACTOR_MAX_INPUT_CHARS` | `12000` | Extractor 输入预算 |
-
-失败语义：
-
-- Extractor 非法 JSON/schema：无提案，主响应继续；
-- Pipeline/Dispatcher 异常：记录无敏感字段审计，主响应继续；
-- Java Memory 校验、状态冲突或数据库异常：不写入，主响应继续；
-- PendingAction 创建失败：不处理本次 Memory 提案；
-- `MEMORY_WRITE_MODE=DISABLED`：零额外 Extractor 成本。
-
-## 8. 明确不做
-
-- 跨会话长期画像、偏好记忆、向量记忆；
-- 用 Memory 决定权限、owner、employeeId 或业务事实；
-- Python/LLM 决定 Memory 终态；
-- 自动 retry 或静默 fallback；
-- 用 Checkpointer 替代业务数据库状态机。
+相关安全清单见 [memory-security.md](memory-security.md)，验收记录见 [memory-p0-acceptance.md](memory-p0-acceptance.md)。

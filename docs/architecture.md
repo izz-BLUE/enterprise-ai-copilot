@@ -1,645 +1,246 @@
-# 架构说明
+# Enterprise AI Copilot Architecture
 
-## 项目定位
+本文是当前实现的 canonical architecture source。它描述 Java Spring Boot、Python FastAPI、PostgreSQL、Enterprise OA MCP、Mock OA 和 React 之间的真实责任边界；业务状态和权限以 Java/数据库实现为准，Checkpoint 与 Memory 都不是业务事实源。
 
-Enterprise AI Copilot 是一个**企业知识库 AI 应用后端**项目，采用 Java Spring Boot + Python FastAPI 双服务架构，支持 RAG 检索增强生成问答。
-
-## 总体架构
+## 1. System boundary
 
 ```mermaid
-flowchart TD
-    subgraph Frontend ["Frontend (React + Vite :5173)"]
-        UI[App.jsx]
-    end
-
-    subgraph Java ["Java Spring Boot :8080"]
-        HC[HealthController]
-        CC[ChatController]
-        LAC[LangGraphAgentController]
-        TID[TraceIdFilter]
-        BAS[BusinessActionService]
-        EAC[ExpenseExternalApprovalCoordinator]
-        EC[JDBC ExpenseClaim Repository]
-        LRC[Java LeaveReadController]
-        PA[JDBC Action Repository]
-        LS[JDBC Leave Repositories]
-    end
-
-    subgraph Python ["Python FastAPI :8000"]
-        MW[trace_id_middleware]
-        EP1[/agent/chat]
-        EP2[/agent/langgraph/chat]
-        SG[Safety Guard]
-        CPR[Checkpoint Runtime<br/>Pool + PostgresSaver]
-    end
-
-    subgraph Database ["PostgreSQL 16"]
-        BA[(business_action)]
-        AC[(leave_account)]
-        LR[(leave_request)]
-        CP[(LangGraph checkpoint 表)]
-    end
-
-    subgraph RAG ["RAG 管道"]
-        HR[Hybrid Retriever]
-        FR[Faiss Semantic]
-        KR[Keyword Retrieval]
-        RG[Experimental Shadow Gate<br/>default: off]
-        PP[Prompt Builder]
-        LLM[DeepSeek LLM]
-    end
-
-    subgraph Reports ["Evaluation Reports"]
-        EVR[Evaluation Reports]
-    end
-
-    subgraph Observability ["Optional Observability"]
-        OI[OpenInference / OpenTelemetry<br/>BatchSpanProcessor]
-        PHX[Phoenix Collector + UI<br/>:4317 / :6006]
-    end
-
-    subgraph ExternalOA ["Mock OA :8010"]
-        OA[SQLite approval state]
-        OAW[Demo approve / reject]
-    end
-
-    subgraph Agent ["LangGraph Agent（两套互斥）"]
-        SN[safety_node]
-        LG{AGENT_LOOP_ENABLED}
-        RN[router_node]
-        PLN[planner_node]
-        TEN[tool_executor_node]
-        RAGN[rag_node]
-        EN[eval_node]
-        AN[action_node]
-        REFN[refuse_node]
-        APP[action_proposal]
-        CL[Clarification response]
-        SN --> LG
-        LG -->|false 显式回退| RN
-        LG -->|true 默认| PLN
-        PLN <-->|PlannerDecision / Tool Result| TEN
-        RN -->|rag| RAGN
-        RN -->|eval| EN
-        RN -->|annual leave action| AN
-        RN -->|refuse| REFN
-        AN -->|字段完整| APP
-        AN -->|缺字段| CL
-        TEN -->|rag_answer_tool| HR
-        TEN -->|eval_report_tool| EVR
-        TEN -->|leave_balance_tool / leave_request_tool| LRC
-        TEN -->|leave_proposal_tool| APP
-    end
-
-    subgraph KB ["知识库离线构建"]
-        MD[Markdown 文档]
-        CK[Chunking]
-        EM[BGE Embedding]
-        FI[FAISS Index]
-    end
-
-    subgraph Eval ["Evaluation"]
-        RE[Retrieval Eval]
-        GE[Generation Eval]
-        BL[Baseline Regression]
-    end
-
-    UI -->|POST /api/chat| CC
-    UI -->|POST /api/agent/langgraph/chat| LAC
-    TID -->|X-Trace-Id| CC
-    TID -->|X-Trace-Id| LAC
-
-    CC -->|HTTP + X-Trace-Id| EP1
-    LAC -->|X-Trace-Id + X-Agent-Thread-Id| EP2
-    MW -.->|PHOENIX_TRACING=true| OI --> PHX
-
-    EP1 --> HR
-    HR --> FR
-    HR --> KR
-    HR --> RG --> PP
-    PP --> LLM
-
-    EP2 --> SN
-    EP2 -->|thread_id + durability=sync| CPR --> CP
-    RAGN --> HR
-    EN --> EVR
-    APP -->|Java createPending| LAC
-    CL -->|Clarification response| EP2
-    LRC --> LS
-    LAC --> BAS --> PA
-    PA --> BA
-    BAS -->|confirm transaction| LS
-    LS --> AC
-    LS --> LR
-    BAS --> EAC
-    EAC -->|POST + Idempotency-Key| OA
-    OAW -->|commit terminal state| OA
-    OA -->|signed notification| WH[Java HMAC webhook]
-    WH -->|GET authoritative status| OA
-    WH -->|ExpenseClaim terminal update| EC
-
-    MD --> CK --> EM --> FI
-    FI -.->|在线检索| FR
+flowchart TB
+    B[Browser / React :5173] --> N[Nginx HTTPS ingress]
+    N --> J[Java Spring Boot :8080]
+    J --> P[Python FastAPI :8000]
+    J --> DB[(PostgreSQL: business tables)]
+    P --> IDX[(Processed chunks / FAISS / BM25)]
+    P --> LLM[DeepSeek API]
+    P --> MCP[Enterprise OA MCP<br/>read-only travel/invoice]
+    J --> OA[Mock OA :8010<br/>SQLite approval simulator]
+    OA -->|HMAC notification without status| J
+    P --> CP[(PostgreSQL: LangGraph checkpoints)]
 ```
 
-## 项目模块
+生产 Compose 只把 Java 绑定到宿主机入口；Python 使用 Docker 网络内的 `expose 8000`，不能绕过 Java 访问公网。开发环境可以直接访问各服务端口，但内部端点仍按内部契约使用。
 
-| 模块 | 目录 | 说明 |
-|------|------|------|
-| backend-java | `backend-java/` | Java Spring Boot 业务系统，提供对外 API 并代理 Python 接口 |
-| agent-python | `agent-python/` | Python FastAPI AI 服务，包含 RAG、Agent、Tools、Safety Guard |
-| enterprise-oa-mcp | `agent-python/enterprise_oa_mcp_server/` | P2-A 极简 MCP Server（官方 `mcp` SDK v2，Streamable HTTP `:8100/mcp`），内存 fixture：`travel_record_get` / `invoice_verify`（含 ownership check） |
-| knowledge-base | `data/hr/ bank/ it/` | 企业知识库 Markdown 文档 |
-| evaluation | `data/eval/` | RAG 评估测试集、报告和 baseline |
-| frontend | `frontend/` | React + Vite 前端演示页面 |
-| docs | `docs/` | 项目文档、架构说明、接口文档 |
+| 层 | 责任 | 不负责 |
+|---|---|---|
+| React | 登录、conversationId、普通聊天、Proposal 确认 UI | 认证事实、权限判断、业务状态 |
+| Java | JWT/身份、Admin gate、trace、超时/并发、PendingAction、业务事务、Memory 生命周期、外部状态 authority | LLM 推理、RAG 召回、Planner 决策 |
+| Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume | 最终业务授权、业务数据库写入、Memory terminal lifecycle |
+| Enterprise OA MCP | 读取当前 trip/invoice 事实 | 报销写入、审批状态 authority |
+| Mock OA | 独立 SQLite 的模拟外部审批服务 | Enterprise AI Copilot 的业务事实、Java action authority |
+| PostgreSQL | Java 业务表和可选 LangGraph checkpoint | 让 LLM 获得权限或替代 Java 状态机 |
 
-## 三端架构
+## 2. Trusted runtime context
 
-| 层 | 技术 | 端口 | 职责 |
-|---|------|------|------|
-| 前端 | React + Vite | 5173 | 用户交互、模式切换、traceId 展示 |
-| 业务网关 | Java Spring Boot | 8080 | 统一入口、traceId 管理、异常兜底、CORS |
-| AI 引擎 | Python FastAPI | 8000 | RAG 检索、Prompt 构造、LLM 调用、Agent 编排 |
+每次请求由 Java 注入并在 Python Runtime Context 中使用：
 
-## Java Backend 职责
+- `employee_id`：来自 `VerifiedIdentity`，不是 request body、Memory、LLM arguments 或 Tool arguments；
+- `business_date`：Java 配置时区和可注入 Clock 计算；
+- `trace_id`：Java 入口生成并透传；
+- `conversation_id`：Java 校验客户端 hint，作为同一可信用户的 namespace；
+- `X-Agent-Thread-Id`：Java 根据可信 user/conversation 生成 `rt_<sha256>`，Python 再区分 graph variant；
+- `allow_eval` / `allow_business_actions`：Java capability gate 结果，Python 只消费，不接受模型扩大。
 
-- **TraceIdFilter**：统一生成/读取 traceId，存入 SLF4J MDC 和 request attribute，设置响应头
-- **ChatController**：转发 `/api/chat` 到 Python `/agent/chat`，透传 traceId
-- **SecurityConfig / AuthController**：`app_user` + BCrypt 登录并签发短期 JWT；浏览器使用 HttpOnly + SameSite=Strict Cookie（Web Storage 不保存 Token），API 客户端继续支持 Bearer；Cookie 写请求要求 `X-Requested-With`；Agent/Business Action 使用 `authenticated()`，无效凭据不回退 Demo；`/api/internal/leave/**` 保持 X-Internal-Token 服务间认证
-- **LangGraphAgentController / BusinessActionHitlCoordinator**：在 Python 调用前解析 JWT 或显式 Demo fallback 身份，转发时只透传 Java traceId、Evaluation 许可、Business Action 许可、可信 `employee_id`、Java 权威 `business_date`，以及由 `VerifiedIdentity.userId()` + 已解析 `conversationId` 计算的 `X-Agent-Thread-Id`；Admin Token 和客户端伪造的 thread header 不下传。Python 返回完整 Proposal + 内部 `hitl_wait` 后，Coordinator 以 `agent_execution_id + hitl_wait_id` 注册唯一 PendingAction；`BusinessActionService.createHitlPending` 由 Java 生成 `confirmationNonce`（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）并保证相同 wait 重试不创建第二个动作。注册异常只有显式 deterministic whitelist（`BUSINESS_RULE_VIOLATION` / `EXPENSE_ITEMS_REQUIRED` / `EXPENSE_AMOUNT_INVALID` / `EXPENSE_INVOICES_REQUIRED`）才 terminalize；Java Memory 收口成功后才 best-effort 发送无 Action 的 `FAILED + REJECTED` resume，Memory infrastructure failure 则保持 Graph `WAITING_USER`
-- **AgentRuntimeThreadExecutionGuard**：Java 单实例进程级 conversation guard；在最终 runtime thread 生成后、Memory Read 之前原子占用，覆盖 Memory Read、Python 调用、PendingAction / Memory 后处理及所有 early return，忙时返回 `429 + Retry-After: 1`；多实例分布式 lease/lock 延后实现
-- **BusinessActionController**：`POST /api/agent/actions/{actionId}/confirm` 与 `/cancel`；通过 `BusinessActionHitlCoordinator` 与 Agent Chat 共用同一个最终 runtime thread guard，强制要求 owner 校验、nonce 校验、状态机、TTL、幂等；Java 事务提交后才 best-effort 调 Python HITL resume
-- **HealthController / AgentHealthController**：健康检查
-- **PythonAgentBulkhead**：限制 Java → Python 的在途 AI 请求数，短队列超时后返回 429
-- **PythonAgentGateway**：统一 Java → Python 基础 URL、trace header、HTTP 调用与 Bulkhead 许可生命周期
-- **WebConfig**：CORS 配置（可配置白名单 `cors.allowed-origins`），暴露 `X-Trace-Id` 响应头
-- **RestClientConfig**：RestTemplate 超时配置（`connect-timeout` 3s，`read-timeout` 40s）
-- **ChatRequest**：输入长度校验（`@Size(max=2000)`）
-- **GlobalExceptionHandler**：全局异常处理，统一错误响应
-- **DemoIdentityService**：默认关闭的三身份白名单目录，仅供受控兼容 fallback；服务端派生 employeeId/displayName/role
-- **BusinessActionService**：Java 权威控制面 —— PendingAction 状态机、TTL、容量、owner 校验、nonce 校验、幂等确认、Spring 事务、持久化与审计；业务专属逻辑通过 `BusinessActionHandlerRegistry`（`proposal.actionType() → handler`）分发到 `AnnualLeaveActionHandler`（年假余额/冲突/执行/余额扣减）与 `ExpenseClaimActionHandler`（报销校验/确定性金额/`ExpenseExecutionGateway` 写 `expense_claim`+`expense_item`），最终执行只通过各 Handler 的 Gateway
-- **LeaveReadController**：`/api/internal/leave/{balance,requests}`，由 Python 只读企业 Tool 调用；`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权；**与 `leave_proposal_tool` 无关**（`leave_proposal_tool` 不调用此端点）
-- **PostgresLeaveSandboxGateway**：当前同数据库事务执行适配器，按 employeeId 检查冲突、生成编号并写入 LeaveRequest
-- **JdbcPendingActionRepository / JdbcLeaveAccountRepository / JdbcLeaveRequestRepository**：明确 SQL、Action/Account 行锁、唯一申请关联和原子余额扣减
-- **Flyway / PostgreSQL 16**：版本化结构迁移，并持久化 Action、余额、申请及执行结果
+这些字段不进入保存的 AgentState，也不进入 LLM 的 `arguments`。PlannerDecision 使用严格 Pydantic schema；Tool Executor 在实际执行前再次校验结构、员工身份、能力、Tool 预算、成功签名和 retry policy。
 
-## Python AI Service 职责
+## 3. Agent graph
 
-- **trace_id_middleware**：接收/生成 traceId，并在 AI 路径进入检索前执行有界并发准入
-- **rag_service**：RAG 管道（检索 → 拼 Prompt → 调 LLM → 返回）
-- **langgraph_agent**：LangGraph 状态图编排入口；同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换：
-  - `use_planner=true`（仓库部署默认）：`build_agent_loop_graph()` —— `safety → planner ⇄ tool_executor → finalize`
-  - `use_planner=false`（显式回退 legacy）：`build_agent_graph()` —— `safety → router → rag|eval|action|refuse`
-- **planner_node**（Planner-first）：输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；预算由 `MAX_PLANNER_STEPS=5` 收敛；可信系统字段（`employee_id` / `business_date` / `trace_id`）不进入 LLM `arguments`；Capability Gate 同时收缩 system/user Prompt 中的 Tool contract，并在 Planner post-validation 阶段拒绝隐藏 Tool
-- **tool_executor_node**（Planner-first）：执行 Planner `action=tool` 决策；预算由 `MAX_TOOL_CALLS=3` 收敛；按结构 / employee_id / 权限 / Tool 预算 / 成功签名去重顺序校验；执行前拦截不计数；只读 Tool 的 Java URL / internal token 继续由下游 Tool / JavaClient 校验
-- **P3-0 状态边界**：`AgentState` 仅承载当前执行状态与不可信历史任务上下文；`employee_id` / 权限 / `business_date` / `trace_id` / 请求 deadline 由每次调用的 LangGraph `Runtime Context` 提供，不进入 `AgentState`，未来执行快照不能恢复并继续信任这些字段
-- **P3-1 / P3-2 / P3-3 / P3-4 执行快照**：`checkpoint_runtime` 在 FastAPI 启动时按 `LANGGRAPH_CHECKPOINT_MODE` 创建 `ConnectionPool`、显式严格 `JsonPlusSerializer`、调用官方 `PostgresSaver.setup()`，并一次性编译两套带 Checkpointer 的图；POSTGRES 模式每个节点以 `durability="sync"` 写入。`rt_<hash>:planner-v1` 与 `rt_<hash>:deterministic-v1` 相互隔离。Planner-first 新执行从 START 写入 strict `execution_recovery` marker，其中只保存 employee scope fingerprint（`SHA-256(b"enterprise-ai-copilot:execution-actor:v1\\0" + employee_id UTF-8)`），不保存 raw employee 或权限；该 fingerprint 仅用于恢复一致性绑定，不参与认证或 Capability Gate。完整业务 Proposal 继续经过 `prepare_hitl_node → approval_node(interrupt) → finalize_node`，并把严格 `HitlWaitMarker` 落入同一 Checkpoint。普通 Chat 对 pending HITL 只返回最新 wait，不会重跑 Planner；Java 以唯一 `hitl_wait_id` 注册 PendingAction，Confirm / Cancel 的事务提交后才调用 Python 内部 resume endpoint，Python 用严格 Java decision 通过 `Command(resume=...)` 继续，恢复时重新注入当前 Runtime Context，且不运行 Memory proposal pipeline。HITL resume 只读取 latest snapshot，校验 actor/correlation 与合法 pending/finalize/completed 状态；Java 已持久化的 terminal business result 即使当前业务能力被撤销，也允许 approval → finalize 收口，但 Runtime Context 仍注入当前的 `allow_business_actions=false`，且不重新进入 Planner、Tool 或业务写操作。已完成执行是 no-op，approval 后 finalizer 崩溃可从 `finalize_node` 继续。P3-3 的 crash recovery 仍按 marker、日期 anchor、actor scope、当前 capability 对 persisted privileged material 的残留闸门、单一合法 pending node 与 Tool replay policy 校验，通过后使用 `graph.invoke(None)` 从 latest head 继续。Resume 不重建 initial state、不 hydrate P3-2 history；legacy deterministic graph 不启用自动 Resume。`execution_history_policy` 只把当前请求中 `travel_record_tool` / `invoice_verify_tool` 的成功 Observation 白名单归一化为 `CONTEXT_ONLY` 摘要，在 `finalize_node` 中合并后随最终 Checkpoint 保存。
-- **P3-5A / P3-5B1 / P3-5B2a / P3-5B2b / P3-5B3 Durable WAITING_EXTERNAL**：不改变 P3-4 的 Java authority 与 Memory terminal 语义。报销 `CONFIRMED + EXPENSE_CLAIM + local ExpenseClaim request_id` 在同一 execution 内追加 `prepare_external_wait_node → external_wait_node(interrupt)`；`ExternalWaitMarker.wait_id` 由 execution id 与本地 request id 确定性派生，不保存 raw identity、权限、日期、trace、nonce、credential 或 webhook payload。`ExpenseExternalApprovalCoordinator` 在事务外调用独立的 Mock OA，仅发送 Expense 业务字段和确定性 `Idempotency-Key`；Mock OA SQLite 在 PENDING → APPROVED/REJECTED 提交后，才发送不含 status 的 `EXPENSE_APPROVAL_CHANGED` 通知。Java webhook 仅接受精确路径上的 HMAC-SHA256 + 5 分钟时间戳窗口请求，解析严格 DTO 后按 `external_request_id` 找本地 ExpenseClaim，始终通过 `ExpenseApprovalGateway.getStatus` GET Mock OA 权威状态；`WAITING_APPROVAL → APPROVED/REJECTED` 由 Java 仓储严格幂等更新，同终态 no-op，禁止反向或 PENDING 回退。提交 replay 返回 APPROVED/REJECTED 时先绑定同一 `external_request_id`，再应用终态，不创建第二个 OA 请求。P3-5B2b 另增加默认关闭、低频、限批的 Java reconciliation：候选按 `external_last_checked_at` due，先以短事务 CAS 标记检查时间并提交，再在事务外 GET Mock OA；Webhook 与 reconciliation 共用同一权威状态同步服务。P3-5B3 只在 Java 终态提交后以持久化 correlation 重建 owner/conversation/employee/execution/wait runtime，使用 false capabilities 调用 Python external resume；Python 以 `Command(resume)` 收口 Graph END，Java 通过 `external_resume_last_attempt_at` / `external_resume_completed_at` 做无事务跨 HTTP 的可重试投递。请求失败或响应丢失不回滚 Java 权威状态，普通 Chat 不跨过 external interrupt，当前 Java thread guard 仍是单实例进程内边界。
-- **P3-2 历史闸门**：下一轮只有 Java 注入的 `memoryContext.status=ACTIVE` 且 `taskType` 匹配时，才从该 thread 的最新 Checkpoint hydrate `execution_history`；无 Memory、终态 Memory 或任务类型不匹配时从空列表开始。历史最多 16 条，travel snapshot 最多 10 个 trip；它只供 Planner 理解以前做过哪些步骤，不是当前业务事实，不进入当前 `tool_history` 去重、`ExpenseProposalContext` 或 Memory Trigger。
-- **P3-2 / P3-3 同 thread 并发**：单 worker 进程内用 `active_thread_ids + threading.Lock` 原子保护“latest recovery inspection → Fresh/Resume Graph invoke → 最终 Checkpoint”区间；同一 thread 忙时快速返回 `429 + Retry-After`，不同 thread 不互相阻塞。多 worker / 多实例需要分布式 lease 或 lock，当前不实现。
-- **safety_guard**：Safety Guard Lite —— 启发式纵深防御过滤器（heuristic defense-in-depth filter），**不是** authorization / trust / tool permission / business validation 边界。输入规范化（NFKC、Default-Ignorable 移除、控制字符移除、空白归一）+ 有限分隔符 compact 视图，五族高置信确定性规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass）只拦截明确攻击，咨询/讨论型输入默认放行；原始输入原样传给下游
-- **hybrid_retriever**：支持 vector / hybrid / hybrid_rerank 三种检索模式
-  - `vector`：Faiss 语义检索 + keyword 检索合并去重
-  - `hybrid`（默认）：Faiss + BM25 + RRF 融合排序
-  - `hybrid_rerank`（实验）：Hybrid 候选召回 + Cross Encoder 精排
-- **query_rewriter**：规则版查询重写（实验模式，`rewrite_mode=rule`）
-- **cross_encoder_reranker**：Cross Encoder 精排（实验模式，`hybrid_rerank`）
-- **llm_service**：通过 OpenAI SDK 调用 DeepSeek API
-- **observability**：可选 Phoenix/OpenTelemetry 旁路。FastAPI 生命周期负责初始化/关闭，`trace_id_middleware` 为两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；固定使用 BatchSpanProcessor，默认隐藏输入、输出、Prompt 和 embedding vector，Collector 故障不改变业务响应
-- **annual_leave_input_service**：保守识别年假 Action，使用 Java 业务日期确定性解析日期、明确原因和半天表达，并生成固定缺字段列表（legacy Router-first 与 Planner-first 的 `leave_proposal_tool` 复用此服务）
-- **tool_calling_service**：`plan_annual_leave_action` 的实现入口，由 `leave_proposal_tool` 复用；固定 Named Tool Choice、关闭 Thinking、无重试，Provider 不接收业务数据，Proposal 完全由 Python 确定性分析构造
-- **enterprise_tools**：Planner-first 下的企业 Tool 实现 —— `leave_balance_tool` / `leave_request_tool` 通过 `JavaReadClient` 调 Java `/api/internal/leave/*`；`leave_proposal_tool` 只生成 Proposal / Clarification，**不调用 Java 内部只读端点**，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；P2-A 新增 `travel_record_tool` / `invoice_verify_tool`（经 `app/integrations/mcp/enterprise_oa_client.py` → `enterprise-oa-mcp` Streamable HTTP）、`expense_proposal_tool`（显式接收 `ExpenseProposalContext`，程序层从 tool_history 构造；内部禁止再次调 MCP/Java/RAG）、`expense_status_tool`（Java `/api/internal/expense/*`，Java 权威状态）
-- **java_client**：Python → Java 内部只读 HTTP 客户端；仅供 `leave_balance_tool` / `leave_request_tool` 使用；不做 retry / fallback
-- **memory runtime hook**：Agent 响应出口旁路；按 `MEMORY_WRITE_MODE` 组装现有 LLM service、Trigger/Extractor/WritePolicy 与响应提案 writer，失败不阻断主响应
-- **Memory 持久化**：Python 响应只携带内容提案；Java 使用当前 `VerifiedIdentity` 与服务端解析的 conversationId 固定执行 `UPSERT + ACTIVE`
+### Planner-first（仓库部署默认）
 
-受控业务动作的完整边界和状态机见 [Controlled Business Actions](controlled-business-actions.md)。
-
-### Phoenix / OpenTelemetry Observability
-
-Phoenix 仅负责运行时调试与 Trace 展示，不替代 `scripts/eval/`、
-`agent_real_eval` 或发布质量门禁。`PHOENIX_TRACING=false` 时不加载 Phoenix
-插桩组件；启用后普通 RAG 与 LangGraph 请求共享同一根 Span，并以
-`business.trace_id` 属性关联 Java 生成的业务 traceId。OTel Trace ID 仍由
-OpenTelemetry 自身生成，业务 traceId 不覆盖它。
-
-生产配置固定使用批量异步导出。初始化、后台导出和关闭失败只记录日志，
-不得触发聊天、Tool 或受控业务动作失败。`PHOENIX_CAPTURE_CONTENT=false`
-为默认值，不上传 Prompt、用户输入、检索正文和模型输出；Trace 不包含
-`employee_id`，也不参与 Capability Gate、owner 派生或 Java 权威业务判断。
-
-自托管 Phoenix 在 Compose 中属于 `observability` profile，默认不随主服务启动。
-控制台只绑定宿主机 `127.0.0.1:6006`；Collector 通过 Docker 内网 `4317`
-接收 Python Trace。SQLite Volume 适合当前低流量演示，生产规模、保留周期和
-资源上限仍需通过单独压测确认。
-
-### 实验性 Retrieval Shadow Gate
-
-Hybrid Retrieval 可在内部保留同一候选的 FAISS cosine 与 BM25 原始分数，并通过实验性 Gate 记录相关性判断。该能力默认 `off`；`shadow` 只记录不阻断；`enforce` 会阻断低相关结果且评估异常时安全拒答，只应在目标数据集完成阈值验收后启用。
-
-独立 Holdout 结果为 answerable `7/8`、no-answer block `1/8`，证明 Vector/BM25 主题相关性不足以判断答案证据是否充分。因此 Gate 不属于正式启用的生产能力，不改变 Prompt、公开响应或实际 LLM 调用。完整实验见 [RAG 生成前检索相关性 Gate 实验报告](rag-retrieval-gate-experiment.md)。
-
-## 两条聊天链路
-
-### 链路一：/api/chat（稳定 RAG 主链路）
-
-```
-POST /api/chat
-  → Java ChatController（读取 traceId，透传 X-Trace-Id）
-    → @Size(max=2000) 输入长度校验
-    → PythonAgentBulkhead（默认 3 个并发槽，排队 500ms）
-    → PythonAgentGateway 调 Python（连接池、统一 Bulkhead、trace header、3s 连接 / 50s 读取超时）
-    → Python POST /agent/chat
-      → RequestConcurrencyLimiter（默认 3 个并发槽，排队 500ms）
-      → MAX_MESSAGE_LENGTH 兜底校验（默认 2000）
-      → rag_service.process_chat() → rag_answer_service.answer_rag()
-        → safety_guard.check_user_query_safety()  # 规则版 Safety Guard 前置检查
-        → query_rewriter.rewrite_query()           # 实验模式，none 时跳过
-        → hybrid_retriever.retrieve()
-          ├── faiss_retriever（BGE embedding 语义检索）
-          └── bm25_retriever（字符级 n-gram BM25 检索）
-        → RRF 融合排序（默认 hybrid 模式）→ TopK=3
-        → build_rag_prompt()
-        → llm_service.call_llm()                   # 30s 单次超时、1024 输出 Token、默认不重试
-          → DeepSeek API
-        → ChatResponse（含 traceId）
-```
-
-**特点**：标准问答和 Agent RAG Tool 复用同一 `rag_answer_service`；兼容 Chain 仅委托该服务。Safety Guard 在检索前检查输入，高风险问题直接拒答，不进入检索。
-
-> **注意：** Safety Guard Lite 是启发式纵深防御过滤器（heuristic defense-in-depth filter），不是 authorization / trust / tool permission / business validation 边界。真正安全边界由认证、授权、工具能力、业务校验、租户/数据隔离、事务/状态机、人工确认承担。Lite 只做输入规范化 + 五族高置信确定性规则，明确攻击拦截、咨询放行，不承诺完整 prompt injection 检测 / 完整 Unicode confusable 保护 / 完整自然语言意图理解。
-
-### 链路二：/api/agent/langgraph/chat（LangGraph Agent）
-
-main 同时保留两套互斥图，由 `AGENT_LOOP_ENABLED` 切换（仓库部署默认 true，走 Planner-first；false 保留 legacy fallback）。
-
-**legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）：
-
-```
-POST /api/agent/langgraph/chat
-  → Java LangGraphAgentController
-    → Python POST /agent/langgraph/chat
-      → run_langgraph_agent(use_planner=False)
-        → build_agent_graph()
-          ├── safety_node
-          │     └── check_user_query_safety()
-          │           ├── unsafe → route=refuse
-          │           └── safe → 继续
-          ├── router_node
-          │     ├── 评估类关键词 → route=eval
-          │     ├── 明确年假申请 → route=action
-          │     └── 其他（含年假政策/余额/流程）→ route=rag
-          ├── rag_node / eval_node / action_node / refuse_node → END
-          └── action_node: plan_annual_leave_action
-                ├─ 字段完整：
-                │     action_proposal
-                │     → BusinessActionService.createPending
-                │        → Java 权威 Proposal 校验
-                │        → Java 生成 confirmationNonce
-                │        → 持久化 PendingAction
-                └─ 缺字段：
-                      missing_fields
-                      → Clarification response
-                      → END
-                      （不得进入 BusinessActionService / PendingAction）
-    → 已创建 PendingAction
-      → React 脱敏确认卡
-        ├── confirm
-        │  → BusinessActionService confirm
-        │  → owner / nonce / 状态机 / TTL / 幂等校验
-        │  → LeaveExecutionGateway
-        │  → PostgreSQL 事务
-        └── cancel
-           → CANCELLED
-```
-
-**Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：
-
-```
-POST /api/agent/langgraph/chat
-  → Java LangGraphAgentController
-    → Python POST /agent/langgraph/chat
-      → run_langgraph_agent(use_planner=True)
-        → build_agent_loop_graph()
-          ├── safety_node
-          │     └── unsafe → route=refuse（直接终止，不调 Planner LLM）
-          │     └── safe → planner_node
-          ├── planner_node
-          │     └── PlannerDecision（Pydantic 严格白名单，MAX_PLANNER_STEPS=5）
-          │           ├── action=tool → tool_executor_node
-          │           ├── action=finish / refuse → END
-          │           └── step budget exhausted
-          │                 → stop_reason=step_budget_exhausted
-          │                 → route=error
-          │                 （Planner 只能规划，不能授权 —— 权限边界在 tool_executor_node）
-          ├── tool_executor_node
-          │     └── 校验：结构 → employee_id → 权限 → Tool 预算（MAX_TOOL_CALLS=3） → 成功签名去重
-          │           ├── 通过 → 执行 Tool；Capability Gate 由程序层按可信状态动态收缩
-          │           │     system/user Prompt 与 Planner contract（模型不能自行扩大 Tool 权限）：
-          │           │     始终 rag_answer_tool；
-          │           │     employee_id + JAVA_BASE_URL + JAVA_INTERNAL_TOKEN 齐全时追加
-          │           │     leave_balance_tool / leave_request_tool；
-          │           │     allow_eval=true 追加 eval_report_tool；
-          │           │     allow_business_actions=true 且 employee_id 非空时追加 leave_proposal_tool
-          │           ├── 任一执行前校验失败
-          │           │     → 记录 blocked observation / tool_history，不计数，Tool 不执行
-          │           │     → 回到 planner_node，由 Planner 决定下一步
-          │           └── 最终 public route 由 Agent Loop 终态的 response contract 收敛
-          ├── leave_proposal_tool（Planner-first 下）：
-          │     ├─ action_proposal（字段完整）
-          │     │     → BusinessActionService.createPending
-          │     │        → Java 权威 Proposal 校验
-          │     │        → Java 生成 confirmationNonce
-          │     │        → 持久化 PendingAction
-          │     └─ missing_fields（Clarification）
-          │           → Clarification response
-          │           → 不创建 PendingAction
-          ├── leave_balance_tool / leave_request_tool：Python JavaReadClient → Java /api/internal/leave/*
-           └── finalize_node：在 Graph 内调用 _finalize_action_proposal + _finalize_response_contract，随后 END
-    → 已创建 PendingAction
-      → React 脱敏确认卡
-        ├── confirm
-        │  → BusinessActionService confirm
-        │  → owner / nonce / 状态机 / TTL / 幂等校验
-        │  → LeaveExecutionGateway
-        │  → PostgreSQL 事务
-        └── cancel
-           → CANCELLED
-```
-
-**特点**：两套互斥图共用同一 Java 控制面；Planner-first 的 `finalize_node` 在最后一次 Checkpoint 写入前依次收敛 `_finalize_action_proposal`、`_finalize_response_contract` 与 `execution_history`，`run_langgraph_agent` 不再在 `graph.invoke()` 返回后修改 Planner 状态。
-
-> **权限链路（v0.3.2+）：** 用户请求 → Java `LangGraphAgentController` 判断 `admin.token` / `X-Admin-Token` → Java 设置 `X-Allow-Eval` header → Python `router_node` 根据 `allow_eval` 控制是否路由到 `eval_node`。Java 后端是权限判断唯一入口。公网部署 `ADMIN_TOKEN` 必须非空（Compose `:?` 强制校验）。`X-Allow-Eval` 是内部传递信号，不是认证凭证。当前方案是**最小 Admin Token + Evaluation 访问限制**，不是完整认证体系。
-
-> **身份边界：** 正常请求使用 `app_user` 签发的 JWT；`X-Demo-User-Id` 只用于完全没有 Bearer 时的本地或受控兼容 fallback，不是认证凭证。Manager 没有审批权限。未来 DingTalk/Feishu/WeCom 等真实 OA Gateway 需要 Outbox 与异步一致性机制，不能参与当前本地 PostgreSQL 事务。
-
-### Scoped Conversation Memory P0（Agent 出口旁路）
-
-Memory 不改变 Planner / Tool Executor 的授权边界，也不属于 PendingAction。完整运行时链路为：
+`AGENT_LOOP_ENABLED=true` 时，主入口是：
 
 ```text
-React sessionStorage conversationId
-  → Java LangGraphAgentController
-    → VerifiedIdentity.userId() + conversationId 复合 key 读取 ACTIVE ai_task_memory
-    → 内部 body.memoryContext 注入 Python
-    → Planner 只把 memoryContext 当作不可信历史数据
-  → run_langgraph_agent result
-  → MemoryTriggerPolicy
-    → leave_proposal_tool 成功或已有 ACTIVE memory 才进入 Extractor
-  → MemoryExtractor(MemoryLLMAdapter → 现有 llm_service.call_llm)
-  → MemoryWritePolicy（trusted key / 脱敏 / 16 KiB / 500 字符 / 仅 UPSERT+ACTIVE）
-  → MEMORY_WRITE_MODE
-    ├─ DISABLED：入口短路，不调用 Extractor
-    ├─ AUDIT_ONLY：生成 command，仅记录元数据
-    └─ ENABLED：MemoryWriteDispatcher → response memory_proposal
-          → Java 先创建 PendingAction（若有 action_proposal）
-          → Java 以当前 VerifiedIdentity.userId() + conversationId 写 ACTIVE Memory
+START → safety → planner ⇄ tool_executor → finalize → END
 ```
 
-身份边界：`user_id` 不来自前端 body、Python payload、LLM 或 Memory；Java 直接使用当前认证上下文。`conversationId` 只作 namespace，并由 Java 在当前请求内解析。Read Path 只注入 `ACTIVE`；终态只由 Java PendingAction 生命周期收口，无 TTL、归档、向量或 Profile Memory。
+Safety Guard Lite 是深度防御过滤器，不是 authorization 或业务 validation。安全拒答不进入 Planner。Planner 每次输出一个严格 decision，当前最多 6 次 decision；Tool Executor 当前最多真正执行 5 次 Tool，成功、失败和超时均消耗执行预算。
 
-P3-2 Audit Fix：Java 先生成最终 runtime thread，再由 `AgentRuntimeThreadExecutionGuard` 获取进程内 guard，随后才读取 ACTIVE Memory；该 guard 一直覆盖 Python 调用、PendingAction 创建、Memory persist 和响应返回。这样 Memory Read 与 Python Checkpoint read-modify-write 不会被同一 conversation 的并发请求交错。Python `CheckpointRuntime.active_thread_ids` 仍保留，职责仅是保护 Python 侧 history hydrate 到最终 Checkpoint 的区间。
+可见 Tool 由 Runtime Context 和服务配置动态生成：`rag_answer_tool` 始终可见；Java read 配置可用时加入 leave/expense status；Enterprise OA MCP 可用时加入 travel/invoice；`allow_eval` 加入 eval；`allow_business_actions` 且有 employee 时加入 leave/expense proposal。注册表和执行器仍是最后防线。
 
-执行快照与 Memory 不同：Memory 记“用户在做什么”，是 Java 控制的对话范围任务生命周期；`tool_history` 记“这一轮刚刚执行了什么”，每个新请求清空；`execution_history` 记“以前做过哪些执行步骤”，只保存有限的成功 Tool 摘要并统一为 `CONTEXT_ONLY`。Checkpoint 保存这些 Agent 状态，但 `execution_history` 不能作为用户画像、当前业务事实、PendingAction 查询源或权限来源。历史 invoice 的 `valid / duplicate`、历史 trip 的 `status` 都不能直接复用，当前决策必须重新调用对应 Tool；Java 业务数据库仍是当前业务事实的权威来源。
+`leave_proposal_tool` 和 `expense_proposal_tool` 只生成 Proposal 或 Clarification。它们不调用业务写 API、不生成 nonce、不改变 Java 状态。报销金额、住宿上限和 Proposal facts 由程序确定性计算，LLM 不能计算或伪造。
 
-P3-2 不实现历史事实的 TTL / revalidation；P3-3 的 Crash Resume 不依赖 ACTIVE Memory。Fresh request 的 `tool_history=[]`，普通跨请求连续性使用 `execution_history`；同一次未完成执行 Resume 使用 Checkpoint 中原样保留的 `tool_history`、`execution_history`、计数、Planner decision 和 execution marker。只有 exact same question、同一 `business_date` anchor、同一 actor scope、当前权限未撤销已物化的敏感结果、合法 replay-safe pending Tool 才可自动恢复；completed execution 永远 Fresh。request/date/actor conflict、权限残留、旧 marker、interrupt、未知/并行 pending node 和 unsafe Tool 均 fail-closed 为 HTTP 409。真实外部副作用 Tool 必须具备业务幂等，或保持 `resume_safe=False`。Checkpoint retention / pruning 同样暂缓。
+这两个 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只用于 Python → Java 的只读业务 Tool 链路。
 
-## 离线知识库构建流程
+### Legacy Router-first（显式回退）
 
-```
-data/hr/*.md, data/it/*.md, data/bank/*.md
-  → build_chunks.py（段落切片 + 短段落合并 + 长段落 overlap 拆分）
-    → data/processed/chunks.json
-  → build_embeddings.py（BGE embedding 编码）
-    → data/processed/embeddings.json
-  → build_faiss_index.py（FAISS 索引构建）
-    → data/processed/faiss.index + faiss_metadata.json
+`AGENT_LOOP_ENABLED=false` 时使用已实现的确定性图：
+
+```text
+START → safety → router → rag | eval | action | refuse → END
 ```
 
-## Hybrid Retrieval 设计
+它用于兼容性回退和对照验证，不是仓库部署的 primary path；两套图都必须汇入同一个 Java authority boundary。
 
-支持三种检索模式：
+## 4. RAG data path
 
-**hybrid 模式（默认）：**
-```
-用户问题
-  ├─→ Faiss Semantic Retrieval（向量余弦相似度）
-  └─→ BM25 Retrieval（字符级 n-gram，无外部依赖，对中文友好）
-       ↓
-  RRF（Reciprocal Rank Fusion）融合排序
-       ↓
-  TopK=3 → 传给 LLM
-```
-
-**vector 模式：**
-```
-用户问题
-  ├─→ Faiss Semantic Retrieval
-  └─→ Keyword Retrieval（简单关键词匹配）
-       ↓
-  按 chunk id 合并去重 → TopK=3
+```text
+data/hr|bank|it/*.md
+  → chunk builder（段落合并、长度切分、overlap、source metadata）
+  → BAAI/bge-small-zh-v1.5 embeddings
+  → FAISS semantic retrieval + character BM25
+  → RRF fusion
+  → optional Cross Encoder rerank
+  → bounded prompt context
+  → DeepSeek answer + sources
 ```
 
-**hybrid_rerank 模式（实验）：**
-```
-用户问题
-  → Hybrid Retrieval → Top10 候选
-  → Cross Encoder 精排（BAAI/bge-reranker-base）
-  → TopK=3
-```
+`hybrid` 是默认模式；`vector` 和 `hybrid_rerank` 用于比较。规则 Query Rewrite 只改变检索 query，原始用户问题仍用于最终 Prompt。RAG 的知识证据不能转化为业务授权；缺少证据时必须明确拒答。
 
-**Query Rewrite（实验模式）：**
-```
-original_query → query_rewriter → rewritten_query → retrieval
-                                                  ↓
-                                    prompt 使用 original_query
-```
+## 5. Java authority and action state
 
-> `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用。
+受控动作当前支持 `ANNUAL_LEAVE_REQUEST` 和 `EXPENSE_CLAIM`。Python 只提交内部 Proposal；Java `BusinessActionService` 在创建时重新校验 action type、owner、日期/字段、权限、容量和业务规则。
 
-> 检索相关性 Shadow Gate 同样是实验能力且默认关闭。首轮阈值只用于复现实验，不能视为可部署参数；当前未启用生成前请求拦截。
-
-## Evaluation 架构
-
-### Retrieval Evaluation（零 token 消耗）
-
-检查 TopK 检索结果是否包含预期来源和预期关键词。
-
-- answerable case：检查 `source_hit` + `keyword_hit`
-- no-answer case：SKIP，不判 fail，只记录检索结果
-
-### Generation Evaluation（调用 LLM）
-
-检查 LLM 最终回答是否包含预期关键词或正确拒答。
-
-- answerable case：检查 `expected_answer_keywords` 命中
-- no-answer case：检查是否包含拒答关键词（"未找到"、"当前知识库"等）
-- flaky 机制：第一次 FAIL 后 retry 一次，区分随机波动和稳定失败
-
-### Baseline Regression
-
-`compare_eval_reports.py` 对比 baseline 和 current report，判断是否有退化。
-
-- `exit 0` = NO REGRESSION
-- `exit 1` = REGRESSION DETECTED
-
-## traceId 全链路透传
-
-> **信任边界：** Java 入口统一生成服务端 traceId，不信任客户端传入的 `X-Trace-Id`。
-
-```
-Frontend: 发送请求（X-Trace-Id 可选，不被信任）
-  ↓
-Java TraceIdFilter: 忽略客户端 X-Trace-Id，统一生成 UUID
-  → MDC + request.setAttribute + 响应头 X-Trace-Id
-  ↓
-Java → Python: X-Trace-Id（服务端生成，透传）
-  ↓
-Python middleware: 读取 → request.state.trace_id + 响应头
-  → JSON: { "traceId": "..." }
-Frontend: 展示 traceId 标签
+```text
+PENDING_CONFIRMATION
+  ├─ confirm → PROCESSING → SUCCEEDED
+  │                        └→ FAILED
+  ├─ cancel  → CANCELLED
+  └─ TTL     → EXPIRED
 ```
 
-客户端传入的非法 traceId（含控制字符、超长、非 UUID 格式）会被丢弃，Java 重新生成。
+Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数据库只保存 SHA-256 digest。Confirm 要求 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key`；成功重放返回原 `requestId`，不重复写 LeaveRequest 或 ExpenseClaim。Confirm/cancel/expire/失败时，Java 同步负责对应 Memory 的 terminal transition；Python 不写 terminal Memory。
 
-## 异常兜底设计
+业务数据库的关键事实：
 
-| 场景 | 处理 |
-|------|------|
-| Python 服务不可用 | Java 返回 `success=false`，traceId 仍然存在 |
-| Java → Python 超时 | RestTemplate 超时（3s 连接 / 40s 读取），Java 返回兜底响应 |
-| AI 并发槽已满 | Java 或 Python 在短队列截止后返回 HTTP 429 + `Retry-After: 1` |
-| LLM 调用超时 | Python `llm_service` 捕获 `APITimeoutError`，返回 `success=false` |
-| LLM 调用失败 | Python rag_service 返回 `success=false`，日志记录异常 |
-| 输入过长 | Java `@Size(max=2000)` 拦截 + Python `MAX_MESSAGE_LENGTH` 兜底 |
-| 知识库无检索结果 | Prompt 兜底："当前知识库暂无相关信息，不要编造" |
-| 安全问题输入 | Safety Guard 拦截，返回安全拒答文案 |
-| Agent 异常 | Python endpoint catch Exception，返回 `success=false` |
+- `PendingAction`：确认凭据、owner、conversation、action type、状态和结果；
+- `LeaveRequest` / leave account：年假业务事实；
+- `ExpenseClaim` / `ExpenseItem`：报销金额、trip/invoice 摘要、外部 provider/request、wait 和 resume markers；
+- `source_action_id` 唯一约束防止一个动作生成多个业务写入。
 
-> **异常边界：** 响应中的 `reason` 字段不暴露底层异常详情（如 `e.getMessage()` / `str(e)`）。用户看到稳定通用文案，服务端日志保留完整异常堆栈和 traceId，用户可通过 traceId 反馈问题。
-
-## Python 模块一览
-
-```
-agent-python/app/
-├── core/          # config.py — 环境变量、路径、常量
-├── retrieval/     # faiss_retriever, keyword_retriever, bm25_retriever, hybrid_retriever, query_rewriter, cross_encoder_reranker
-├── services/      # rag_answer_service.py（统一 RAG）, rag_service.py（安全入口）, llm_service.py
-├── prompts/       # system_prompt.py, build_rag_prompt()
-├── schemas/       # ChatRequest, ChatResponse, AgentResponse
-├── chains/        # langchain_rag_chain.py — 旧入口兼容委托层
-├── tools/         # rag_tools（rag_answer_tool / eval_report_tool，LangChain @tool）+ enterprise_tools（leave_balance_tool / leave_request_tool / leave_proposal_tool）
-├── agents/        # langgraph_agent.py + planner_node.py + tool_executor_node.py — LangGraph 两套互斥图
-├── runtime/       # checkpoint_runtime.py — PostgresSaver / Pool / 持久化图生命周期
-├── clients/       # java_client.py — Python → Java 内部只读 HTTP 客户端（仅供只读企业 Tool 使用）
-├── guards/        # input_normalizer + safety_rules + safety_guard — Safety Guard Lite（规范化 + 五族规则）
-└── main.py        # FastAPI 应用入口 + trace_id_middleware
-```
-
-## 配置说明
-
-```properties
-# Java → Python 服务地址
-python.agent.base-url=http://localhost:8000
-
-# Java 日志格式（含 traceId）
-logging.pattern.console=%d{HH:mm:ss.SSS} [%X{traceId}] %-5level %logger{36} - %msg%n
-
-# Java → Python 有界并发和超时
-python.agent.max-concurrent-requests=3
-python.agent.acquire-timeout-ms=500
-python.agent.connect-timeout=3000
-python.agent.read-timeout=50000
-```
-
-## 网络拓扑（部署环境）
+## 6. Expense durable workflow
 
 ```mermaid
-graph TD
-    subgraph Internet
-        U[用户浏览器]
-    end
+sequenceDiagram
+    participant U as User
+    participant J as Java
+    participant P as Python Graph
+    participant M as Enterprise OA MCP
+    participant DB as Java PostgreSQL
+    participant O as Mock OA SQLite
 
-    subgraph Host ["宿主机"]
-        NG[Nginx<br/>0.0.0.0:80/443]
-        J[Java Backend<br/>127.0.0.1:8080]
-    end
-
-    subgraph Net1 ["Docker: deploy_eat-what-net"]
-        NG
-        J
-    end
-
-    subgraph Net2 ["Docker: ai-copilot-net"]
-        J
-        P[Python Agent<br/>expose 8000]
-        M[models/:ro]
-        D[data/processed/:ro]
-    end
-
-    U -->|HTTPS| NG
-    NG -->|/api proxy| J
-    J -->|HTTP| P
-    P -->|只读挂载| M
-    P -->|只读挂载| D
+    U->>J: POST /api/agent/langgraph/chat
+    J->>P: trusted context + question
+    P->>M: travel_record / invoice_verify (read-only)
+    P->>P: deterministic expense proposal
+    P-->>J: proposal + WAITING_USER marker
+    J->>DB: PendingAction PENDING_CONFIRMATION
+    U->>J: confirm + nonce + idempotency key
+    J->>P: narrow confirm-time revalidation
+    P-->>J: current trip/invoice facts
+    J->>DB: ExpenseClaim + items and Action SUCCEEDED
+    J->>P: Command(resume) for user decision
+    P->>P: prepare_external_wait → interrupt
+    J->>O: POST approval PENDING (idempotent)
+    U->>O: approve or reject
+    O-->>J: signed notification without status
+    J->>O: authoritative GET status
+    J->>DB: ExpenseClaim APPROVED/REJECTED
+    J->>P: external Command(resume)
+    P-->>J: Graph END response
 ```
 
-**部署要点：**
+The two waits have deliberately different meanings:
 
-- Nginx 监听 0.0.0.0:80/443，提供静态文件和 /api 反向代理
-- Nginx 位于 `deploy_eat-what-net`，通过该网络访问 Java
-- Java 同时连接 `deploy_eat-what-net` 和 `ai-copilot-net`
-- Python 只连接 `ai-copilot-net`，Nginx 无法直接访问 Python
-- Java 绑定 127.0.0.1:8080（localhost only，不暴露公网）
-- Python 不映射宿主机公网端口，仅 expose 8000（Docker 内网）
-- 模型和 processed data 使用只读挂载
-- 独立 Let's Encrypt 证书，自动续签
-- 基础 API 限流（2 req/s，burst 5）
-- Java/Python 双层有界并发（默认各 3 个槽，排队 500ms）
+| Wait | Trigger | Authority | Resume |
+|---|---|---|---|
+| `WAITING_USER` | complete Proposal needs explicit user decision | Java PendingAction | `POST /agent/langgraph/hitl/resume`, `Command(resume)` |
+| `WAITING_EXTERNAL` | Java ExpenseClaim is already written and awaits OA | Java ExpenseClaim + OA authoritative GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
 
-## Agent 与 Controlled Action 边界说明
+普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。
 
-LangGraph 用于流程编排，main 同时保留两套互斥状态图：
+## 7. Confirm-time revalidation and TOCTOU
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）
-  - 状态图：`safety → router → rag|eval|action|refuse`
-  - Router 基于保守规则匹配；只有明确年假申请进入 Action，政策、余额、结转、审批流程继续走 RAG
-  - 不使用"自主 Agent""智能规划系统"等措辞
-  - legacy Router-first 不暴露 Planner-first 的 Tool 可见性集合；`leave_proposal_tool` 仅在 Planner-first 下被 Planner 决策调用
+The revalidation adapter is a narrow Java → Python internal endpoint. It reads persisted Action payload, not browser fields or Memory, and checks:
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
-  - 状态图：`safety → planner ⇄ tool_executor → finalize`
-  - Planner 拥有规划权（Pydantic 严格白名单），没有最终业务执行授权
-  - 预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛；Tool Executor 独立做 employee_id / 权限 / Tool 预算 / 成功签名去重校验
-  - 任务拆解 / 多步规划具有有限自主规划能力，但受 Tool 白名单、权限校验、`MAX_PLANNER_STEPS=5`、`MAX_TOOL_CALLS=3` 和 Java 最终授权边界约束
-  - 可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`
-  - `leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作，不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`
+1. trip ID exists, belongs to the employee, is `APPROVED`, and current start/end dates are valid and produce a current stay-night count;
+2. the current invoice set exactly matches the persisted invoice IDs, with ownership accepted, `valid=true`, `duplicate=false`, amount and category unchanged;
+3. Java recalculates deterministic reimbursable amount and compares it with the Proposal before opening the local write transaction.
 
-- **跨图公共语义**：受控业务动作的统一边界仍然由 Java 承担 —— React 展示 PendingAction 确认卡；`confirmationNonce` 由 Java 生成（32 字节 SecureRandom，DB 仅存 SHA-256 摘要）；Confirm 幂等 Key 仅存页面内存，双击由同步锁拦截，网络失败重试 Confirm 时复用原 Key。客户端按 `expiresAt` 提前禁用过期草稿，服务端 Action 状态和错误码仍是权威来源；确认/取消执行期间禁用清空会话和模式切换。PendingAction、幂等结果、余额和 LeaveRequest 均持久化到 PostgreSQL；Action/Account 行锁和唯一 `source_action_id` 保证并发确认只执行一次，Java 或数据库重启后可恢复和重放。
-- **共同不变约束**：仍不接真实 OA、不使用 Redis，也不处理法定节假日和调休；浏览器刷新不会恢复只存在页面内存的 nonce 明文。
+If the facts are stale, Java marks Action `FAILED`, Memory `ABANDONED`, and the HITL decision `REJECTED`; no ExpenseClaim is created and the graph is closed safely. If the adapter is unavailable, Java keeps `PENDING_CONFIRMATION` and returns 503 so the user can retry. A small residual window remains between remote read and local commit; this is explicitly accepted for this small-scale design and would require a stronger external transaction/version contract in production.
 
-## Embedding Runtime
+## 8. External approval authority
 
-项目使用 Direct ONNX Runtime 替代 sentence-transformers：
+Mock OA is independent from Java and uses SQLite. Submission is idempotent by `expense:<expenseId>` and starts `PENDING`. Approve/reject transitions are terminal and idempotent; opposite decisions conflict. The webhook contains `eventId`, `eventType` and `requestId`, but deliberately no status.
 
-| 后端 | 依赖 | 内存 |
-|------|------|------|
-| Torch | PyTorch + sentence-transformers | 877 MiB |
-| ONNX_ST | Torch + ONNX Runtime | 920 MiB |
-| Direct ONNX | onnxruntime + tokenizers | 174 MiB |
+For webhook exposure, Java permits only the exact `POST /api/webhooks/mock-oa/expense-approval` path without normal user authentication. Health/version and token-protected internal read routes have separate contracts. The webhook handler validates the raw-body HMAC-SHA256 signature and timestamp window (300 seconds), strictly parses the body, then calls Mock OA `GET /api/expense-approvals/{requestId}`. Only that authoritative status can update `ExpenseClaim`; `PENDING` never regresses a terminal local claim, and a terminal decision cannot be reversed.
 
-详见 [`performance.md`](performance.md)。
+Reconciliation is default-off and bounded. It selects only `WAITING_APPROVAL + MOCK_OA + external_request_id`, uses a due `external_last_checked_at` compare-and-set before the out-of-transaction GET, and shares the same status-sync path as webhook processing. Submission retry and external-resume retry are separate, low-frequency, bounded workers. A failed external resume never rolls back a committed Java terminal state.
 
-## 当前架构边界（未生产化）
+## 9. Checkpoint and crash recovery
 
-以下能力尚未实现，属于 Roadmap 范畴：
+`LANGGRAPH_CHECKPOINT_MODE` has two modes:
 
-- 文档上传与知识库管理
-- 多租户隔离
-- 审计日志
-- 完整 metrics、告警和审计栈（Phoenix 当前只提供可选 AI Trace/评估控制台）
-- 多模型配置
-- 高可用、水平扩容和大规模高并发（当前仅实现单机有界并发保护）
+- `DISABLED`：不创建持久化 LangGraph runtime；适合普通本地 RAG/Agent 测试；
+- `POSTGRES`：启动 `ConnectionPool + PostgresSaver + JsonPlusSerializer`，执行 `setup()` 并编译两套图；DSN、连接、setup 或图编译失败会阻止启动，不自动降级。
 
-并发保护的配置、压测脚本和验收边界见 [`concurrency-and-load-test.md`](concurrency-and-load-test.md)。
+POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapshot：
+
+- 无 `snapshot.next` 代表新执行或已完成执行；
+- 非 interrupt 恢复要求 exact raw question/fingerprint、相同 business-date anchor、相同 actor scope、当前 capability residue 安全、pending node 合法且 Tool replay-safe；通过后调用 `graph.invoke(None)`；
+- `WAITING_USER` 和 `WAITING_EXTERNAL` 使用独立 marker、correlation、检查器和 `Command(resume)`；
+- completed execution、legacy deterministic graph、unknown/parallel pending node、scope/date/question 冲突和不安全 Tool 均 fail-closed 为稳定 409；
+- resume 保留原 execution 的 `tool_history`、计数、execution_id 和 marker，不重新 hydrate `execution_history`，也不重新跑 Planner。
+
+最终 response contract 和有界 `execution_history` 在 `finalize_node` 内写入最后一次 Checkpoint 前完成。`execution_history` 只保存成功的 travel/invoice 等白名单摘要，在 ACTIVE Memory + task type 匹配时 hydrate，且永远标记为 `CONTEXT_ONLY`。
+
+## 10. Memory and history boundaries
+
+Memory 是 Conversation Scoped Task State Persistence，不是 Profile Memory、Preference Memory、Vector Memory 或业务真相。
+
+```text
+Java VerifiedIdentity + conversationId
+  → read ACTIVE ai_task_memory
+  → Python memoryContext（untrusted context）
+  → Agent response
+  → trigger policy
+  → extractor
+  → UPSERT + ACTIVE proposal
+  → Java authenticated lifecycle write
+```
+
+Trigger 规则：`action_proposal` 或 Memory-eligible Tool 成功才触发；现有 ACTIVE Memory 本身不触发，纯 RAG/eval/余额/leave request/expense status/read-only MCP 成功也不触发。Python write policy 只产生 `UPSERT + ACTIVE`，不接受 `COMPLETE`、`ABANDON` 或终态业务写入；Java 负责 terminal lifecycle 和 owner scope。
+
+| 名称 | 语义 | 不能做什么 |
+|---|---|---|
+| Memory | 当前会话的任务连续性 | 不能提供权限、业务当前事实或终态写入 |
+| `tool_history` | 当前 execution 已执行 Tool | 不能跨请求当作历史事实 |
+| `execution_history` | 有界、脱敏、`CONTEXT_ONLY` 成功摘要 | 不能用于 Tool 去重、金额、Memory trigger 或 PendingAction |
+| LangGraph Checkpoint | 执行现场与恢复材料 | 不能替代 Java DB 或身份来源 |
+| Java PostgreSQL | 业务状态和 Memory lifecycle authority | 不由 LLM/Python 直接写 |
+
+## 11. Concurrency and observability
+
+Java `AgentRuntimeThreadExecutionGuard` 在 Memory Read 前获取，覆盖 Java Agent 生命周期到响应结束；HITL/外部 resume 在 transaction commit 或 handoff 前后遵守 exact-one owner release。Python guard 覆盖 recovery inspection 到 final Checkpoint。两者都是单进程内存保护，不是多实例分布式锁；当前没有分布式 lease、event inbox/outbox 或 workflow engine。
+
+Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返回。Phoenix/OpenTelemetry 默认关闭；启用时是旁路批量 trace，默认不采集 Prompt、用户输入、检索正文和模型输出，初始化或导出失败不阻断业务。
+
+## 12. Deployment and configuration
+
+关键默认值：
+
+| 配置 | 默认/部署口径 |
+|---|---|
+| `AGENT_LOOP_ENABLED` | `true`；`false` 才回退 Router-first |
+| `LANGGRAPH_CHECKPOINT_MODE` | Python 本地默认 `DISABLED`；生产 Compose 默认 `POSTGRES` |
+| `business.actions.enabled` | Java 默认 `false` |
+| `MEMORY_WRITE_MODE` | Python 默认 `DISABLED` |
+| `MOCK_OA_ENABLED` | Java 默认 `false` |
+| reconciliation/resume retry | 默认 `false` |
+| `ADMIN_TOKEN` | 空值为本地 Demo eval 口径；生产 Compose 强制提供 |
+
+完整配置和启动步骤见 [deployment.md](deployment.md)；受控动作和外部审批的本地演示见 [demo-guide.md](demo-guide.md)。
+
+## 13. Accepted limitations
+
+以下不是未记录的缺口，而是当前交付明确接受的边界：
+
+- 面向小规格单机和短时受控验证，不承诺生产 SLA；
+- Java/Python guard 仅 process-local，不提供多实例分布式锁或 lease；
+- 不使用 Temporal、DBOS、Kafka 或消息总线；没有分布式 workflow engine；
+- Java 本地数据库事务与 Enterprise OA 之间没有分布式事务，真实生产需要 outbox、外部幂等、重试、补偿和状态映射；
+- Mock OA 是 SQLite 模拟服务，Enterprise OA MCP 是 fixture-backed read-only integration；生产 credentials 和正式 OA 集成未验收；
+- confirm-time remote read 与本地 commit 之间有小型 TOCTOU 窗口；
+- Safety Guard 是规则版深度防御，不是完整 Prompt Injection 或内容安全系统；
+- 评估集和浏览器覆盖有限，容量数据不能外推为生产 QPS/P95；
+- Checkpoint retention/pruning、分布式恢复租约和完整集中式 metrics/alerting 不在当前范围。
+
+这些限制不能通过把当前系统描述为“生产级”来消除；它们分别记录在 [quality-assurance.md](quality-assurance.md) 和 [roadmap.md](roadmap.md)。

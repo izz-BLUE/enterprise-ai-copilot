@@ -1,71 +1,101 @@
-# Quality assurance
+# Quality Assurance and Verification Baseline
 
-This project combines deterministic tests, retrieval evaluation, controlled load checks, and deployment smoke tests. Each layer answers a different question; no single result is treated as proof of production readiness.
+本文记录项目最终文档收口采用的验证口径。测试结果是已接受的工程基线，不等价于生产 SLA、长期容量或真实 OA 集成承诺。
 
-## Continuous integration
+## 1. Accepted baseline
 
-GitHub Actions runs four independent functional jobs, plus security workflows:
+| 范围 | 结果 |
+|---|---:|
+| Java backend | 334 passed |
+| Python full suite | 1402 passed + 34 expected skips |
+| PostgreSQL checkpoint integration | 17 passed |
+| PostgreSQL crash recovery | 7 passed |
+| PostgreSQL HITL | 5 passed |
+| PostgreSQL external resume | 5 passed |
+| PostgreSQL persistent runtime total | 34 passed, 0 skipped |
+| Enterprise OA MCP | 24 passed |
+| Mock OA | 17 passed |
+| Frontend | 44 passed |
+| Lint/build | pass |
 
-| Area | Checks |
-|------|--------|
-| Java backend | compile, unit tests, concurrency behavior |
-| Python service | concurrency tests, retrieval evaluation in `none` and `rule` rewrite modes |
-| Frontend | lint and production build |
-| Browser | five Playwright scenarios against mocked API contracts |
+## 2. CI checks
 
-Gitleaks scans repository history for committed secrets. CodeQL analyzes Java, Python, and JavaScript on pull requests, pushes to `main`, and a weekly schedule. Dependabot checks GitHub Actions, Maven, uv, and npm dependencies monthly.
+`.github/workflows/ci.yml` 当前包含：
 
-The workflow is defined in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+- **Java Backend**：JDK 17，Maven compile 和 `./mvnw test`；
+- **Mock OA Webhook**：Mock OA pytest、Ruff、local Compose config validation；
+- **Python RAG Evaluation**：Python full suite、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成、baseline retrieval gate、rule rewrite retrieval evaluation；
+- **Frontend Build**：`npm ci`、production build、lint；
+- **Frontend Browser Tests**：Chromium 安装和 Playwright E2E；
+- **Secret Scan**：Gitleaks；
+- **CodeQL**：Java/Kotlin、Python、JavaScript/TypeScript；
+- **Dependabot**：GitHub Actions、Maven、uv 和 npm 的月度依赖检查。
 
-## Retrieval evaluation
+## 3. RAG evaluation
 
-The retrieval suite contains answerable and no-answer cases. It measures source hits, keyword hits, and final case outcomes without calling the LLM, so it can run in CI with zero model-token cost.
+固定评估集包含 38 个 case，区分：
+
+- Retrieval：source hit、keyword hit、final case outcome，不调用 LLM；
+- Generation：expected answer keywords、no-answer refusal、flaky retry；
+- Regression：baseline/current report 对比，检测退化。
+
+命令：
 
 ```bash
 cd agent-python
-
-uv run python scripts/eval/eval_retrieval.py --rewrite-mode none \
-  --min-source-hit-rate 100 \
-  --min-keyword-hit-rate 95 \
-  --min-final-pass-rate 95
-
-uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule
+uv run python scripts/eval/run_rag_eval.py
+uv run python scripts/eval/run_rag_eval.py --with-baseline
 ```
 
-The `none` mode retains a known colloquial-query miss and therefore uses explicit 95% keyword and final-pass thresholds. Production uses deterministic rule rewriting; the corresponding suite is expected to pass completely. Reported rates apply only to the versioned test set, not arbitrary user questions.
+评估集规模有限；通过率不能外推到所有企业文档、所有模型版本或生产 QPS。
 
-## Security checks
+## 4. Runtime and workflow verification
 
-The automated and manual checks cover:
+重点验证范围：
 
-- deterministic refusal of known high-risk requests before retrieval and LLM calls;
-- server-generated trace IDs and stable public error messages;
-- administrator-token protection for evaluation reports;
-- network isolation between the public Nginx/Java path and the internal Python service;
-- repository scans for credentials, `.env` files, keys, and generated artifacts.
+- Java authority：PendingAction nonce、TTL、owner、幂等、锁、业务事务和 stale confirmation；
+- Python Agent：Planner schema、Tool visibility、Tool budget、success-signature dedupe、Safety Guard；
+- Checkpoint：PostgresSaver setup、同步 durability、latest snapshot recovery、`graph.invoke(None)`；
+- HITL：`WAITING_USER` marker/correlation、Java commit 后 `Command(resume)`；
+- External approval：Mock OA PENDING→terminal、HMAC webhook、authoritative GET、reconciliation 和 external resume；
+- Memory：ACTIVE read、trigger policy、`UPSERT + ACTIVE` proposal、Java terminal lifecycle；
+- Frontend：聊天、Markdown、Safety、错误、确认卡和滚动回归。
 
-The rule-based Safety Guard can be bypassed by unseen wording and is documented as a baseline control rather than a complete content-safety solution.
+## 5. Operational safety
 
-## Concurrency and deployment validation
+- Java/Python 都有有界并发和超时；busy/overload 以稳定 429 和 `Retry-After` 反馈；
+- Java 生成服务端 traceId，错误响应不暴露 exception message、secret、nonce digest 或 webhook raw body；
+- Python、内部 Java API、Mock OA admin API 不作为公网业务入口；
+- `PHOENIX_TRACING` 默认关闭，启用时旁路导出失败不阻断业务；
+- `BUSINESS_ACTIONS_ENABLED`、Memory 写入、Mock OA、reconciliation 和 external resume retry 默认关闭。
 
-Bounded concurrency is tested at the Java and Python layers. k6 scenarios separately exercise health stability, deterministic safety rejection, application overload, and Nginx rate limiting. Commands, thresholds, and stopping conditions are documented in [Concurrency & Load Test](concurrency-and-load-test.md); measured server results are summarized in [Performance](performance.md).
+## 6. Accepted limitations
 
-Release verification also checks the public page, Java and Python health endpoints, representative RAG questions, container restart counts, and the JSON 429 contract. These are short, controlled checks on a small single-server deployment and do not establish a production SLA.
+- 当前验证是小规格、单机、短时受控验证，没有生产 SLA；
+- Rule-based Safety Guard 不是完整的 prompt-injection/content-safety 方案；
+- Java/Python thread guard 是 process-local，不覆盖多实例；
+- Java 本地事务与真实 OA 没有分布式事务，Mock OA 只是模拟；
+- Enterprise OA MCP 是 fixture-backed read-only 集成，生产凭据和正式 OA 集成未验收；
+- confirm-time revalidation 与本地 commit 之间存在小型 TOCTOU 窗口；
+- 浏览器、评估集、容量和集中式 metrics/alerting 覆盖有限。
 
-## Phoenix observability verification
+## 7. Reproducible commands
 
-Phoenix tracing is opt-in and is not a test oracle. Unit tests verify disabled-mode
-No-op behavior, batch auto-instrumentation, sampling validation, content masking,
-business traceId correlation, and fail-open initialization/shutdown. A deployment
-performance check must compare tracing disabled with `batch=true` at the configured
-sample rate and record p50/p95/p99, Python/Phoenix CPU and RSS, disk growth, dropped
-spans, and 429/5xx counts. Collector unavailability must never change the public API
-response or the result of the deterministic test/evaluation suites.
+```bash
+cd backend-java
+./mvnw test
 
-## Known gaps
+cd agent-python
+uv run pytest
 
-- The retrieval set is intentionally small and domain-specific.
-- Playwright covers the main chat, Markdown, Safety Guard, and scrolling regressions; broad visual and cross-browser UAT is still manual.
-- Long-running, multi-client, distributed capacity tests have not been completed.
-- Authentication is a shared administrator token rather than per-user JWT/RBAC.
-- Optional Phoenix tracing is available, but observability still does not include a full metrics, alerting, and audit stack.
+cd frontend
+npm ci
+npm run lint
+npm run build
+npm run test:e2e
+
+cd mock-oa
+python -m pytest -q
+```
+
+POSTGRES 集成测试需要可用 PostgreSQL 和 `LANGGRAPH_CHECKPOINT_DSN`；真实 Enterprise OA 依赖外部 MCP fixture/service，不能用本地单元测试替代正式集成验收。

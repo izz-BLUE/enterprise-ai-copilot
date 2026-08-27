@@ -1,63 +1,68 @@
-# 项目介绍
+# Project Introduction for Interviews
 
-下面提供三种长度的介绍口径。所有表述以当前仓库和 v0.4.0 的公开验证结果为准。
+以下口径以当前仓库实现和最终验证基线为准。描述项目时强调边界：这是可演示、可恢复、可验证的小规格系统，不把它包装成生产级平台。
 
-## 30 秒版本
+## 30 seconds
 
-> Enterprise AI Copilot 是一个企业知识库问答项目。Java Spring Boot 负责统一 API 和边界控制，Python FastAPI 负责检索、LLM 调用与 Agent 编排，React 提供演示界面。项目实现了 FAISS + BM25 + RRF 混合检索、可回归的检索评估、请求追踪和有界并发，并已在小规格云服务器上完成 HTTPS 部署和受控压测。
+> 我做了一个企业 AI Copilot，解决企业制度问答和受控业务流程辅助问题。Java Spring Boot 负责认证、权限和业务状态，Python FastAPI 负责 RAG、LLM 和 LangGraph Agent，前端用 React。RAG 用 FAISS + 字符级 BM25 + RRF，并返回来源；Agent 可以读取差旅和发票事实生成报销 Proposal，但不直接写库，必须经过 Java PendingAction、用户确认、confirm-time revalidation 和外部审批。项目还验证了 PostgreSQL Checkpoint、HITL、外部 resume 以及 Memory 与业务事实的边界。
 
-## 1 分钟版本
+## 1 minute
 
-> 这是一个 Java、Python 和 React 组成的企业知识库问答系统。Java 是对外入口，负责输入校验、traceId、超时、并发保护和异常收敛；Python 负责文档检索、Prompt 构造、LLM 调用和实验性的 LangGraph 路由。
+> 这个项目不是简单的“问答 API”。稳定链路是 Java → Python → hybrid retrieval → DeepSeek；Agent 链路默认使用 Planner-first LangGraph，Planner 只负责有限规划，Tool Executor 负责 capability、身份、预算和去重，Java 是最终业务 authority。
 >
-> RAG 主链路采用 FAISS 语义检索与字符级 BM25，再用 RRF 融合排名。检索质量通过 38 个固定用例回归，测试区分 answerable 与 no-answer 场景，并在 CI 中运行。部署侧使用 Nginx、Docker Compose 和 HTTPS，Python 不暴露宿主机端口；Nginx、Java、Python 三层都有明确的限流、并发或超时边界。
->
-> 这个项目已经完成公网功能验证和小规格服务器的短时受控压测，但没有正式用户体系、高可用和完整监控，因此我把它定义为工程化个人项目，而不是生产级平台。
+> 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。项目有 1402 个 Python 通过、34 个预期 skip，PostgreSQL durable flows 34/0，Java 334、MCP 24、Mock OA 17、前端 44 的接受基线。
 
-## 3 分钟版本
+## 3 minutes
 
-> 项目的目标是把一个知识库问答原型补齐为可以部署、测试和解释的 AI 应用。
->
-> 架构上，React 只访问 Java。Java 作为控制面统一处理 CORS、输入长度、traceId、管理员权限、异常和 Java 到 Python 的在途请求数。Python 是内部 AI 服务，负责 Safety Guard、查询改写、混合检索、Prompt 和 LLM 调用。公网流量先经过 Nginx，Python 只存在于 Docker 内网。
->
-> 检索部分没有直接把向量分数和 BM25 分数相加，因为两者尺度不同。我使用 RRF 按排名融合，让语义召回和关键词召回互补。生产配置还启用了确定性规则改写，解决“几点上班”这类口语查询与知识库表述不一致的问题。
->
-> 质量保障分为几层：单元测试验证 Java/Python 并发边界，Retrieval Evaluation 用固定数据集检查来源、关键词和最终结果，前端执行 lint 与构建；部署后再做健康检查、代表性问答、拒答、权限和 429 契约验证。k6 测试分别覆盖健康接口、Safety 拒答、应用层过载和公网限流，避免把不同层的结果混在一起。
->
-> 项目目前在小规格单机上运行。过载请求会在短等待后返回 429，而不是无限排队。现有测试证明保护机制在记录的环境和时长内有效，但不能推出生产 SLA。正式上线仍需补充用户级认证、集中监控告警、长期多客户端容量测试和高可用部署。
+### 背景
 
-## 技术栈
+企业员工需要查询 HR、银行和 IT 制度，也会提出请假、差旅报销等需要确认的业务请求。单纯把自然语言直接交给 LLM 会产生两个问题：知识答案缺少可追溯性，业务写操作缺少权限和幂等边界。
 
-| 层 | 技术 |
-|---|---|
-| 前端 | React, Vite |
-| API 与控制面 | Java 17, Spring Boot 3, Maven |
-| AI 服务 | Python 3.11, FastAPI, Pydantic, Uvicorn |
-| LLM | DeepSeek（OpenAI-compatible API） |
-| Embedding | BAAI/bge-small-zh-v1.5, ONNX Runtime |
-| 检索 | FAISS, 字符级 BM25, RRF |
-| Agent | LangGraph（实验链路） |
-| 部署与验证 | Docker Compose, Nginx, Let's Encrypt, GitHub Actions, k6 |
+### 架构
 
-## 可以重点展开的实现
+Java 是 gateway 和 control plane：解析 JWT/受控身份、生成 traceId、决定 capability、保存 PendingAction/业务结果/Memory lifecycle，并控制对 Python 的调用。Python 是 AI data plane：做 Safety Guard、hybrid RAG、DeepSeek 调用、Planner、Tool Executor 和 LangGraph checkpoint。Enterprise OA MCP 只读差旅和发票，Mock OA 独立模拟外部审批。React 只负责交互，不拥有业务权限。
 
-- Java/Python 服务边界与失败处理
-- FAISS + BM25 + RRF 混合检索
-- 查询改写与检索评估的对应关系
-- answerable/no-answer 评估口径
-- traceId、Safety Guard 与 Evaluation 权限边界
-- Nginx 限流和 Java/Python 双层有界并发
-- 小内存服务器上的 ONNX 与容器资源优化
+### Agent 与 RAG
 
-## 项目边界
+仓库部署默认 `AGENT_LOOP_ENABLED=true`，使用 `safety → planner ⇄ tool_executor → finalize`；显式设为 false 才走 legacy Router-first。Planner 最多 6 次 decision，Tool 最多 5 次执行，Tool 可见性由 Java trusted context 和服务配置动态收缩。RAG 先用 BGE embedding、FAISS 和字符 BM25 召回，再用 RRF 融合，规则 Rewrite 只改检索 query，原问题仍进入 Prompt；38 个 case 评估 source/keyword hit、生成关键词和 no-answer refusal。
 
-| 已验证 | 尚未完成 |
-|---|---|
-| HTTPS 公网演示与隔离部署 | 正式用户认证、JWT/RBAC |
-| RAG 与实验性 LangGraph 链路 | 多租户与数据权限 |
-| 检索回归和 CI | 大规模、长时间分布式压测 |
-| Safety Guard 基础拒答 | 语义级安全与 Prompt Injection 完整防护 |
-| Nginx/Java/Python 过载保护 | 多实例、高可用与自动扩缩容 |
-| 短时受控压测 | 完整监控、告警与审计平台 |
+### 报销业务闭环
 
-面试时应主动说明这些边界。能够区分“已经验证”“当前设计”和“未来计划”，比把项目描述成生产级系统更可信。
+```text
+MCP facts → deterministic Proposal → WAITING_USER
+→ Java PendingAction → Confirm-time revalidation
+→ ExpenseClaim/Item transaction
+→ WAITING_EXTERNAL → Mock OA PENDING
+→ webhook notification + authoritative GET
+→ APPROVED/REJECTED → external resume → Graph END
+```
+
+用户确认前不产生业务副作用。Confirm-time revalidation 发现 trip/invoice/amount stale 时 fail closed：Action FAILED、Memory ABANDONED、HITL REJECTED，不创建 ExpenseClaim；OA 不可用则保留 Pending 并允许重试。Java 终态提交先于 Python external resume，resume 失败不回滚业务事实。
+
+### Memory 与恢复
+
+Memory key 是 `(user_id, conversation_id)`，只读 ACTIVE。当前 ACTIVE Memory 不会单独触发 Extractor，只有 action proposal 或白名单 Tool 成功才触发 Python trigger→extractor→`UPSERT + ACTIVE` proposal，Java 才落库。`tool_history` 是当前 execution，`execution_history` 是有界 `CONTEXT_ONLY`，Checkpoint 是执行现场，Java DB 是业务事实。POSTGRES 模式用 `PostgresSaver`；精确匹配的 crash recovery 用 `graph.invoke(None)`，两个 wait 各自用 `Command(resume)`。
+
+## Resume bullets
+
+- 设计 Java Spring Boot + Python FastAPI 双服务 AI 平台，将 Java 认证/权限/业务事务与 Python RAG/LLM/LangGraph 编排解耦，并通过 trusted runtime context 防止 LLM 伪造身份和能力。
+- 构建 FAISS + 字符级 BM25 + RRF hybrid retrieval 与 38-case 回归评估，覆盖 source hit、keyword hit、生成关键词、no-answer refusal 和 baseline regression。
+- 实现受控报销链路：Enterprise OA MCP 只读事实 → 确定性 Proposal → Java PendingAction/nonce/幂等 → confirm-time revalidation → ExpenseClaim → Mock OA authoritative approval。
+- 实现 PostgreSQL-backed LangGraph Checkpoint、`WAITING_USER`/`WAITING_EXTERNAL` 双 interrupt、精确 correlation、crash resume、webhook/reconciliation 和终态后的 external resume。
+- 建立 Scoped Conversation Memory 边界：Java 认证作用域与生命周期权威、Python 仅返回 `UPSERT + ACTIVE` 提案，并将 Memory、tool history、execution history、Checkpoint 与业务 DB 分离。
+
+## 面试官第一印象
+
+这是一个把 RAG/Agent、业务 authority、HITL、外部一致性和可验证边界放在同一个小型工程里的项目；亮点是系统语义清楚，短板是生产化规模和真实 OA 集成仍未完成。
+
+## 三个亮点
+
+1. AI 只计划，Java 才授权和写入，避免“模型直接执行数据库操作”。
+2. Expense workflow 把用户确认和外部审批拆成两个可恢复 wait，并明确 webhook 不是真实状态源。
+3. 质量证据分层：Java/Python/前端/MCP/Mock OA/Checkpoint 各有独立基线，不用单一“Demo 能跑”替代验证。
+
+## 三个短板
+
+1. 单机 process-local guard，不支持多实例分布式协调。
+2. Mock OA 和 fixture-backed MCP 不能替代真实生产 OA、凭据、outbox 和 SLA 验证。
+3. 规则 Safety Guard、38-case eval 和小规格容量基线仍不足以证明通用生产安全性。

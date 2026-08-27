@@ -1,247 +1,212 @@
-# 多用户请假 Demo Guide
+# Local Demo Guide
 
-本手册用于隔离的本地或受控演示环境。身份选择器和共享 Admin Token 都不是生产认证机制，不得直接开放到生产环境。
+本手册按当前实现准备本地演示。推荐主线是差旅报销外部审批闭环；年假申请作为较短的第二条受控动作。所有演示都应使用本地或专用 Demo 数据，不要把 Demo header、共享 token 或 Mock OA 当作生产认证方案。
 
-## 1. 前置要求
+## 1. Demo scope
 
-- Git；
-- Java 17，Java 依赖由 Maven Wrapper 管理；
-- Python 3.11 和 `uv`；
-- Node.js 20 或更高版本、npm；
-- Docker Desktop 或兼容 Docker Engine，Docker Compose v2；
-- PowerShell 7。
+主线展示：
 
-生产 Compose 还需要仓库外的 ONNX 模型和 RAG 数据，目录结构见 [Deployment](deployment.md)。模型、索引和 Secret 均不进入 Git。
+```text
+RAG/Planner
+  → Enterprise OA MCP read-only facts
+  → expense Proposal
+  → WAITING_USER + Java PendingAction
+  → confirm-time revalidation
+  → ExpenseClaim persisted
+  → WAITING_EXTERNAL + Mock OA
+  → signed webhook / reconciliation
+  → authoritative status
+  → external resume → Graph END
+```
 
-## 2. 获取代码与安装依赖
+次线展示：`leave_proposal_tool → PendingAction → confirm/cancel → LeaveRequest`。
 
-```powershell
-git clone https://github.com/izz-BLUE/enterprise-ai-copilot.git
-Set-Location enterprise-ai-copilot
+## 2. Prerequisites
 
-Set-Location agent-python
-uv sync
-Set-Location ..\frontend
+- Java 17、Maven wrapper；
+- Python 3.11、uv；
+- Node 20、npm；
+- Docker Compose 和可用 PostgreSQL；
+- DeepSeek API key；
+- Enterprise OA MCP fixture/service（默认 URL `http://127.0.0.1:8100/mcp`）；
+- 如果演示 durable HITL/external approval：独立 LangGraph checkpoint PostgreSQL DSN。
+
+启动基础设施：
+
+```bash
+docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
+```
+
+复制 `agent-python/.env.example` 为 `.env`，并按演示目的配置：
+
+```text
+AGENT_LOOP_ENABLED=true
+LANGGRAPH_CHECKPOINT_MODE=POSTGRES
+LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
+ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
+MEMORY_WRITE_MODE=DISABLED
+```
+
+Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`BUSINESS_ACTIONS_ENABLED=true`、`DEMO_IDENTITY_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`，以及按需开启 `EXTERNAL_APPROVAL_RECONCILIATION_ENABLED` / `EXTERNAL_APPROVAL_RESUME_ENABLED`。功能默认关闭是安全基线，不是演示失败。
+
+## 3. Start services
+
+```bash
+# Terminal 1: Python
+cd agent-python
+uv sync --group dev
+uv run uvicorn app.main:app --reload --port 8000
+
+# Terminal 2: Java
+cd backend-java
+./mvnw spring-boot:run
+
+# Terminal 3: Frontend
+cd frontend
 npm ci
-Set-Location ..\backend-java
-.\mvnw.cmd -v
-Set-Location ..
-```
-
-构建本次演示使用的本地镜像：
-
-```powershell
-docker build -t enterprise-ai-copilot-python:demo -f agent-python/Dockerfile agent-python
-docker build -t enterprise-ai-copilot-java:demo -f backend-java/Dockerfile backend-java
-$env:PYTHON_IMAGE = "enterprise-ai-copilot-python:demo"
-$env:JAVA_IMAGE = "enterprise-ai-copilot-java:demo"
-```
-
-Compose 使用外部网络 `deploy_eat-what-net`。仅在网络不存在时创建：
-
-```powershell
-docker network inspect deploy_eat-what-net *> $null
-if ($LASTEXITCODE -ne 0) { docker network create deploy_eat-what-net | Out-Null }
-```
-
-## 3. 当前进程环境变量
-
-以下都是占位值。替换后只保存在当前 PowerShell 进程，不要提交 `.env`，不要在录屏、截图或日志中展示 Secret。
-
-```powershell
-$env:POSTGRES_PASSWORD = "<generate-a-strong-password>"
-$env:ADMIN_TOKEN = "<your-admin-token>"
-$env:DEEPSEEK_API_KEY = "<your-provider-key>"
-$env:DEEPSEEK_BASE_URL = "<your-provider-base-url>"
-$env:DEEPSEEK_MODEL = "<your-provider-model>"
-$env:BUSINESS_ACTIONS_ENABLED = "false"
-$env:BUSINESS_ACTIONS_REQUIRE_ADMIN = "true"
-$env:DEMO_IDENTITY_ENABLED = "false"
-```
-
-模型和数据必须位于 Compose 声明的仓库外只读挂载路径。修改路径时使用仓库外临时 Compose override，不要提交本机绝对路径。
-
-## 4. 默认安全启动
-
-```powershell
-$project = "eac-p0-final-remediation"
-$compose = "deploy/docker-compose.prod.yml"
-$javaBase = "http://127.0.0.1:18088"
-$portOverride = Join-Path $env:TEMP "eac-p0-final-remediation-port.override.yml"
-@'
-services:
-  java-backend:
-    ports: !override
-      - "127.0.0.1:18088:8080"
-'@ | Set-Content -Encoding utf8 $portOverride
-$overrideArgs = @('-f', $portOverride)
-
-docker compose -p $project -f $compose @overrideArgs config --quiet
-docker compose -p $project -f $compose @overrideArgs up -d --build
-docker compose -p $project -f $compose @overrideArgs ps
-```
-
-验证 Java 健康和默认关闭状态：
-
-```powershell
-(Invoke-WebRequest "$javaBase/api/health" -SkipHttpErrorCheck).StatusCode
-(Invoke-WebRequest "$javaBase/api/demo/identities" -SkipHttpErrorCheck).StatusCode
-```
-
-预期健康接口为 `200`，身份目录为 `503 DEMO_IDENTITY_DISABLED`；Business Actions 和 Demo Identity 默认均关闭。标准 RAG 不要求 Demo 身份，可以正常使用；Provider 或模型资产不可用时必须返回安全降级响应，不得伪造成功。
-
-## 5. 开启受控演示模式
-
-```powershell
-docker compose -p $project -f $compose @overrideArgs down
-$env:BUSINESS_ACTIONS_ENABLED = "true"
-$env:BUSINESS_ACTIONS_REQUIRE_ADMIN = "true"
-$env:DEMO_IDENTITY_ENABLED = "true"
-docker compose -p $project -f $compose @overrideArgs config --quiet
-docker compose -p $project -f $compose @overrideArgs up -d --build
-(Invoke-WebRequest "$javaBase/api/health" -SkipHttpErrorCheck).StatusCode
-```
-
-前端在另一个 PowerShell 窗口启动：
-
-```powershell
-Set-Location frontend
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173`。Admin Token 只输入演示页面内存，不写入 URL、Cookie、localStorage 或 sessionStorage。
+先检查：
 
-## 6. 动态计算未来工作日
-
-```powershell
-function Get-NextWorkday([datetime]$From) {
-    $day = $From.Date.AddDays(1)
-    while ($day.DayOfWeek -in @('Saturday', 'Sunday')) { $day = $day.AddDays(1) }
-    $day
-}
-$nextWorkday = Get-NextWorkday (Get-Date)
-$followingWorkday = Get-NextWorkday $nextWorkday
-$nextDate = $nextWorkday.ToString('yyyy-MM-dd')
-$followingDate = $followingWorkday.ToString('yyyy-MM-dd')
+```bash
+curl http://localhost:8080/api/ready
+curl http://localhost:8080/api/agent/ready
+curl http://localhost:8000/agent/ready
 ```
 
-当前 Demo 只排除周六、周日，不处理中国法定节假日和调休。
+浏览器打开 `http://localhost:5173`。普通用户请求走 Java；不要把浏览器请求直接改到 Python 8000。
 
-## 7. 核心演示
+## 4. Primary demo: expense approval
 
-### User A Confirm
+### Step A — Prepare source facts
 
-1. 选择 **Demo User A**；
-2. 输入：`申请 $nextDate 一天年假，原因为个人事务`；
-3. 检查确认卡姓名、日期、天数、余额前后值；
-4. 点击 Confirm；
-5. 确认 `SUCCEEDED` 且返回 requestId，User A 余额只扣减一次。
+确保 Enterprise OA MCP fixture 中存在当前 Demo employee 可访问的 `APPROVED` trip 和有效、未重复的 invoices。需要检查的事实包括 trip ID、日期、cost center、invoice ID、金额和 category。演示前先确认 fixture 与 employee scope 一致。
 
-### Cancel
+### Step B — Create a proposal
 
-1. User A 使用 `$followingDate` 生成新 Pending；
-2. 点击 Cancel；
-3. 确认 `CANCELLED`，余额不变且没有新增 LeaveRequest。
+在 Agent 模式输入类似：
 
-### 多用户和 Manager 边界
-
-User B 可以申请与 User A 相同日期；冲突按 employeeId 隔离。Manager 只能创建、确认或取消自己的草稿，没有审批、查看或操作 A/B 申请的权限。
-
-跨用户验证不得在文档、命令历史或截图中复制 nonce。使用真实 PostgreSQL 集成测试：
-
-```powershell
-Set-Location backend-java
-.\mvnw.cmd "-Dtest=DemoIdentityIsolationIntegrationTest" test
-Set-Location ..
+```text
+请根据我最近一次已批准出差和对应发票，准备一份差旅报销。
 ```
 
-测试断言 B 和 Manager 对 A 的 Confirm/Cancel 均得到与不存在 Action 相同的 `404 ACTION_NOT_FOUND`，且 A 的草稿、余额和申请不变。
+预期：
 
-## 8. 幂等重放
+- Planner 调用 travel/invoice read tools，必要时调用 RAG 读取政策；
+- expense proposal 使用成功 observations 和确定性金额计算；
+- 返回 `pendingAction`/确认卡，或因缺字段返回 Clarification；
+- 此时没有 ExpenseClaim、没有 Mock OA request、没有外部副作用。
 
-首次 Confirm 成功后，Action 的持久化成功结果成为权威结果。后续使用相同或不同的格式合法 UUID `Idempotency-Key` 再次确认，均返回原 requestId 和 `replayed=true`，不会再次创建 LeaveRequest 或扣减余额。
+话术：
 
-为避免手工复制 nonce、Admin Token 和完整 ID，使用定向集成测试：
+> AI 只负责把已读事实整理成 Proposal。Proposal 不是授权，Java 还会做一次权威校验并生成一次性 nonce。
 
-```powershell
-Set-Location backend-java
-.\mvnw.cmd "-Dtest=BusinessActionPersistenceIntegrationTest#confirmPersistsAndReplaysSameResultForAnyValidKey" test
-Set-Location ..
+### Step C — Confirm
+
+点击确认。前端只在页面内存保存 nonce 和幂等 key；Java 会：
+
+1. 验证 owner、nonce、TTL、Action state 和 UUID idempotency key；
+2. 调用 Python narrow adapter 做当前 trip/invoice revalidation；
+3. 重新计算 reimbursable amount；
+4. 在 PostgreSQL 事务内写 ExpenseClaim/ExpenseItem，并把 BusinessAction 置为 `SUCCEEDED`；
+5. 事务提交后再恢复 Python HITL Checkpoint。
+
+预期：确认成功不会直接把 OA 状态当作已批准；页面进入等待外部审批语义。
+
+### Step D — Show WAITING_EXTERNAL
+
+说明两个等待点的区别：
+
+- `WAITING_USER`：等用户确认 Java PendingAction；
+- `WAITING_EXTERNAL`：Java ExpenseClaim 已经写入，等 Mock OA 决定。
+
+普通 Chat 不能穿过 `WAITING_EXTERNAL` 重新规划同一个 execution。
+
+### Step E — Submit and decide in Mock OA
+
+确认 Java 已启用 external submission 后，Mock OA 会收到：
+
+```text
+POST http://localhost:8010/api/expense-approvals
+Idempotency-Key: expense:<expenseId>
 ```
 
-该测试同时断言首次 `replayed=false`、同 Key/不同合法 Key 重放、requestId 相同、LeaveRequest 只有一条且余额只扣一次。
+初始响应为 `PENDING`。使用 Mock OA 管理端点批准或拒绝：
 
-## 9. Java 重启恢复
-
-1. User A 创建 Pending，保持浏览器页面不刷新；nonce 只存在当前页面内存；
-2. 只重启 Java：
-
-```powershell
-docker compose -p $project -f $compose @overrideArgs restart java-backend
-docker compose -p $project -f $compose @overrideArgs ps java-backend
+```bash
+curl -X POST http://localhost:8010/api/admin/expense-approvals/<requestId>/approve
+# 或
+curl -X POST http://localhost:8010/api/admin/expense-approvals/<requestId>/reject
 ```
 
-3. Java 恢复健康后，由原 User A 在原页面点击 Confirm；
-4. 刷新浏览器会丢失 nonce，刷新后必须重新生成草稿，这是预期安全行为。
+Mock OA 先提交自己的 SQLite 终态，再 best-effort 发送 webhook。webhook 只有 event/request correlation，没有 status。
 
-## 10. PostgreSQL Named Volume 恢复
+### Step F — Verify Java authority and resume
 
-先记录页面显示的余额与状态，不输出完整业务 ID。停止并重建 PostgreSQL 容器，但保留 Named Volume：
+Java 收到通知后检查 HMAC 和 300 秒 timestamp window，然后 GET：
 
-```powershell
-docker compose -p $project -f $compose @overrideArgs stop java-backend postgres
-docker compose -p $project -f $compose @overrideArgs rm -f postgres
-docker compose -p $project -f $compose @overrideArgs up -d postgres
-docker compose -p $project -f $compose @overrideArgs up -d java-backend
+```text
+GET http://localhost:8010/api/expense-approvals/<requestId>
 ```
 
-重新检查余额、Action 状态和 LeaveRequest。恢复验证中严禁执行 `docker compose down -v`，因为 `-v` 会删除持久化数据。
+只有 GET 的 `APPROVED/REJECTED` 能更新本地 ExpenseClaim。Webhook 丢失时，打开 reconciliation，等待 due poll；它只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先做 CAS 再在事务外 GET。
 
-## 11. 数据库故障与恢复
+终态提交后 Java 才调用 Python external resume。成功时 Graph 以 `Command(resume)` 到 END；Python 不重新跑 Planner/Tool，也不触发 Memory proposal pipeline。若 resume 失败，ExpenseClaim 终态仍保留，retry markers 支持重新投递。
 
-```powershell
-docker compose -p $project -f $compose @overrideArgs stop postgres
-(Invoke-WebRequest "$javaBase/api/health" -SkipHttpErrorCheck).StatusCode
-docker compose -p $project -f $compose @overrideArgs start postgres
-docker compose -p $project -f $compose @overrideArgs ps postgres
-(Invoke-WebRequest "$javaBase/api/health" -SkipHttpErrorCheck).StatusCode
+## 5. Secondary demo: annual leave
+
+在 Agent 模式输入包含明确日期、原因和申请意图的请求，例如：
+
+```text
+我想在下周一到下周二请年假，原因是个人安排。
 ```
 
-预期停库后为 `503`，恢复后为 `200`，响应不得包含 JDBC URL、数据库用户名、密码、SQL 或堆栈。
+预期流程：
 
-## 12. 无 Provider Secret 时
-
-没有有效 Provider Key 时，不得宣称真实 Provider Smoke 通过。仍可运行 Java、Python、前端、PostgreSQL 和 Mock Provider 测试：
-
-```powershell
-Set-Location agent-python
-cmd /d /c "set DEEPSEEK_API_KEY=& set DEEPSEEK_BASE_URL=& set DEEPSEEK_MODEL=& uv run python -m pytest -q"
-Set-Location ..\backend-java
-.\mvnw.cmd clean test
-Set-Location ..\frontend
-npm run lint
-npm run build
-npm run test:e2e
+```text
+leave_proposal_tool
+  → action_proposal 或 missing_fields
+  → Java PendingAction PENDING_CONFIRMATION
+  → Confirm / Cancel
+  → LeaveRequest + balance transaction
 ```
 
-## 13. 停止与清理
+展示重点：Proposal 阶段不扣余额；Confirm 做 owner/nonce/TTL/幂等/业务规则校验；重复 Confirm 重放同一 requestId；Cancel 或过期不会写 LeaveRequest。当前 Demo 不处理法定节假日和调休。
 
-普通停止会保留 Named Volume：
+## 6. Safety and RAG fallback
 
-```powershell
-docker compose -p $project -f $compose @overrideArgs down
-Remove-Item -LiteralPath $portOverride
+### 普通 RAG
+
+```bash
+curl -X POST http://localhost:8080/api/chat `
+  -H 'Content-Type: application/json' `
+  -d '{"message":"病假需要提供哪些材料？"}'
 ```
 
-仅在明确不再需要演示数据时执行完全清理。以下命令会永久删除本项目 Volume：
+预期有 `answer`、`sources`、`traceId`。知识库没有证据时回答明确拒答，不编造。
 
-```powershell
-docker compose -p $project -f $compose @overrideArgs down -v
-Remove-Item -LiteralPath $portOverride
-```
+### Safety Guard
 
-清理只使用本手册的独立项目名，不执行全局容器、网络、Volume 或镜像清理命令。
+在 Agent 模式输入“怎么伪造病假证明？”。预期 `safe=false` 或 `route=refuse`，不进入 Planner/RAG。说明 Safety Guard Lite 是规则型纵深防御，不是完整授权或内容安全系统。
 
-## 14. 真实 OA 边界
+### Eval gate
 
-当前 `PostgresLeaveSandboxGateway` 与 Action、账户参加同一个本地 PostgreSQL 事务，本项目没有发送任何真实 OA 请求。真实 OA 网络调用不能加入本地数据库事务，不能只替换 Gateway 就宣称安全上线；后续至少需要 Transactional Outbox、异步投递、外部幂等、重试、回调或轮询、对账、补偿和状态映射。
+Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只消费 Java 的 `allow_eval` 结果。空 Admin Token 仅代表本地 Demo eval 口径，不等于真实管理员认证。
+
+## 7. Troubleshooting
+
+| 现象 | 检查 |
+|---|---|
+| Agent 返回 checkpoint unavailable | `LANGGRAPH_CHECKPOINT_MODE`、DSN、PostgreSQL health、`PostgresSaver.setup()` |
+| Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture employee ownership、trip/invoice 状态 |
+| Confirm 返回 503 | Python revalidation adapter 或 OA MCP 不可用；PendingAction 应保持可重试 |
+| Confirm 被拒绝为 stale | trip/invoice 在 Proposal 后发生变化；重新读取当前事实再建 Proposal |
+| OA 状态不变化 | `MOCK_OA_ENABLED`、base URL、webhook secret、Mock OA SQLite volume |
+| webhook 被拒绝 | raw body 签名、timestamp、精确 path 和共享 secret |
+| external resume 没有立即收口 | Java 终态是否已提交、resume enabled、retry markers；不要回滚 ExpenseClaim |
+| 两次请求互相 busy | 同一 runtime thread 的 process-local guard 正在保护完整 lifecycle |
+
+## 8. Demo boundary
+
+演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、Mock OA、reconciliation、external resume retry 和 Memory write。不要在公开环境使用 `X-Demo-User-Id` 作为身份；不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。
