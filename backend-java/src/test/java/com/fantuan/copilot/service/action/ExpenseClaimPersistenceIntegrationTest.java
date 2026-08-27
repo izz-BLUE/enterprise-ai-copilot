@@ -3,7 +3,11 @@ package com.fantuan.copilot.service.action;
 import com.fantuan.copilot.PostgresIntegrationTestBase;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.ExpenseActionProposal;
+import com.fantuan.copilot.dto.action.HitlResumePayload;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.gateway.python.PythonAgentGateway;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -27,6 +32,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 
 /**
  * ExpenseClaim 持久化集成测试（V2 §二十三 / §二十八 Stress H）。
@@ -44,13 +52,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase {
     private static final DemoIdentity USER_A = new DemoIdentity(
             "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+    private static final String CONV_EXPENSE_HITL = "conv-expense-hitl-test";
 
     @Autowired BusinessActionService actionService;
+    @Autowired BusinessActionHitlCoordinator hitlCoordinator;
     @Autowired PendingActionRepository actions;
     @Autowired ExpenseClaimRepository expenseClaims;
     @Autowired BusinessActionProperties properties;
     @Autowired JdbcTemplate jdbc;
     @Autowired ExpenseCalculationService calculation;
+    @MockitoBean PythonAgentGateway pythonAgentGateway;
+
+    private static final VerifiedIdentity VERIFIED_USER_A = VerifiedIdentity.from(USER_A);
 
     @BeforeEach
     void resetDatabase() {
@@ -131,6 +144,48 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     }
 
     @Test
+    void hitlExpenseAmountInvalidIsDeterministicallyRejectedWithoutActionRow() {
+        ExpenseActionProposal invalid = new ExpenseActionProposal(
+                com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM,
+                "TRIP-20260818-001",
+                List.of(new ExpenseActionProposal.ExpenseItemPayload(
+                        "HOTEL", BigDecimal.ZERO, "INV-001", "无效金额")),
+                BigDecimal.ZERO, BigDecimal.ZERO, "COST-IT", "上海出差报销",
+                List.of("INV-001"), 1);
+        HitlWaitMarker wait = expenseWait();
+
+        ActionException exception = assertThrows(ActionException.class, () -> hitlCoordinator.registerWait(
+                invalid, wait, "hitl-expense-amount", null, VERIFIED_USER_A, CONV_EXPENSE_HITL));
+
+        assertEquals("EXPENSE_AMOUNT_INVALID", exception.errorCode());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM business_action WHERE action_type = 'EXPENSE_CLAIM'",
+                Integer.class));
+        verifyRejectedResume(wait);
+    }
+
+    @Test
+    void hitlExpenseInvoiceMismatchIsDeterministicallyRejectedWithoutActionRow() {
+        ExpenseActionProposal invalid = new ExpenseActionProposal(
+                com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM,
+                "TRIP-20260818-001",
+                List.of(new ExpenseActionProposal.ExpenseItemPayload(
+                        "TAXI", new BigDecimal("230"), "INV-001", "机场往返打车")),
+                new BigDecimal("230"), new BigDecimal("230"), "COST-IT", "上海出差报销",
+                List.of("INV-999"), 1);
+        HitlWaitMarker wait = expenseWait();
+
+        ActionException exception = assertThrows(ActionException.class, () -> hitlCoordinator.registerWait(
+                invalid, wait, "hitl-expense-invoice", null, VERIFIED_USER_A, CONV_EXPENSE_HITL));
+
+        assertEquals("EXPENSE_INVOICES_REQUIRED", exception.errorCode());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM business_action WHERE action_type = 'EXPENSE_CLAIM'",
+                Integer.class));
+        verifyRejectedResume(wait);
+    }
+
+    @Test
     void replayedConfirmCreatesOnlyOneExpenseClaim() {
         PendingActionView view = actionService.createPending(
                 proposal(), "origin-exp-replay", null, USER_A, null);
@@ -175,5 +230,26 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         assertEquals(1, expenseClaims.countBySourceActionId(view.actionId()));
         // 并发下允许部分 confirm 因状态机冲突/幂等重放失败（不创建第二名报销）
         assertTrue(failures.get() >= 0);
+    }
+
+    private HitlWaitMarker expenseWait() {
+        return new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + "a".repeat(64), "ex_" + "b".repeat(32),
+                com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM);
+    }
+
+    private void verifyRejectedResume(HitlWaitMarker wait) {
+        var captor = org.mockito.ArgumentCaptor.forClass(HitlResumePayload.class);
+        verify(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), captor.capture(),
+                any(), eq(com.fantuan.copilot.dto.PythonAgentResponse.class), any());
+        HitlResumePayload payload = captor.getValue();
+        assertEquals(HitlResumePayload.HitlDecision.REJECTED, payload.decision());
+        assertNull(payload.actionId());
+        assertNull(payload.requestId());
+        assertEquals(ActionStatus.FAILED, payload.actionStatus());
+        assertEquals(wait.waitId(), payload.waitId());
+        assertEquals(wait.executionId(), payload.executionId());
+        assertEquals(wait.actionType(), payload.actionType());
+        assertEquals("申请未能完成，已安全拒绝。", payload.message());
     }
 }

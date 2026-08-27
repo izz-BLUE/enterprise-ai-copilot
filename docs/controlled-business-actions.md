@@ -2,13 +2,13 @@
 
 ## 定位与边界
 
-该能力是 PostgreSQL 持久化的受控 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。PostgreSQL 是生产强依赖，数据库不可用时应用启动失败且不会降级到内存。它不接真实 OA、不使用 Redis 或消息队列。PendingAction、模拟余额和 LeaveRequest 可跨 Java/PostgreSQL 重启恢复。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
+该能力是 PostgreSQL 持久化的受控 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。PostgreSQL 是生产强依赖，数据库不可用时应用启动失败且不会降级到内存。它不接真实 OA、不使用 Redis 或消息队列。PendingAction、模拟余额、LeaveRequest 与 Planner-first 的 HITL Checkpoint 可跨 Java/Python/PostgreSQL 重启恢复。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
 
 Feature Flag `business.actions.enabled` 与 `demo.identity.enabled` 均默认关闭。共享 Admin Token 只用于演示访问控制，`X-Demo-User-Id` 只用于受控 Demo 数据隔离，两者都不代表员工身份认证。数据库终态和唯一 `source_action_id` 支持多 Java 实例间的确认重放；当前仍不处理中国法定节假日与调休。
 
 main 同时保留两套 LangGraph 互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：`safety → planner ⇄ tool_executor`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：`safety → planner ⇄ tool_executor → prepare_hitl → approval(interrupt) → finalize`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`；只有完整 Proposal 才进入一次 HITL wait。
 - **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）：`safety → router → rag|eval|action|refuse`。`router_node` 检测到年假申请意图后进入 `action_node`，由 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
 
 两套图在受控业务动作这条链路上汇流到 **同一个 Java 权威控制面**：Python 端只产 Proposal，不执行写操作；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部由 Java 完成。
@@ -28,17 +28,20 @@ flowchart LR
     D --> J[Java Trace / Admin / Feature Flag]
     J --> S[Python Safety Guard]
     S --> G{AGENT_LOOP_ENABLED}
-    G -->|false 默认| RT[Deterministic Router]
-    G -->|true 显式开启| P[Planner ⇄ Tool Executor]
+    G -->|false 显式回退| RT[Deterministic Router]
+    G -->|true 仓库默认| P[Planner ⇄ Tool Executor]
     RT -->|字段完整| APP[action_proposal]
     RT -->|缺字段| CL[Clarification response]
     P -->|PlannerDecision| T[leave_proposal_tool]
     T -->|字段完整| APP
     T -->|缺字段| CL
-    APP --> V[Java BusinessActionService]
-    V -->|Java 产 confirmationNonce| DB[(PostgreSQL PendingAction)]
+    APP --> V[Java BusinessActionService / HITL Coordinator]
+    V -->|Java 产 confirmationNonce + wait correlation| DB[(PostgreSQL PendingAction)]
     DB --> CARD[React PendingAction Card]
-    CARD -->|confirm + owner + stable idempotency key| E[LeaveExecutionGateway]
+    CARD -->|confirm/cancel + owner + stable idempotency key| V
+    V -->|事务提交后 best-effort resume| R[Python HITL resume]
+    R -->|Command(resume) → finalize| CP[(PostgreSQL LangGraph Checkpoint)]
+    V -->|confirm success| E[LeaveExecutionGateway]
     E --> L[(PostgreSQL Leave Account + LeaveRequest)]
     CARD -->|cancel| X[CANCELLED]
 ```
@@ -93,6 +96,14 @@ PENDING_CONFIRMATION
 
 同一 `(owner_user_id, conversation_id)` 至多一个活动 PendingAction（`PENDING_CONFIRMATION` / `PROCESSING`）。这是 `ai_task_memory` 以 `(user_id, conversation_id)` 为唯一键、每条会话只有一条任务记忆的配套约束：若允许同会话多个活动动作，任一动作进入终态都会收口整条会话 Memory，误伤其他仍在等待确认的动作的续接。`createPending` 在控制锁内检查该约束，命中返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；`conversationId` 为 null（无 Memory 关联的历史路径）不限制。动作确认 / 取消 / 过期 / 失败后，同会话可再次发起新申请。
 
+### Durable HITL User Confirmation Resume（P3-4）
+
+Planner-first 的完整业务 Proposal 在 `prepare_hitl_node` 生成严格的 `HitlWaitMarker`：`schema_version=1`、固定 `kind`、确定性 `wait_id`、当前 `execution_id` 与 `action_type`。`approval_node` 只调用 LangGraph `interrupt(wait_marker)`，在恢复时严格校验 Java 返回的 `wait_id`、`execution_id`、`action_type` 和决定状态；interrupt 前后均不执行业务写操作。Clarification（`action_proposal=null`）不会创建 wait，也不会触发 Java PendingAction。
+
+Python 先以 `durability=sync` 落盘 wait，再返回 Java 内部响应。Java `BusinessActionHitlCoordinator` 用 `agent_execution_id + hitl_wait_id` 注册唯一 PendingAction；相同 wait 的重试复用同一 action 行并只轮换尚未确认的 nonce，归属、会话、员工、动作类型或 execution 不一致时 fail-closed。若相同 wait 已对应 Java 的 `SUCCEEDED / CANCELLED / EXPIRED / FAILED` 终态，注册只读取终态并向 Python 续接，不创建新动作、不轮换 nonce；这条终态对账路径只要求当前可信 owner/correlation，允许业务能力已撤销。HITL 的 correlation 字段是内部持久化元数据，不进入公网 `AgentChatResponse`。
+
+Confirm / Cancel 与原 Agent Chat 共用 Java 的最终 runtime thread guard；guard 忙时返回 `ACTION_THREAD_BUSY`，不进入业务 Service，已获取的 guard 在所有路径释放。Java 业务事务先提交后，才 best-effort 调用 Python `POST /agent/langgraph/hitl/resume`；Python 只接受严格的 Java-authoritative decision，重新注入当前 Runtime Context，不运行 Memory proposal pipeline。成功、取消、过期或安全拒绝都可幂等重放；Python 服务暂时不可用不会回滚已提交的 Java 业务结果，后续可由同一终态调用重试续接。确定性注册拒绝白名单只有 `BUSINESS_RULE_VIOLATION`、`EXPENSE_ITEMS_REQUIRED`、`EXPENSE_AMOUNT_INVALID`、`EXPENSE_INVOICES_REQUIRED`；这些错误不创建 PendingAction，由 Java 先将已有 ACTIVE Memory 收口为 `ABANDONED`，再发送 `action_id/request_id=null`、当前 wait/execution/action type、`FAILED + REJECTED` 的安全终态。Memory 收口抛出 infrastructure exception 时禁止发送 Graph terminal，保留 `WAITING_USER` 供下次重试；Memory 不存在或已是终态的幂等 no-op 仍可继续 resume。容量、会话并发、能力/管理员权限、数据库或 Python 传输异常保持可重试，不伪造 rejected Action。普通 Chat 发现已有 wait 时只返回持久化 Proposal/wait 状态，不重新规划或覆盖它；wait、actor、correlation 或 checkpoint 状态不匹配统一拒绝。终态视图的 nonce 为 null 且 `confirmationRequired=false`，只有 `PENDING_CONFIRMATION` 返回确认凭据。
+
 当前唯一实现 `PostgresLeaveSandboxGateway` 与 Action、账户处于同一个 PostgreSQL 事务。真实 OA 远程请求无法加入本地事务，不能声称"替换 Gateway 即可安全上线"；未来需要 Transactional Outbox、异步投递、外部幂等、回调或轮询、重试、对账、补偿和状态映射。
 
 LeaveRequest 编号由 PostgreSQL Sequence 生成。事务回滚时 Sequence 已取出的编号不会回收，因此编号允许出现间隙，但不会因服务或数据库重启而重复。
@@ -108,9 +119,10 @@ Python 端通过 `/agent/langgraph/chat` 返回的内部响应字段（公网侧
 
 Java 端在 `LangGraphAgentController` 内：
 
-1. 收到 `action_proposal` 后立即调用 `BusinessActionService.createPending`；
+1. 收到完整 `action_proposal` + Python 已落盘的 `hitl_wait` 后调用 `BusinessActionHitlCoordinator`；
 2. 重新校验日期、跨度、半天、原因长度、工作日、余额与冲突；
-3. 生成 `confirmationNonce`，持久化 PendingAction，返回公网 `pendingAction` 视图（仅摘要 + nonce，不含内部 trace_id / 数据库主键 / 余额与申请历史）。
+3. 以 `agent_execution_id + hitl_wait_id` 唯一注册 PendingAction，生成 `confirmationNonce`，返回公网 `pendingAction` 视图（仅摘要 + nonce，不含内部 trace_id / 数据库主键 / 余额与申请历史）；
+4. Confirm / Cancel 在同一 runtime thread guard 内执行，Java 事务提交后 best-effort 调用 Python 内部 resume；Python 只继续原 Checkpoint，不重跑 Planner、业务 Tool 或 Memory。
 
 `action_proposal` 是 Java/Python 内部契约，**不能绕过 Java 权威校验直接执行**。
 

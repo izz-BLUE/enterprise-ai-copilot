@@ -7,6 +7,7 @@ import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
@@ -70,6 +71,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
         jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'DEMO-001'");
+        properties.setEnabled(true);
+        properties.setRequireAdmin(false);
         properties.setMaxPending(100);
     }
 
@@ -83,8 +86,9 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     void flywaySchemaAndPendingDigestArePersisted() {
         Integer migrations = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success", Integer.class);
-        // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item
-        assertEquals(7, migrations);
+        // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item；
+        // P3-4 V8: durable HITL wait correlation columns and unique wait index
+        assertEquals(8, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());
@@ -97,6 +101,80 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
                 WHERE table_name = 'business_action' AND column_name = 'confirmation_nonce'
                 """, Integer.class);
         assertEquals(0, plaintextColumns);
+    }
+
+    @Test
+    void hitlWaitRegistrationIsUniqueAndRotatesOnlyThePendingNonce() {
+        String executionId = "ex_" + "a".repeat(32);
+        String waitId = "wait_" + "b".repeat(64);
+        AnnualLeaveActionProposal proposal = proposal(nextWeekday(2));
+
+        PendingActionView first = actionService.createHitlPending(
+                proposal, "hitl-origin", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+        PendingAction stored = actions.findByHitlWaitId(waitId).orElseThrow();
+        assertEquals(first.actionId(), stored.actionId());
+        assertEquals(executionId, stored.agentExecutionId());
+        assertEquals(waitId, stored.hitlWaitId());
+
+        PendingActionView retry = actionService.createHitlPending(
+                proposal, "hitl-retry", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+        assertEquals(first.actionId(), retry.actionId());
+        assertNotEquals(first.confirmationNonce(), retry.confirmationNonce());
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM business_action WHERE hitl_wait_id = ?",
+                Integer.class, waitId));
+
+        ActionException staleNonce = assertThrows(ActionException.class,
+                () -> actionService.confirm(first.actionId(), first.confirmationNonce(),
+                        UUID.randomUUID().toString(), null, "old-nonce", USER_A));
+        assertEquals("INVALID_CONFIRMATION_NONCE", staleNonce.errorCode());
+    }
+
+    @Test
+    void terminalHitlRegistrationReconcilesAfterCapabilityRevocationWithoutNonce() {
+        String executionId = "ex_" + "c".repeat(32);
+        String waitId = "wait_" + "d".repeat(64);
+        AnnualLeaveActionProposal proposal = proposal(nextWeekday(2));
+
+        PendingActionView first = actionService.createHitlPending(
+                proposal, "hitl-terminal", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "ANNUAL_LEAVE_REQUEST",
+                TaskStatus.ACTIVE, "{}", "HITL approval in progress");
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "hitl-confirm", USER_A);
+
+        properties.setEnabled(false);
+        PendingActionView replay = actionService.createHitlPending(
+                proposal, "hitl-terminal-retry", null, USER_A, CONV_LIFECYCLE,
+                executionId, waitId);
+
+        assertEquals(ActionStatus.SUCCEEDED, replay.status());
+        assertNull(replay.confirmationNonce());
+        assertFalse(replay.confirmationRequired());
+        assertEquals(1, requests.countBySourceActionId(first.actionId()));
+        assertEquals(TaskStatus.COMPLETED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void pendingHitlConfirmStillRequiresCurrentBusinessCapability() {
+        PendingActionView pending = actionService.createHitlPending(
+                proposal(nextWeekday(2)), "hitl-pending-capability", null, USER_A,
+                CONV_LIFECYCLE, "ex_" + "e".repeat(32), "wait_" + "f".repeat(64));
+        properties.setEnabled(false);
+
+        ActionException exception = assertThrows(ActionException.class, () -> actionService.confirm(
+                pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "revoked-confirm", USER_A));
+
+        assertEquals("BUSINESS_ACTIONS_DISABLED", exception.errorCode());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(0, requests.countBySourceActionId(pending.actionId()));
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
     }
 
     @Test

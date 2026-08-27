@@ -22,6 +22,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -93,17 +95,68 @@ public class BusinessActionService {
                                            String presentedToken,
                                            DemoIdentity identity,
                                            String conversationId) {
+        return createPendingInternal(proposal, originTraceId, presentedToken, identity,
+                conversationId, null, null);
+    }
+
+    /**
+     * P3-4 registration path.  The wait correlation is immutable and is
+     * checked under the same global action control row as new action creation.
+     */
+    @Transactional
+    public PendingActionView createHitlPending(BusinessActionProposal proposal,
+                                                String originTraceId,
+                                                String presentedToken,
+                                                DemoIdentity identity,
+                                                String conversationId,
+                                                String agentExecutionId,
+                                                String hitlWaitId) {
+        return createPendingInternal(proposal, originTraceId, presentedToken, identity,
+                conversationId, agentExecutionId, hitlWaitId);
+    }
+
+    /** Preserve the service's authorization ordering before coordinator routing. */
+    void authorizeForAction(String presentedToken, DemoIdentity identity) {
+        requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
+    }
+
+    /**
+     * Close the Java-owned task memory when a durable HITL Proposal is
+     * deterministically rejected before a PendingAction can be created.
+     * This is intentionally package-private: Python never controls this
+     * lifecycle transition.
+     */
+    void abandonMemoryAfterHitlRejection(DemoIdentity identity, String conversationId) {
+        if (identity == null || identity.userId() == null || conversationId == null) {
+            return;
+        }
+        memoryService.abandon(identity.userId(), conversationId);
+    }
+
+    private PendingActionView createPendingInternal(BusinessActionProposal proposal,
+                                                     String originTraceId,
+                                                     String presentedToken,
+                                                     DemoIdentity identity,
+                                                     String conversationId,
+                                                     String agentExecutionId,
+                                                     String hitlWaitId) {
         if (proposal == null) {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
                     "缺少 action_proposal。", null, null);
         }
-        requireEnabledAndAdmin(presentedToken);
-        requireIdentity(identity);
+        if (hitlWaitId != null && (hitlWaitId.isBlank()
+                || agentExecutionId == null || agentExecutionId.isBlank())) {
+            throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
+                    "HITL wait correlation 不完整。", null, null);
+        }
         // 唯一业务分发点：actionType() → registry → handler（V2 §十七）。
         // action_type 缺失属于未信任 proposal 的规则违规（BUSINESS_RULE_VIOLATION）；
         // 未知非空类型属于协议层错误（INVALID_REQUEST）。
         BusinessActionType actionType = proposal.actionType();
         if (actionType == null) {
+            requireEnabledAndAdmin(presentedToken);
+            requireIdentity(identity);
             throw new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "BUSINESS_RULE_VIOLATION", "action_type 缺失，请检查申请参数。", null, null);
         }
@@ -111,11 +164,43 @@ public class BusinessActionService {
                 .orElseThrow(() -> new ActionException(HttpStatus.BAD_REQUEST,
                         "INVALID_REQUEST",
                         "暂不支持的 action subtype: " + actionType, null, null));
+        if (hitlWaitId != null) {
+            // Terminal HITL rows only need trusted identity/correlation for
+            // checkpoint reconciliation.  Business capability is checked
+            // below for every new or still-actionable row.
+            requireIdentity(identity);
+            actions.lockControl();
+            Optional<PendingAction> existingResult = actions.findByHitlWaitIdForUpdate(hitlWaitId);
+            PendingAction existing = existingResult == null ? null : existingResult.orElse(null);
+            if (existing != null) {
+                verifyHitlCorrelation(existing, proposal.actionType(), identity,
+                        conversationId, agentExecutionId, hitlWaitId);
+                if (isTerminal(existing.status())) {
+                    // A Java terminal result must be able to finish the
+                    // approval checkpoint after capability revocation.
+                    return handler.buildSummary(existing, null);
+                }
+                requireEnabledAndAdmin(presentedToken);
+                if (existing.status() == ActionStatus.PENDING_CONFIRMATION) {
+                    ActionNonceService.Nonce nonce = nonceService.create();
+                    actions.updateConfirmationNonceDigest(
+                            existing.actionId(), nonce.digest());
+                    return handler.buildSummary(existing, nonce.plaintext());
+                }
+                if (existing.status() == ActionStatus.PROCESSING) {
+                    throw error(HttpStatus.CONFLICT, "ACTION_IN_PROGRESS",
+                            "申请正在处理中。", existing);
+                }
+            }
+        }
+        requireEnabledAndAdmin(presentedToken);
+        requireIdentity(identity);
+        if (hitlWaitId == null) {
+            actions.lockControl();
+        }
         Instant now = clock.instant();
         BusinessActionHandler.PendingPlan plan =
                 handler.planPending(proposal, identity, businessDate(), now);
-
-        actions.lockControl();
         List<PendingAction> expired = actions.findExpired(now);
         actions.expirePending(now);
         // 批量过期动作先收口 Memory（与 PendingAction 同一事务，避免泄漏 ACTIVE 记忆）
@@ -148,7 +233,8 @@ public class BusinessActionService {
                 identity.employeeId(), identity.displayName(),
                 plan.startDate(), plan.endDate(), plan.halfDay(), plan.reason(),
                 plan.days(), plan.balanceBefore(), plan.balanceAfter(), nonce.digest(), now,
-                now.plusSeconds(properties.getTtlSeconds()), plan.payloadJson());
+                now.plusSeconds(properties.getTtlSeconds()), plan.payloadJson(),
+                agentExecutionId, hitlWaitId);
         actions.saveNew(action);
         if (actions.size() > properties.getMaxPending() + properties.getMaxCompleted()) {
             actions.maintainBounds(properties.getMaxCompleted());
@@ -301,6 +387,36 @@ public class BusinessActionService {
     private PendingAction findForUpdate(String actionId) {
         return actions.findForUpdate(actionId).orElseThrow(() -> new ActionException(
                 HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", null, null));
+    }
+
+    public Optional<PendingAction> findByHitlWaitId(String hitlWaitId) {
+        if (hitlWaitId == null || hitlWaitId.isBlank()) {
+            return Optional.empty();
+        }
+        return actions.findByHitlWaitId(hitlWaitId);
+    }
+
+    private static boolean isTerminal(ActionStatus status) {
+        return status == ActionStatus.SUCCEEDED || status == ActionStatus.CANCELLED
+                || status == ActionStatus.EXPIRED || status == ActionStatus.FAILED;
+    }
+
+    private void verifyHitlCorrelation(PendingAction existing,
+                                       BusinessActionType actionType,
+                                       DemoIdentity identity,
+                                       String conversationId,
+                                       String agentExecutionId,
+                                       String hitlWaitId) {
+        boolean same = Objects.equals(existing.hitlWaitId(), hitlWaitId)
+                && Objects.equals(existing.agentExecutionId(), agentExecutionId)
+                && Objects.equals(existing.actionType(), actionType)
+                && Objects.equals(existing.ownerUserId(), identity.userId())
+                && Objects.equals(existing.conversationId(), conversationId)
+                && Objects.equals(existing.employeeId(), identity.employeeId());
+        if (!same) {
+            throw new ActionException(HttpStatus.CONFLICT, "ACTION_HITL_WAIT_CONFLICT",
+                    "HITL wait 归属不匹配，已拒绝复用。", existing.actionId(), existing.status());
+        }
     }
 
     private void requireIdentity(DemoIdentity identity) {

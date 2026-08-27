@@ -17,7 +17,9 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
+from langgraph.types import Command, interrupt
 
+from app.agents.action_proposal_policy import PROPOSAL_TOOL_NAMES, is_confirmable_action_proposal
 from app.agents.execution_history_policy import merge_execution_history
 from app.agents.planner_node import planner_node
 from app.agents.runtime_context import AgentRuntimeContext
@@ -25,11 +27,13 @@ from app.agents.tool_executor_node import tool_executor_node
 from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
 from app.guards.safety_guard import check_user_query_safety
 from app.retrieval.query_rewriter import rewrite_query
-from app.schemas.execution_recovery_schema import new_execution_recovery_marker
+from app.schemas.execution_recovery_schema import (
+    ExecutionRecoveryMarker,
+    new_execution_recovery_marker,
+)
+from app.schemas.hitl_schema import HitlResumePayload, HitlWaitMarker, proposal_action_type
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
-    EXPENSE_PROPOSAL_TOOL_NAME,
-    LEAVE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
 )
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
@@ -70,6 +74,9 @@ class AgentState(TypedDict):
     # P3-3：当前未完成 Planner-first execution 的严格恢复控制标记；不承载
     # user/employee/permission/date/trace/deadline 等可信 Runtime Context。
     execution_recovery: dict | None
+    # P3-4: persisted correlation for the single user-confirmation wait.
+    hitl_wait: dict | None
+    hitl_result: dict | None
 
 
 def safety_node(state: AgentState) -> dict:
@@ -285,7 +292,78 @@ def build_agent_graph():
     return compile_agent_graph()
 
 
-def compile_agent_loop_graph(checkpointer: Any | None = None):
+def prepare_hitl_node(state: AgentState) -> dict:
+    """Create the deterministic checkpoint marker immediately before approval."""
+    if not is_confirmable_action_proposal(state):
+        raise RuntimeError('当前状态不是可确认的业务 Proposal，禁止进入 HITL')
+
+    try:
+        recovery = ExecutionRecoveryMarker.model_validate(
+            state.get('execution_recovery'),
+        )
+        action_type = proposal_action_type(state.get('action_proposal'))
+        if action_type is None:
+            raise ValueError('action_proposal action_type 无效')
+        wait = HitlWaitMarker.for_execution(recovery.execution_id, action_type)
+    except Exception as exc:
+        logger.error('HITL wait marker 构造失败 error_type=%s', type(exc).__name__)
+        raise RuntimeError('HITL wait marker 无效') from None
+
+    return {
+        'hitl_wait': wait.model_dump(),
+        'route': 'action',
+        'category': 'business_action',
+    }
+
+
+def approval_node(state: AgentState) -> dict:
+    """Pause for Java's authoritative decision and deterministically apply it."""
+    try:
+        wait = HitlWaitMarker.model_validate(state.get('hitl_wait'))
+    except Exception:
+        logger.error('HITL approval marker 校验失败')
+        raise RuntimeError('HITL wait marker 无效') from None
+
+    # This node must remain side-effect free before interrupt(): LangGraph 1.2.9
+    # re-executes the node from its beginning when Command(resume=...) arrives.
+    resumed = interrupt(wait.model_dump())
+    try:
+        payload = HitlResumePayload.model_validate(resumed)
+    except Exception:
+        logger.warning('HITL authoritative resume payload 校验失败')
+        raise RuntimeError('HITL resume payload 无效') from None
+
+    if (
+        payload.wait_id != wait.wait_id
+        or payload.execution_id != wait.execution_id
+        or payload.action_type != wait.action_type
+    ):
+        logger.warning('HITL authoritative resume correlation mismatch')
+        raise RuntimeError('HITL resume correlation 不匹配')
+
+    stop_reason = {
+        'CONFIRMED': 'hitl_confirmed',
+        'CANCELLED': 'hitl_cancelled',
+        'EXPIRED': 'hitl_expired',
+        'REJECTED': 'hitl_rejected',
+    }[payload.decision]
+    return {
+        'hitl_result': payload.model_dump(),
+        'action_proposal': None,
+        'missing_fields': [],
+        'answer': payload.message,
+        'route': 'action',
+        'category': 'business_action',
+        'reason': '',
+        'stop_reason': stop_reason,
+    }
+
+
+def compile_agent_loop_graph(
+    checkpointer: Any | None = None,
+    *,
+    enable_hitl: bool = True,
+):
     """最小有限 Agent Loop：safety → planner ⇄ tool_executor → finalize。
 
     Planner-first 拓扑。Safety 保留 pre-Planner 拦截边界：
@@ -301,6 +379,9 @@ def compile_agent_loop_graph(checkpointer: Any | None = None):
     graph.add_node("safety_node", safety_node)
     graph.add_node("planner_node", planner_node)
     graph.add_node("tool_executor_node", tool_executor_node)
+    if enable_hitl:
+        graph.add_node("prepare_hitl_node", prepare_hitl_node)
+        graph.add_node("approval_node", approval_node)
     graph.add_node("finalize_node", finalize_node)
 
     graph.add_edge(START, "safety_node")
@@ -314,19 +395,25 @@ def compile_agent_loop_graph(checkpointer: Any | None = None):
         },
     )
 
-    graph.add_conditional_edges(
-        "planner_node",
-        lambda state: (
-            "tool_executor_node" if state.get("stop_reason") == "continue"
-            else "finalize_node"
-        ),
-        {
-            "tool_executor_node": "tool_executor_node",
-            "finalize_node": "finalize_node",
-        },
-    )
+    def planner_route(state: AgentState) -> str:
+        if state.get("stop_reason") == "continue":
+            return "tool_executor_node"
+        if enable_hitl and is_confirmable_action_proposal(state):
+            return "prepare_hitl_node"
+        return "finalize_node"
+
+    planner_routes = {
+        "tool_executor_node": "tool_executor_node",
+        "finalize_node": "finalize_node",
+    }
+    if enable_hitl:
+        planner_routes["prepare_hitl_node"] = "prepare_hitl_node"
+    graph.add_conditional_edges("planner_node", planner_route, planner_routes)
 
     graph.add_edge("tool_executor_node", "planner_node")
+    if enable_hitl:
+        graph.add_edge("prepare_hitl_node", "approval_node")
+        graph.add_edge("approval_node", "finalize_node")
     graph.add_edge("finalize_node", END)
 
     return graph.compile(checkpointer=checkpointer)
@@ -335,14 +422,18 @@ def compile_agent_loop_graph(checkpointer: Any | None = None):
 @lru_cache(maxsize=1)
 def build_agent_loop_graph():
     """无 Checkpointer 的兼容 Planner-first Graph。"""
-    return compile_agent_loop_graph()
+    # Dynamic interrupt requires a checkpointer to be resumable.  The legacy
+    # no-checkpoint graph remains a deterministic compatibility graph used by
+    # unit tests and DISABLED mode; POSTGRES production compiles the HITL graph
+    # through CheckpointRuntime with the default enable_hitl=True.
+    return compile_agent_loop_graph(enable_hitl=False)
 
 
-# P2-A: proposal 风格 Tool 集合（leave / expense）。
+# P2-A/P3-4: proposal 风格 Tool 集合（leave / expense）。
 # - leave_proposal_tool / expense_proposal_tool 的最后成功 → route=action
 # - **不**包含 travel_record_tool / invoice_verify_tool / expense_status_tool
-#   （V2 §十六：这些只读/查询 Tool 单独成功不应触发 action 语义）
-_PROPOSAL_TOOL_NAMES = frozenset({LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME})
+#   （这些只读/查询 Tool 单独成功不应触发 action 语义）
+_PROPOSAL_TOOL_NAMES = PROPOSAL_TOOL_NAMES
 
 
 def _finalize_action_proposal(state: dict) -> dict:
@@ -358,12 +449,10 @@ def _finalize_action_proposal(state: dict) -> dict:
         state['action_proposal'] = None
         state['missing_fields'] = []
         return state
-    last_success: str | None = None
-    for entry in state.get('tool_history', []) or []:
-        if entry.get('status') == 'success':
-            last_success = entry.get('tool_name')
-    # P2-A: proposal 风格 Tool 集合（leave / expense），route=action 触发条件。
-    if last_success not in _PROPOSAL_TOOL_NAMES:
+    # Clarification keeps its missing_fields with action_proposal=None.  A
+    # materialized proposal must use the same shared readiness predicate as
+    # HITL routing, otherwise stale proposals could leak into the response.
+    if state.get('action_proposal') is not None and not is_confirmable_action_proposal(state):
         state['action_proposal'] = None
         state['missing_fields'] = []
     return state
@@ -408,6 +497,18 @@ def _finalize_response_contract(state: dict) -> dict:
     if not safe:
         state['route'] = 'refuse'
         state['reason'] = state.get('reason', '')
+        return state
+
+    # Java has already decided the business action.  The graph must not ask the
+    # LLM to reinterpret that result during finalization.
+    if stop_reason in {
+        'hitl_confirmed', 'hitl_cancelled', 'hitl_expired', 'hitl_rejected',
+    }:
+        state['route'] = 'action'
+        state['category'] = 'business_action'
+        state['reason'] = ''
+        state['action_proposal'] = None
+        state['missing_fields'] = []
         return state
 
     # 2. task_complete：根据 tool_history 收敛 route。
@@ -535,6 +636,8 @@ def run_langgraph_agent(
             new_execution_recovery_marker(question, business_date, employee_id)
             if use_planner else None
         ),
+        "hitl_wait": None,
+        "hitl_result": None,
     }
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
@@ -602,6 +705,33 @@ def resume_langgraph_agent(
     )
     return dict(graph.invoke(
         None,
+        config=_build_graph_config(runtime_thread_id, trace_id),
+        context=runtime_context,
+        durability='sync',
+    ))
+
+
+def resume_hitl_langgraph_agent(
+    *,
+    graph: Any,
+    runtime_thread_id: str,
+    payload: HitlResumePayload,
+    allow_eval: bool = False,
+    allow_business_actions: bool = False,
+    business_date: date | None = None,
+    trace_id: str = '',
+    employee_id: str = '',
+) -> dict:
+    """Resume the active approval interrupt with Java's validated result."""
+    runtime_context = _build_runtime_context(
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        business_date=business_date,
+        trace_id=trace_id,
+        employee_id=employee_id,
+    )
+    return dict(graph.invoke(
+        Command(resume=payload.model_dump()),
         config=_build_graph_config(runtime_thread_id, trace_id),
         context=runtime_context,
         durability='sync',

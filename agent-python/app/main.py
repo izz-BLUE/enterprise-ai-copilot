@@ -6,7 +6,11 @@ from datetime import date
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from app.agents.langgraph_agent import resume_langgraph_agent, run_langgraph_agent
+from app.agents.langgraph_agent import (
+    resume_hitl_langgraph_agent,
+    resume_langgraph_agent,
+    run_langgraph_agent,
+)
 from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
 from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
@@ -37,13 +41,14 @@ from app.memory.memory_write_policy import MemoryWriteCommand
 from app.retrieval.chunk_store import chunk_store_status
 from app.retrieval.faiss_retriever import faiss_status
 from app.runtime.checkpoint_runtime import CheckpointRuntime
-from app.runtime.execution_recovery import RecoveryMode
+from app.runtime.execution_recovery import RecoveryMode, inspect_hitl_resume
 from app.schemas.chat_schema import (
     AgentMemoryProposal,
     AgentResponse,
     ChatRequest,
     ChatResponse,
 )
+from app.schemas.hitl_schema import HitlResumePayload
 from app.schemas.version_schema import VersionResponse
 from app.services.llm_service import call_llm
 from app.services.rag_service import process_chat
@@ -64,7 +69,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title='Agent Python Service', lifespan=lifespan)
 
-_BOUNDED_AI_PATHS = {'/agent/chat', '/agent/langgraph/chat'}
+_BOUNDED_AI_PATHS = {
+    '/agent/chat',
+    '/agent/langgraph/chat',
+    '/agent/langgraph/hitl/resume',
+}
 
 # 配置在 import 时 fail-closed 校验；模式不在白名单时服务不应静默运行。
 _memory_execution_policy = make_execution_policy(MEMORY_WRITE_MODE)
@@ -122,7 +131,7 @@ def _build_memory_runtime_hook(
 
 def _busy_response(path: str, trace_id: str) -> JSONResponse:
     common_headers = {'X-Trace-Id': trace_id, 'Retry-After': '1'}
-    if path == '/agent/langgraph/chat':
+    if path in {'/agent/langgraph/chat', '/agent/langgraph/hitl/resume'}:
         content = {
             'answer': '当前请求较多，请稍后重试。',
             'route': 'busy',
@@ -395,6 +404,24 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         trace_id=trace_id,
                         employee_id=employee_id,
                     )
+                elif recovery is not None and recovery.mode is RecoveryMode.WAITING_USER:
+                    # A normal chat must never cross an active approval
+                    # interrupt.  Return the persisted proposal/wait marker so
+                    # Java can perform idempotent PendingAction registration.
+                    snapshot = graph.get_state(
+                        {'configurable': {'thread_id': runtime_thread_id}},
+                    )
+                    values = getattr(snapshot, 'values', None)
+                    if not isinstance(values, dict):
+                        return _checkpoint_failure_response(trace_id, status_code=503)
+                    result = dict(values)
+                    result.update({
+                        'route': 'action',
+                        'category': 'business_action',
+                        'safe': True,
+                        'success': True,
+                        'hitl_wait': recovery.hitl_wait,
+                    })
                 else:
                     try:
                         execution_history = checkpoint_runtime.load_execution_history(
@@ -463,6 +490,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             action_proposal=result.get('action_proposal'),
             missing_fields=result.get('missing_fields', []),
             memory_proposal=memory_proposal,
+            hitl_wait=result.get('hitl_wait'),
         )
         if not response.success:
             return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
@@ -480,6 +508,117 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             traceId=trace_id,
         )
         return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+
+
+@app.post('/agent/langgraph/hitl/resume', response_model=AgentResponse)
+def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResponse | JSONResponse:
+    """Resume one persisted business-action interrupt with Java authority.
+
+    This endpoint has no browser contract.  The thread id and capability
+    headers are accepted only from Java's internal gateway; the payload itself
+    is still strictly validated and correlated with the latest checkpoint.
+    Unlike normal chat, this path never runs the Memory proposal pipeline.
+    """
+    trace_id = req.state.trace_id
+    if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
+        return _checkpoint_failure_response(trace_id, status_code=503)
+
+    allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
+    allow_business_actions = (
+        req.headers.get('x-allow-business-actions', 'false').lower() == 'true'
+    )
+    business_date = None
+    business_date_header = req.headers.get('x-business-date')
+    if business_date_header:
+        try:
+            business_date = date.fromisoformat(business_date_header)
+        except ValueError:
+            return _hitl_resume_conflict_response(trace_id)
+    employee_id = (req.headers.get('x-employee-id') or '').strip()
+
+    checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
+    if checkpoint_runtime is None:
+        return _checkpoint_failure_response(trace_id, status_code=503)
+    try:
+        runtime_thread_id = checkpoint_runtime.build_thread_id(
+            (req.headers.get('x-agent-thread-id') or '').strip(),
+            use_planner=True,
+        )
+        graph = checkpoint_runtime.get_graph(use_planner=True)
+    except (RuntimeError, ValueError):
+        return _checkpoint_failure_response(trace_id, status_code=400)
+
+    if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
+        return _busy_response('/agent/langgraph/hitl/resume', trace_id)
+    try:
+        try:
+            decision = inspect_hitl_resume(
+                graph.get_state({'configurable': {'thread_id': runtime_thread_id}}),
+                payload,
+                employee_id=employee_id,
+                allow_business_actions=allow_business_actions,
+            )
+        except Exception:
+            logger.exception('[%s] HITL resume inspection 读取失败', trace_id)
+            return _checkpoint_failure_response(trace_id, status_code=503)
+
+        if decision.mode is RecoveryMode.WAITING_USER:
+            result = resume_hitl_langgraph_agent(
+                graph=graph,
+                runtime_thread_id=runtime_thread_id,
+                payload=payload,
+                allow_eval=allow_eval,
+                allow_business_actions=allow_business_actions,
+                business_date=business_date,
+                trace_id=trace_id,
+                employee_id=employee_id,
+            )
+        elif decision.mode is RecoveryMode.HITL_CONTINUATION:
+            # Approval has already been checkpointed; only deterministic
+            # finalization is pending after a Python crash.
+            result = resume_langgraph_agent(
+                graph=graph,
+                runtime_thread_id=runtime_thread_id,
+                allow_eval=allow_eval,
+                allow_business_actions=allow_business_actions,
+                business_date=business_date,
+                trace_id=trace_id,
+                employee_id=employee_id,
+            )
+        elif decision.mode is RecoveryMode.HITL_COMPLETED:
+            snapshot = graph.get_state(
+                {'configurable': {'thread_id': runtime_thread_id}},
+            )
+            result = dict(snapshot.values)
+        else:
+            logger.warning(
+                '[%s] HITL resume rejected mode=%s reason=%s',
+                trace_id, decision.mode.value, decision.reason,
+            )
+            return _hitl_resume_conflict_response(trace_id)
+    except Exception:
+        logger.exception('[%s] HITL resume 执行失败', trace_id)
+        return _checkpoint_failure_response(trace_id, status_code=502)
+    finally:
+        checkpoint_runtime.release_thread(runtime_thread_id)
+
+    response = AgentResponse(
+        answer=result.get('answer', ''),
+        route=result.get('route', 'action'),
+        safe=result.get('safe', True),
+        category=result.get('category', 'business_action'),
+        reason='',
+        sources=result.get('sources', []),
+        success=result.get('route', 'action') != 'error',
+        traceId=trace_id,
+        action_proposal=None,
+        missing_fields=[],
+        memory_proposal=None,
+        hitl_wait=result.get('hitl_wait'),
+    )
+    if not response.success:
+        return JSONResponse(status_code=502, content=response.model_dump(mode='json'))
+    return response
 
 
 def _checkpoint_failure_response(trace_id: str, status_code: int) -> JSONResponse:
@@ -501,6 +640,20 @@ def _recovery_conflict_response(trace_id: str) -> JSONResponse:
     """Hide internal recovery reasons while exposing the stable 409 contract."""
     response = AgentResponse(
         answer='当前会话存在未完成的 Agent 执行，请重试原请求或重新开始会话。',
+        route='error',
+        safe=True,
+        category='recovery_conflict',
+        reason='',
+        sources=[],
+        success=False,
+        traceId=trace_id,
+    )
+    return JSONResponse(status_code=409, content=response.model_dump(mode='json'))
+
+
+def _hitl_resume_conflict_response(trace_id: str) -> JSONResponse:
+    response = AgentResponse(
+        answer='当前确认请求与执行快照不匹配，未恢复该业务动作。',
         route='error',
         safe=True,
         category='recovery_conflict',

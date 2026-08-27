@@ -4,10 +4,14 @@ from unittest.mock import Mock, patch
 
 from fastapi import Request
 
-from app.agents.langgraph_agent import resume_langgraph_agent, run_langgraph_agent
-from app.main import app, langgraph_chat
+from app.agents.langgraph_agent import (
+    resume_langgraph_agent,
+    run_langgraph_agent,
+)
+from app.main import app, langgraph_chat, langgraph_hitl_resume
 from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
 from app.schemas.chat_schema import ChatRequest
+from app.schemas.hitl_schema import HitlResumePayload
 
 
 def _request(headers=None):
@@ -258,4 +262,68 @@ def test_postgres_endpoint_resume_failure_returns_502_and_releases_guard(monkeyp
     assert response.status_code == 502
     resume.assert_called_once()
     runtime.load_execution_history.assert_not_called()
+    runtime.release_thread.assert_called_once()
+
+
+def test_hitl_resume_endpoint_uses_authoritative_command_and_skips_memory(monkeypatch):
+    runtime = Mock()
+    graph = Mock()
+    runtime.build_thread_id.return_value = 'rt_' + ('h' * 64) + ':planner-v1'
+    runtime.get_graph.return_value = graph
+    runtime.try_acquire_thread.return_value = True
+    decision = RecoveryDecision(
+        RecoveryMode.WAITING_USER,
+        pending_node='approval_node',
+        execution_id='ex_' + ('a' * 32),
+        hitl_wait={
+            'schema_version': 1,
+            'kind': 'BUSINESS_ACTION_CONFIRMATION',
+            'wait_id': 'wait_' + ('b' * 64),
+            'execution_id': 'ex_' + ('a' * 32),
+            'action_type': 'ANNUAL_LEAVE_REQUEST',
+        },
+    )
+    payload = HitlResumePayload(
+        schema_version=1,
+        wait_id='wait_' + ('b' * 64),
+        execution_id='ex_' + ('a' * 32),
+        decision='CONFIRMED',
+        action_id='act-java-001',
+        action_type='ANNUAL_LEAVE_REQUEST',
+        action_status='SUCCEEDED',
+        request_id='LR-202608-0001',
+        message='Java authoritative result',
+    )
+    result = {
+        'answer': '已提交',
+        'route': 'action',
+        'safe': True,
+        'category': 'business_action',
+        'sources': [],
+        'hitl_wait': decision.hitl_wait,
+    }
+    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
+    monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
+
+    with patch('app.main.inspect_hitl_resume', return_value=decision), \
+            patch('app.main.resume_hitl_langgraph_agent', return_value=result) as resume, \
+            patch('app.main.resume_langgraph_agent') as legacy, \
+            patch('app.main._build_memory_runtime_hook') as memory:
+        response = langgraph_hitl_resume(
+            payload,
+            _request({
+                'X-Agent-Thread-Id': 'rt_' + ('h' * 64),
+                'X-Employee-Id': 'E10001',
+                'X-Allow-Business-Actions': 'false',
+                'X-Business-Date': '2026-08-27',
+            }),
+        )
+
+    assert response.success is True
+    assert response.hitl_wait is not None
+    resume.assert_called_once()
+    assert resume.call_args.kwargs['payload'] == payload
+    assert resume.call_args.kwargs['allow_business_actions'] is False
+    legacy.assert_not_called()
+    memory.assert_not_called()
     runtime.release_thread.assert_called_once()

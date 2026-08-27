@@ -157,7 +157,9 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
                         payload.tripId(), payload.claimedAmount(), payload.reimbursableAmount(),
                         payload.costCenter(), payload.reason(),
                         payload.items().size(), payload.invoiceIds()),
-                plaintextNonce, action.expiresAt(), true);
+                plaintextNonce, action.expiresAt(),
+                action.status() == com.fantuan.copilot.model.action.ActionStatus.PENDING_CONFIRMATION
+                        && plaintextNonce != null);
     }
 
     // ------------------------------------------------------------------

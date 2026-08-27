@@ -3,6 +3,7 @@ package com.fantuan.copilot.dto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fantuan.copilot.dto.action.BusinessActionProposal;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 
 import java.util.List;
@@ -26,5 +27,15 @@ public record PythonAgentResponse(
         @JsonAlias("trace_id") String traceId,
         @JsonAlias("action_proposal") BusinessActionProposal actionProposal,
         @JsonAlias("missing_fields") List<String> missingFields,
-        @JsonAlias("memory_proposal") AgentMemoryProposal memoryProposal) {
+        @JsonAlias("memory_proposal") AgentMemoryProposal memoryProposal,
+        @JsonAlias("hitl_wait") HitlWaitMarker hitlWait) {
+
+    /** Compatibility constructor for pre-P3-4 test fixtures and legacy responses. */
+    public PythonAgentResponse(String answer, String route, Boolean safe, String category,
+                               String reason, List<String> sources, Boolean success,
+                               String traceId, BusinessActionProposal actionProposal,
+                               List<String> missingFields, AgentMemoryProposal memoryProposal) {
+        this(answer, route, safe, category, reason, sources, success, traceId,
+                actionProposal, missingFields, memoryProposal, null);
+    }
 }

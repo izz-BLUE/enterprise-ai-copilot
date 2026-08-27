@@ -25,7 +25,7 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
             employee_id, display_name, start_date, end_date, half_day, reason, days,
             balance_before, balance_after, confirmation_nonce_digest, status, idempotency_key,
             request_id, execution_message, failure_code, created_at, expires_at, completed_at,
-            action_payload_json
+            action_payload_json, agent_execution_id, hitl_wait_id
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -49,11 +49,11 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                     action_id, action_type, origin_trace_id, owner_user_id, conversation_id,
                     employee_id, display_name, start_date, end_date, half_day, reason, days,
                     balance_before, balance_after, confirmation_nonce_digest, status,
-                    created_at, expires_at, action_payload_json)
+                    created_at, expires_at, action_payload_json, agent_execution_id, hitl_wait_id)
                 VALUES (:actionId, :actionType, :originTraceId, :ownerUserId, :conversationId,
                     :employeeId, :displayName, :startDate, :endDate, :halfDay, :reason, :days,
                     :balanceBefore, :balanceAfter, :nonceDigest, :status, :createdAt, :expiresAt,
-                    CAST(:actionPayloadJson AS jsonb))
+                    CAST(:actionPayloadJson AS jsonb), :agentExecutionId, :hitlWaitId)
                 """, p);
     }
 
@@ -68,6 +68,27 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
         return jdbc.query("SELECT " + COLUMNS
                         + " FROM business_action WHERE action_id = :id FOR UPDATE",
                 Map.of("id", actionId), rowMapper).stream().findFirst();
+    }
+
+    @Override
+    public Optional<PendingAction> findByHitlWaitId(String hitlWaitId) {
+        return jdbc.query("SELECT " + COLUMNS
+                        + " FROM business_action WHERE hitl_wait_id = :hitlWaitId",
+                Map.of("hitlWaitId", hitlWaitId), rowMapper).stream().findFirst();
+    }
+
+    @Override
+    public Optional<PendingAction> findByHitlWaitIdForUpdate(String hitlWaitId) {
+        return jdbc.query("SELECT " + COLUMNS
+                        + " FROM business_action WHERE hitl_wait_id = :hitlWaitId FOR UPDATE",
+                Map.of("hitlWaitId", hitlWaitId), rowMapper).stream().findFirst();
+    }
+
+    @Override
+    public void updateConfirmationNonceDigest(String actionId, byte[] nonceDigest) {
+        jdbc.update("UPDATE business_action SET confirmation_nonce_digest = :nonceDigest "
+                        + "WHERE action_id = :id", Map.of(
+                "id", actionId, "nonceDigest", nonceDigest));
     }
 
     @Override
@@ -188,7 +209,9 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 .addValue("status", action.status().name())
                 .addValue("createdAt", Timestamp.from(action.createdAt()))
                 .addValue("expiresAt", Timestamp.from(action.expiresAt()))
-                .addValue("actionPayloadJson", action.actionPayloadJson());
+                .addValue("actionPayloadJson", action.actionPayloadJson())
+                .addValue("agentExecutionId", action.agentExecutionId())
+                .addValue("hitlWaitId", action.hitlWaitId());
     }
 
     private PendingAction map(ResultSet rs, int rowNum) throws SQLException {
@@ -206,7 +229,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 rs.getObject("idempotency_key", UUID.class), rs.getString("request_id"),
                 rs.getString("execution_message"), rs.getString("failure_code"),
                 instant(rs, "created_at"), instant(rs, "expires_at"), instant(rs, "completed_at"),
-                rs.getString("action_payload_json"));
+                rs.getString("action_payload_json"), rs.getString("agent_execution_id"),
+                rs.getString("hitl_wait_id"));
     }
 
     private Instant instant(ResultSet rs, String column) throws SQLException {

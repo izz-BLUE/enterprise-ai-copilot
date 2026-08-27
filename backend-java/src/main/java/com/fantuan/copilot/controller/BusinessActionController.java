@@ -3,7 +3,8 @@ package com.fantuan.copilot.controller;
 import com.fantuan.copilot.dto.action.ActionDecisionRequest;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.identity.IdentityContext;
-import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.identity.VerifiedIdentity;
+import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,14 +20,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/agent/actions")
 public class BusinessActionController {
-    private final BusinessActionService service;
     private final IdentityContext identityContext;
+    private final BusinessActionHitlCoordinator hitlCoordinator;
 
     @Autowired
-    public BusinessActionController(BusinessActionService service,
-                                    IdentityContext identityContext) {
-        this.service = service;
+    public BusinessActionController(IdentityContext identityContext,
+                                    BusinessActionHitlCoordinator hitlCoordinator) {
         this.identityContext = identityContext;
+        this.hitlCoordinator = hitlCoordinator;
     }
 
     @PostMapping("/{actionId}/confirm")
@@ -37,9 +38,11 @@ public class BusinessActionController {
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
-        var identity = identityContext.require(servletRequest).asDemoIdentity();
-        return noStore(service.confirm(actionId, request.confirmationNonce(), idempotencyKey,
-                adminToken, traceId, identity));
+        VerifiedIdentity identity = identityContext.require(servletRequest);
+        ActionExecutionResponse response = hitlCoordinator.confirm(
+                actionId, request.confirmationNonce(), idempotencyKey,
+                adminToken, traceId, identity);
+        return noStore(response);
     }
 
     @PostMapping("/{actionId}/cancel")
@@ -49,9 +52,10 @@ public class BusinessActionController {
             @Valid @RequestBody ActionDecisionRequest request,
             HttpServletRequest servletRequest) {
         String traceId = (String) servletRequest.getAttribute("traceId");
-        var identity = identityContext.require(servletRequest).asDemoIdentity();
-        return noStore(service.cancel(actionId, request.confirmationNonce(), adminToken, traceId,
-                identity));
+        VerifiedIdentity identity = identityContext.require(servletRequest);
+        ActionExecutionResponse response = hitlCoordinator.cancel(
+                actionId, request.confirmationNonce(), adminToken, traceId, identity);
+        return noStore(response);
     }
 
     private ResponseEntity<ActionExecutionResponse> noStore(ActionExecutionResponse response) {
