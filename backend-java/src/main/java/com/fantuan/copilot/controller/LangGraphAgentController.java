@@ -292,12 +292,12 @@ public class LangGraphAgentController {
                 } else if (wait != null) {
                     pendingAction = businessActionService.createHitlPending(
                             pythonResponse.actionProposal(), traceId, presentedToken,
-                            identity.asDemoIdentity(), conversationId,
+                            identity, conversationId,
                             wait.executionId(), wait.waitId());
                 } else {
                     pendingAction = businessActionService.createPending(
                             pythonResponse.actionProposal(), traceId, presentedToken,
-                            identity.asDemoIdentity(), conversationId);
+                            identity, conversationId);
                 }
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",

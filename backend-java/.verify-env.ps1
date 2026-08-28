@@ -1,7 +1,0 @@
-. (Join-Path $PSScriptRoot '.load-env.ps1') | Out-Null
-Write-Host "DEMO_AUTH_ENABLED = [$env:DEMO_AUTH_ENABLED]"
-Write-Host "DEMO_AUTH_DEFAULT_PASSWORD = [$env:DEMO_AUTH_DEFAULT_PASSWORD]"
-Write-Host "BUSINESS_ACTIONS_ENABLED = [$env:BUSINESS_ACTIONS_ENABLED]"
-Write-Host "AUTH_JWT_SECRET length = $($env:AUTH_JWT_SECRET.Length)"
-Write-Host "JAVA_INTERNAL_TOKEN set = $([bool]$env:JAVA_INTERNAL_TOKEN)"
-Write-Host "SPRING_DATASOURCE_URL = [$env:SPRING_DATASOURCE_URL]"

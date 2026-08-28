@@ -37,10 +37,8 @@ public final class AgentResponseFactory {
 
     public static ResponseEntity<AgentChatResponse> identityFailure(
             String traceId, ActionException exception) {
-        String category = exception.errorCode().startsWith("DEMO_")
-                ? "demo_identity" : "authentication";
         return ResponseEntity.status(exception.httpStatus()).cacheControl(CacheControl.noStore())
-                .body(response(exception.getMessage(), "error", category, traceId));
+                .body(response(exception.getMessage(), "error", "authentication", traceId));
     }
 
     private static AgentChatResponse response(String answer, String route,

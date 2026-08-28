@@ -34,7 +34,6 @@ class MockOaWebhookSecurityWebMvcTest {
     @MockitoBean JwtEncoder jwtEncoder;
     @MockitoBean JwtDecoder jwtDecoder;
     @MockitoBean com.fantuan.copilot.auth.AppUserDetailsService appUserDetailsService;
-    @MockitoBean com.fantuan.copilot.service.demo.DemoIdentityService demoIdentityService;
     @MockitoBean MockOaWebhookVerifier verifier;
     @MockitoBean MockOaWebhookProcessingService processingService;
 

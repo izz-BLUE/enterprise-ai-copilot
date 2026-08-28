@@ -14,7 +14,6 @@ import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.identity.IdentityContext;
@@ -68,7 +67,6 @@ class LangGraphAgentMemoryReadBodyTest {
     private AdminAccessService admin;
     private BusinessActionService actionService;
     private AiTaskMemoryService memoryService;
-    private DemoIdentityService identities;
     private LangGraphAgentController controller;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -79,11 +77,10 @@ class LangGraphAgentMemoryReadBodyTest {
         admin = mock(AdminAccessService.class);
         actionService = mock(BusinessActionService.class);
         memoryService = mock(AiTaskMemoryService.class);
-        identities = mock(DemoIdentityService.class);
         controller = new LangGraphAgentController(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService,
-                new IdentityContext(identities), memoryService,
+                new IdentityContext(), memoryService,
                 new AdminLogBuffer());
 
         when(admin.isAdmin(any())).thenReturn(false);

@@ -17,7 +17,7 @@ import com.fantuan.copilot.service.action.ExpenseActionPayload;
 import com.fantuan.copilot.service.action.ExpenseActionPayloadCodec;
 import com.fantuan.copilot.service.action.ExpenseCalculationService;
 import com.fantuan.copilot.service.action.ExpensePrecheckService;
-import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -68,7 +68,7 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
 
     @Override
     public PendingPlan planPending(BusinessActionProposal proposal,
-                                   DemoIdentity identity,
+                                   VerifiedIdentity identity,
                                    LocalDate businessDate,
                                    Instant now) {
         if (!(proposal instanceof ExpenseActionProposal expense)) {

@@ -169,7 +169,6 @@ test('Agent请求使用HttpOnly Cookie会话且不发送Demo身份Header', async
 
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
-  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.body).toEqual({ message: '请帮我申请年假' })
   expect(captured.body.userId).toBeUndefined()
   expect(captured.body.employeeId).toBeUndefined()
@@ -200,7 +199,6 @@ test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page 
   expect(captured.headers['x-admin-token']).toBe('test-only')
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
-  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toMatch(
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   )
@@ -312,7 +310,6 @@ test('Cancel 不发送 Idempotency-Key 且成功后隐藏操作按钮', async ({
   expect(captured.headers['x-admin-token']).toBe('test-only')
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
-  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['idempotency-key']).toBeUndefined()
   expect(captured.body).toEqual({ confirmationNonce: TEST_NONCE })
 })
@@ -377,7 +374,6 @@ test('标准RAG使用HttpOnly Cookie会话且不发送Demo身份Header', async (
   await expect(page.getByText('标准问答', { exact: true }).last()).toBeVisible()
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
-  expect(captured.headers['x-demo-user-id']).toBeUndefined()
   expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.body).toEqual({ message: '几点上班？' })
   expect(captured.body.userId).toBeUndefined()

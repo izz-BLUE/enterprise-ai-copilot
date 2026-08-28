@@ -59,7 +59,7 @@ LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
 ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 ```
 
-Java 侧按 [demo-guide.md](demo-guide.md) 打开 `BUSINESS_ACTIONS_ENABLED`、`DEMO_IDENTITY_ENABLED`、`MOCK_OA_ENABLED` 和所需的 external retry/reconciliation。所有功能默认关闭是安全基线。
+Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINESS_ACTIONS_ENABLED`、`MOCK_OA_ENABLED` 和所需的 external retry/reconciliation。所有功能默认关闭是安全基线。
 
 ## Troubleshooting
 

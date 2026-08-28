@@ -2,6 +2,8 @@ package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.auth.AuthRole;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionGateway;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
@@ -10,8 +12,6 @@ import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.handler.AnnualLeaveActionHandler;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,8 +35,9 @@ import static org.mockito.Mockito.*;
 
 class BusinessActionServiceTest {
     private static final String ADMIN = "test-admin";
-    private static final DemoIdentity USER_A = new DemoIdentity(
-            "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+    private static final VerifiedIdentity USER_A = new VerifiedIdentity(
+            "U10001", "zhangsan", "E10001", "张三",
+            AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
 
     @Test
     void serviceDependsOnHandlerRegistryAndNotLeaveRepositories() {

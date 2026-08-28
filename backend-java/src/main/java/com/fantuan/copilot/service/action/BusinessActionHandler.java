@@ -4,7 +4,7 @@ import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.PendingAction;
-import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -35,7 +35,7 @@ public interface BusinessActionHandler {
      * LocalDate.now()。
      */
     PendingPlan planPending(BusinessActionProposal proposal,
-                            DemoIdentity identity,
+                            VerifiedIdentity identity,
                             LocalDate businessDate,
                             Instant now);
 

@@ -1,16 +1,16 @@
 package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.PostgresIntegrationTestBase;
+import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,13 +25,13 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {
+        "demo.auth.enabled=true",
+        "demo.auth.default-password=test-password",
         "business.actions.enabled=true",
-        "business.actions.require-admin=false",
-        "demo.identity.enabled=true"
+        "business.actions.require-admin=false"
 })
-class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
+class IdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
     @Autowired BusinessActionService service;
-    @Autowired DemoIdentityService identities;
     @Autowired LeaveAccountRepository accounts;
     @Autowired LeaveRequestRepository requests;
     @Autowired PendingActionRepository actions;
@@ -39,6 +39,8 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
 
     @BeforeEach
     void reset() {
+        jdbc.execute("DELETE FROM expense_item");
+        jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
@@ -47,23 +49,22 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
 
     @Test
     void draftsAreBoundToEachServerSideIdentity() {
-        assertOwner(create(user("DEMO-001"), nextWeekday(2)), "DEMO-001", "Demo User");
-        assertOwner(create(user("DEMO-002"), nextWeekday(3)), "DEMO-002", "Demo User B");
-        assertOwner(create(user("DEMO-MGR-001"), nextWeekday(4)),
-                "DEMO-MGR-001", "Demo Manager");
+        assertOwner(create(user("E10001"), nextWeekday(2)), "E10001", "张三");
+        assertOwner(create(user("E10002"), nextWeekday(3)), "E10002", "李四");
+        assertOwner(create(user("E10003"), nextWeekday(4)), "E10003", "王五");
     }
 
     @Test
     void sameDateIsAllowedAcrossUsersButBalanceAndConflictStayPerEmployee() {
         LocalDate date = nextWeekday(2);
-        DemoIdentity a = user("DEMO-001");
-        DemoIdentity b = user("DEMO-002");
+        VerifiedIdentity a = user("E10001");
+        VerifiedIdentity b = user("E10002");
         confirm(create(a, date), a);
         confirm(create(b, date), b);
 
         assertEquals(new BigDecimal("4.0"), accounts.findBalance(a.employeeId()).orElseThrow());
         assertEquals(new BigDecimal("4.0"), accounts.findBalance(b.employeeId()).orElseThrow());
-        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-MGR-001").orElseThrow());
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("E10003").orElseThrow());
         assertEquals(2, requests.size());
 
         ActionException conflict = assertThrows(ActionException.class, () -> create(a, date));
@@ -72,13 +73,13 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
 
     @Test
     void crossUserConfirmIsIndistinguishableFromMissingAndDoesNotConsumeDraft() {
-        DemoIdentity a = user("DEMO-001");
-        DemoIdentity b = user("DEMO-002");
+        VerifiedIdentity a = user("E10001");
+        VerifiedIdentity b = user("E10002");
         PendingActionView pending = create(a, nextWeekday(2));
 
         ActionException managerDenied = assertThrows(ActionException.class, () -> service.confirm(
                 pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
-                null, "manager-cross-user", user("DEMO-MGR-001")));
+                null, "third-user-cross-user", user("E10003")));
         ActionException denied = assertThrows(ActionException.class, () -> service.confirm(
                 pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
                 null, "cross-user", b));
@@ -100,9 +101,9 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
 
     @Test
     void userAndManagerCannotCancelAnotherUsersDraft() {
-        DemoIdentity a = user("DEMO-001");
-        PendingActionView forUserB = create(user("DEMO-002"), nextWeekday(2));
-        PendingActionView forManager = create(user("DEMO-MGR-001"), nextWeekday(3));
+        VerifiedIdentity a = user("E10001");
+        PendingActionView forUserB = create(user("E10002"), nextWeekday(2));
+        PendingActionView forManager = create(user("E10003"), nextWeekday(3));
 
         assertNotFound(() -> service.cancel(forUserB.actionId(), forUserB.confirmationNonce(),
                 null, "a-cancel-b", a));
@@ -112,24 +113,43 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
                 actions.find(forUserB.actionId()).orElseThrow().status());
 
         service.cancel(forUserB.actionId(), forUserB.confirmationNonce(), null,
-                "b-cancel", user("DEMO-002"));
+                "b-cancel", user("E10002"));
         assertEquals(ActionStatus.CANCELLED,
                 actions.find(forUserB.actionId()).orElseThrow().status());
     }
 
-    private PendingActionView create(DemoIdentity identity, LocalDate date) {
+    private PendingActionView create(VerifiedIdentity identity, LocalDate date) {
         return service.createPending(new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, date, date,
                 "identity isolation test", HalfDay.NONE), "origin", null, identity, null);
     }
 
-    private void confirm(PendingActionView pending, DemoIdentity identity) {
+    private void confirm(PendingActionView pending, VerifiedIdentity identity) {
         service.confirm(pending.actionId(), pending.confirmationNonce(),
                 UUID.randomUUID().toString(), null, "confirm", identity);
     }
 
-    private DemoIdentity user(String id) {
-        return identities.requireIdentity(id);
+    private VerifiedIdentity user(String id) {
+        String userId = switch (id) {
+            case "E10001" -> "U10001";
+            case "E10002" -> "U10002";
+            case "E10003" -> "U10003";
+            default -> throw new IllegalArgumentException("Unknown test identity");
+        };
+        String username = switch (id) {
+            case "E10001" -> "zhangsan";
+            case "E10002" -> "lisi";
+            case "E10003" -> "wangwu";
+            default -> throw new IllegalArgumentException("Unknown test identity");
+        };
+        String displayName = switch (id) {
+            case "E10001" -> "张三";
+            case "E10002" -> "李四";
+            case "E10003" -> "王五";
+            default -> throw new IllegalArgumentException("Unknown test identity");
+        };
+        return new VerifiedIdentity(userId, username, id, displayName,
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
     }
 
     private void assertOwner(PendingActionView view, String employeeId, String displayName) {
@@ -156,9 +176,9 @@ class DemoIdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     private void assertAllBalances(String a, String b, String manager) {
-        assertEquals(new BigDecimal(a), accounts.findBalance("DEMO-001").orElseThrow());
-        assertEquals(new BigDecimal(b), accounts.findBalance("DEMO-002").orElseThrow());
-        assertEquals(new BigDecimal(manager), accounts.findBalance("DEMO-MGR-001").orElseThrow());
+        assertEquals(new BigDecimal(a), accounts.findBalance("E10001").orElseThrow());
+        assertEquals(new BigDecimal(b), accounts.findBalance("E10002").orElseThrow());
+        assertEquals(new BigDecimal(manager), accounts.findBalance("E10003").orElseThrow());
     }
 
     private LocalDate nextWeekday(int offset) {

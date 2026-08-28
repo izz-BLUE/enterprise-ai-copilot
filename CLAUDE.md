@@ -169,7 +169,6 @@ Java 和 Python 都有并发限制：
 |------|------|--------|
 | `ADMIN_TOKEN` | 管理员 Token | 空 = Demo 模式 |
 | `BUSINESS_ACTIONS_ENABLED` | 启用业务动作 | false |
-| `DEMO_IDENTITY_ENABLED` | 启用演示身份 | false |
 | `SPRING_DATASOURCE_URL` | PostgreSQL URL | jdbc:postgresql://localhost:5432/enterprise_ai_copilot |
 
 ## 数据目录

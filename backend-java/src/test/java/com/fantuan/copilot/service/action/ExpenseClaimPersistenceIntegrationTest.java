@@ -1,6 +1,7 @@
 package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.PostgresIntegrationTestBase;
+import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.ExpenseActionProposal;
 import com.fantuan.copilot.dto.action.HitlResumePayload;
@@ -14,8 +15,6 @@ import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,13 +47,15 @@ import static org.mockito.Mockito.verify;
  * - concurrent duplicate：并发 confirm → 仅 1 笔 ExpenseClaim（source_action_id UNIQUE）
  */
 @SpringBootTest(properties = {
+        "demo.auth.enabled=true",
+        "demo.auth.default-password=test-password",
         "business.actions.enabled=true",
-        "business.actions.require-admin=false",
-        "demo.identity.enabled=true"
+        "business.actions.require-admin=false"
 })
 class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase {
-    private static final DemoIdentity USER_A = new DemoIdentity(
-            "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+    private static final VerifiedIdentity USER_A = new VerifiedIdentity(
+            "U10001", "zhangsan", "E10001", "张三",
+            AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
     private static final String CONV_EXPENSE_HITL = "conv-expense-hitl-test";
 
     @Autowired BusinessActionService actionService;
@@ -66,7 +67,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
     @Autowired ExpenseCalculationService calculation;
     @MockitoBean PythonAgentGateway pythonAgentGateway;
 
-    private static final VerifiedIdentity VERIFIED_USER_A = VerifiedIdentity.from(USER_A);
+    private static final VerifiedIdentity VERIFIED_USER_A = USER_A;
 
     @BeforeEach
     void resetDatabase() {
@@ -116,7 +117,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         assertEquals(ActionStatus.SUCCEEDED, resp.status());
         var claim = expenseClaims.findByExpenseId(resp.requestId()).orElseThrow();
         assertEquals(ExpenseStatus.SUBMITTED, claim.status());
-        assertEquals("DEMO-001", claim.employeeId());
+        assertEquals("E10001", claim.employeeId());
         assertEquals("TRIP-20260818-001", claim.tripId());
         assertEquals(0, claim.claimedAmount().compareTo(new BigDecimal("1830")));
         assertEquals(2, expenseClaims.findItemsByExpenseId(claim.expenseId()).size());

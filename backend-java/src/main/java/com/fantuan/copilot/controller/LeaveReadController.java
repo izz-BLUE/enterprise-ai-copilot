@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 只读内部接口：供 Python Agent (Python→Java 内部客户端) 调用。
  * 鉴权仅依赖 X-Internal-Token 与调用方在已认证请求链路上游解析后注入的 X-Employee-Id；
- * 不再依赖 DemoIdentityService / demo.identity.enabled —— 身份解析应发生在外部
+ * 身份解析发生在外部
  * 请求进入 Java 的第一跳(LangGraphAgentController)，内部接口仅消费可信 employeeId。
  */
 @RestController

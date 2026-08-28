@@ -28,7 +28,7 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 flowchart LR
     UI[React / API Client] --> J[Java Spring Boot :8080]
     J -->|/api/chat or /api/agent/langgraph/chat| P[Python FastAPI :8000]
-    J --> AUTH[JWT / Demo identity / Admin gate]
+    J --> AUTH[JWT DemoAuth / Admin gate]
     J --> DB[(PostgreSQL business DB)]
     P --> G{AGENT_LOOP_ENABLED}
     G -->|true: repository deployment default| PL[Planner-first Graph]

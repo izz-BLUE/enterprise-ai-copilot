@@ -4,6 +4,8 @@ import com.fantuan.copilot.PostgresIntegrationTestBase;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.auth.AuthRole;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
@@ -12,8 +14,6 @@ import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
@@ -42,13 +42,15 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = {
+        "demo.auth.enabled=true",
+        "demo.auth.default-password=test-password",
         "business.actions.enabled=true",
-        "business.actions.require-admin=false",
-        "demo.identity.enabled=true"
+        "business.actions.require-admin=false"
 })
 class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBase {
-    private static final DemoIdentity USER_A = new DemoIdentity(
-            "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
+    private static final VerifiedIdentity USER_A = new VerifiedIdentity(
+            "U10001", "zhangsan", "E10001", "张三",
+            AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
 
     @Autowired BusinessActionService actionService;
     TestActionService service;
@@ -70,7 +72,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
-        jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'DEMO-001'");
+        jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'E10001'");
         properties.setEnabled(true);
         properties.setRequireAdmin(false);
         properties.setMaxPending(100);
@@ -176,7 +178,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());
         assertEquals(0, requests.countBySourceActionId(pending.actionId()));
-        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -212,7 +214,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(first.requestId(), same.requestId());
         assertEquals(first.requestId(), different.requestId());
         assertEquals(1, requests.countBySourceActionId(pending.actionId()));
-        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -228,7 +230,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
                 expired.actionId(), expired.confirmationNonce(), UUID.randomUUID().toString(), null, "e1"));
         assertEquals("ACTION_EXPIRED", exception.errorCode());
         assertEquals(ActionStatus.EXPIRED, actions.find(expired.actionId()).orElseThrow().status());
-        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -247,7 +249,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
                 () -> service.confirm(pending.actionId(), pending.confirmationNonce(),
                         UUID.randomUUID().toString(), null, "processing")).errorCode());
         assertEquals(0, requests.countBySourceActionId(pending.actionId()));
-        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -258,7 +260,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(2, results.stream().map(ConnectionResult::result)
                 .filter(ActionExecutionResponse.class::isInstance).count());
         assertEquals(1, requests.countBySourceActionId(pending.actionId()));
-        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("E10001").orElseThrow());
         assertEquals(ActionStatus.SUCCEEDED,
                 actions.find(pending.actionId()).orElseThrow().status());
     }
@@ -274,7 +276,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(1, results.stream().filter(ActionExecutionResponse.class::isInstance).count());
         assertEquals(1, results.stream().filter("ACTION_STALE"::equals).count());
         assertEquals(1, requests.size());
-        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -297,7 +299,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertNull(row.get("request_id"));
         assertEquals(1, requests.size());
         assertEquals(0, requests.countBySourceActionId(stale.actionId()));
-        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -317,7 +319,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertNull(row.get("request_id"));
         assertNull(row.get("idempotency_key"));
         assertEquals(0, requests.countBySourceActionId(pending.actionId()));
-        assertEquals(new BigDecimal("5.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("5.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test
@@ -363,7 +365,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
                 UUID.randomUUID().toString(), null, "first-confirm");
         assertEquals(TaskStatus.COMPLETED,
                 memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
-        assertEquals(new BigDecimal("4.0"), accounts.findBalance("DEMO-001").orElseThrow());
+        assertEquals(new BigDecimal("4.0"), accounts.findBalance("E10001").orElseThrow());
     }
 
     @Test

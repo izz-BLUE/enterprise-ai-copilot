@@ -50,7 +50,7 @@ class ExpenseReadControllerTest {
     void statusMissingInternalTokenIsRejected() throws Exception {
         mockMvc.perform(get("/api/internal/expense/status")
                         .param("expenseId", "EXP-20260826-000001")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-no-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("EXPENSE_READ_FORBIDDEN"));
@@ -71,11 +71,11 @@ class ExpenseReadControllerTest {
     @Test
     void statusValidRequestReturnsJavaAuthority() throws Exception {
         when(claims.findByExpenseId("EXP-20260826-000001"))
-                .thenReturn(Optional.of(claim("EXP-20260826-000001", "DEMO-001")));
+                .thenReturn(Optional.of(claim("EXP-20260826-000001", "E10001")));
         mockMvc.perform(get("/api/internal/expense/status")
                         .param("expenseId", "EXP-20260826-000001")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-ok"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
@@ -89,11 +89,11 @@ class ExpenseReadControllerTest {
     void statusCrossEmployeeReadIs404() throws Exception {
         /* V2 §二十四：expense.employeeId != 可信 employeeId → 不能跨员工读取。 */
         when(claims.findByExpenseId("EXP-20260826-000001"))
-                .thenReturn(Optional.of(claim("EXP-20260826-000001", "DEMO-002")));
+                .thenReturn(Optional.of(claim("EXP-20260826-000001", "E10002")));
         mockMvc.perform(get("/api/internal/expense/status")
                         .param("expenseId", "EXP-20260826-000001")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-cross"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("EXPENSE_NOT_FOUND"));
@@ -105,7 +105,7 @@ class ExpenseReadControllerTest {
         mockMvc.perform(get("/api/internal/expense/status")
                         .param("expenseId", "EXP-NOT-EXIST")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-missing"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("EXPENSE_NOT_FOUND"));
@@ -113,14 +113,14 @@ class ExpenseReadControllerTest {
 
     @Test
     void recentValidRequestReturnsList() throws Exception {
-        when(claims.findRecentByEmployee("DEMO-001", 10))
-                .thenReturn(List.of(claim("EXP-20260826-000001", "DEMO-001")));
+        when(claims.findRecentByEmployee("E10001", 10))
+                .thenReturn(List.of(claim("EXP-20260826-000001", "E10001")));
         mockMvc.perform(get("/api/internal/expense/recent")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-recent"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.employeeId").value("DEMO-001"))
+                .andExpect(jsonPath("$.employeeId").value("E10001"))
                 .andExpect(jsonPath("$.total").value(1));
     }
 
@@ -135,7 +135,7 @@ class ExpenseReadControllerTest {
         mvc.perform(get("/api/internal/expense/status")
                         .param("expenseId", "EXP-20260826-000001")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-disabled"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.errorCode").value("EXPENSE_READ_DISABLED"));

@@ -5,7 +5,7 @@
 
 确定性优先：Planner 响应（planner_responses）与 Tool 结果（tool_stubs）
 全部注入，不依赖真实模型与网络。真实模型评估见
-scripts/eval/run_agent_benchmark.py。
+scripts/eval/run_agent_real_eval.py。
 """
 
 import json

@@ -47,7 +47,7 @@ ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 MEMORY_WRITE_MODE=DISABLED
 ```
 
-Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`BUSINESS_ACTIONS_ENABLED=true`、`DEMO_IDENTITY_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`，以及按需开启 `EXTERNAL_APPROVAL_RECONCILIATION_ENABLED` / `EXTERNAL_APPROVAL_RESUME_ENABLED`。功能默认关闭是安全基线，不是演示失败。
+Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`，以及按需开启 `EXTERNAL_APPROVAL_RECONCILIATION_ENABLED` / `EXTERNAL_APPROVAL_RESUME_ENABLED`。功能默认关闭是安全基线，不是演示失败。
 
 ## 3. Start services
 
@@ -209,4 +209,4 @@ Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只
 
 ## 8. Demo boundary
 
-演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、Mock OA、reconciliation、external resume retry 和 Memory write。不要在公开环境使用 `X-Demo-User-Id` 作为身份；不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。
+演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、Mock OA、reconciliation、external resume retry 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。

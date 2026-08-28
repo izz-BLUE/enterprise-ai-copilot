@@ -88,7 +88,7 @@ public class BusinessActionHitlCoordinator {
         validateWaitAndProposal(proposal, wait);
         try {
             PendingActionView view = actionService.createHitlPending(
-                    proposal, originTraceId, presentedToken, identity.asDemoIdentity(),
+                    proposal, originTraceId, presentedToken, identity,
                     conversationId, wait.executionId(), wait.waitId());
 
             // A Java commit may have succeeded before the HTTP response was lost.
@@ -107,7 +107,7 @@ public class BusinessActionHitlCoordinator {
                 // terminalization.  If it fails, keep the checkpoint waiting
                 // so a retry can perform Memory -> Graph in that order.
                 actionService.abandonMemoryAfterHitlRejection(
-                        identity.asDemoIdentity(), conversationId);
+                        identity, conversationId);
                 tryResumeRejected(wait, identity, conversationId,
                         presentedToken, originTraceId);
             }
@@ -132,7 +132,7 @@ public class BusinessActionHitlCoordinator {
                         presentedToken, traceId, identity);
                 ActionExecutionResponse response = actionService.confirm(
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
-                        traceId, identity.asDemoIdentity());
+                        traceId, identity);
                 guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
                         identity, presentedToken, traceId, guardKey);
                 return response;
@@ -184,7 +184,7 @@ public class BusinessActionHitlCoordinator {
             // The service locks and rechecks the action in a separate short
             // transaction.  It throws ActionStaleException after committing.
             actionService.failStaleConfirmation(actionId, confirmationNonce,
-                    presentedToken, traceId, identity.asDemoIdentity(), staleCode);
+                    presentedToken, traceId, identity, staleCode);
             // Keep compatibility with mocked services: a stale result must
             // never fall through to the normal execute path.
             throw new ActionStaleException(actionId);
@@ -213,7 +213,7 @@ public class BusinessActionHitlCoordinator {
             try {
                 ActionExecutionResponse response = actionService.cancel(
                         actionId, confirmationNonce, presentedToken, traceId,
-                        identity.asDemoIdentity());
+                        identity);
                 guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
                         identity, presentedToken, traceId, guardKey);
                 return response;
@@ -251,7 +251,7 @@ public class BusinessActionHitlCoordinator {
             throw new ActionException(HttpStatus.FORBIDDEN, "IDENTITY_REQUIRED",
                     "当前身份不可用。", null, null);
         }
-        actionService.authorizeForAction(presentedToken, identity.asDemoIdentity());
+        actionService.authorizeForAction(presentedToken, identity);
         PendingAction action = actions.find(actionId).orElseThrow(() -> new ActionException(
                 HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND", "未找到申请草稿。", null, null));
         if (action.ownerUserId() != null
