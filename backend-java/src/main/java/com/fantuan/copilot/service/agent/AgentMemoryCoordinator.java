@@ -49,4 +49,27 @@ public final class AgentMemoryCoordinator {
                     traceId, exception.getClass().getSimpleName());
         }
     }
+
+    public void persistForNextTask(AgentMemoryProposal proposal, String userId,
+                                   String conversationId, String traceId) {
+        if (proposal == null) {
+            return;
+        }
+        try {
+            memoryService.upsertActiveForNextTask(userId, conversationId,
+                    proposal.taskType(), proposal.taskState(), proposal.summary());
+        } catch (RuntimeException exception) {
+            log.warn("[{}] 下一 Task Memory proposal 持久化失败: type={}",
+                    traceId, exception.getClass().getSimpleName());
+        }
+    }
+
+    public void abandon(String userId, String conversationId, String traceId) {
+        try {
+            memoryService.abandon(userId, conversationId);
+        } catch (RuntimeException exception) {
+            log.warn("[{}] Task Memory 终态收口失败: type={}", traceId,
+                    exception.getClass().getSimpleName());
+        }
+    }
 }

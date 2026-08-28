@@ -72,6 +72,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     @BeforeEach
     void resetDatabase() {
         service = new TestActionService(actionService);
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
@@ -95,8 +96,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item；
         // P3-4 V8: durable HITL wait correlation; P3-5B1 V9: OA correlation columns/indexes;
         // P3-5B2b V10: last external approval check timestamp;
-        // P3-5B3 V11: external resume delivery markers.
-        assertEquals(11, migrations);
+        // P3-5B3 V11: external resume delivery markers; Phase 2 V12: Java Task Runtime.
+        assertEquals(12, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());

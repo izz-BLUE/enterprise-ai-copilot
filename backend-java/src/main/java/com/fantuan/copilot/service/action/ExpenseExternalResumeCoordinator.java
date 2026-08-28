@@ -14,8 +14,10 @@ import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
@@ -46,7 +48,9 @@ public class ExpenseExternalResumeCoordinator {
     private final TransactionOperations transactions;
     private final long retryIntervalMillis;
     private final Clock clock;
+    private final TaskRuntimeService taskRuntimeService;
 
+    @Autowired
     public ExpenseExternalResumeCoordinator(
             ExpenseClaimRepository claims,
             PendingActionRepository actions,
@@ -56,7 +60,8 @@ public class ExpenseExternalResumeCoordinator {
             AgentRuntimeThreadExecutionGuard threadGuard,
             TransactionOperations transactions,
             @Value("${external.approval.resume.retry-interval-ms:60000}") long retryIntervalMillis,
-            Clock clock) {
+            Clock clock,
+            TaskRuntimeService taskRuntimeService) {
         this.claims = claims;
         this.actions = actions;
         this.pythonAgentGateway = pythonAgentGateway;
@@ -66,6 +71,22 @@ public class ExpenseExternalResumeCoordinator {
         this.transactions = transactions;
         this.retryIntervalMillis = Math.max(1L, retryIntervalMillis);
         this.clock = clock;
+        this.taskRuntimeService = taskRuntimeService;
+    }
+
+    /** Compatibility constructor for focused unit tests. */
+    public ExpenseExternalResumeCoordinator(
+            ExpenseClaimRepository claims,
+            PendingActionRepository actions,
+            PythonAgentGateway pythonAgentGateway,
+            BusinessActionService actionService,
+            AgentRuntimeThreadIdService threadIdService,
+            AgentRuntimeThreadExecutionGuard threadGuard,
+            TransactionOperations transactions,
+            long retryIntervalMillis,
+            Clock clock) {
+        this(claims, actions, pythonAgentGateway, actionService, threadIdService,
+                threadGuard, transactions, retryIntervalMillis, clock, null);
     }
 
     /** Best-effort immediate or retry delivery for one local ExpenseClaim. */
@@ -79,6 +100,16 @@ public class ExpenseExternalResumeCoordinator {
                 return;
             }
             PendingAction action = actions.find(claim.sourceActionId()).orElse(null);
+            if (isTaskRuntimeClaim(claim)) {
+                if (claim.status() == ExpenseStatus.APPROVED
+                        || claim.status() == ExpenseStatus.REJECTED) {
+                    taskRuntimeService.markTerminalByAction(claim.sourceActionId(),
+                            claim.status() == ExpenseStatus.APPROVED
+                                    ? com.fantuan.copilot.model.task.TaskExecutionStatus.COMPLETED
+                                    : com.fantuan.copilot.model.task.TaskExecutionStatus.FAILED);
+                }
+                return;
+            }
             ExternalResumePayload payload = buildPayload(claim, action);
             if (payload == null) {
                 log.warn("EXTERNAL_RESUME_CORRELATION_CONFLICT expenseIdPrefix={}",
@@ -193,6 +224,11 @@ public class ExpenseExternalResumeCoordinator {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
+        return taskRuntimeService != null && claim != null
+                && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 
 }

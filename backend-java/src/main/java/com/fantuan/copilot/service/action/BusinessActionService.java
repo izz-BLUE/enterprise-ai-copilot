@@ -12,6 +12,9 @@ import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,8 +55,10 @@ public class BusinessActionService {
     private final AiTaskMemoryService memoryService;
     private final BusinessActionAuditLogger auditLogger;
     private final Clock clock;
+    private final TaskRuntimeService taskRuntimeService;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /** Compatibility constructor for focused tests that do not use Task Runtime. */
     public BusinessActionService(BusinessActionProperties properties,
                                  AdminAccessService adminAccessService,
                                  PendingActionRepository actions,
@@ -62,6 +67,20 @@ public class BusinessActionService {
                                  AiTaskMemoryService memoryService,
                                  AdminLogBuffer adminLogBuffer,
                                  Clock clock) {
+        this(properties, adminAccessService, actions, handlerRegistry, nonceService,
+                memoryService, adminLogBuffer, clock, null);
+    }
+
+    @Autowired
+    public BusinessActionService(BusinessActionProperties properties,
+                                 AdminAccessService adminAccessService,
+                                 PendingActionRepository actions,
+                                 BusinessActionHandlerRegistry handlerRegistry,
+                                 ActionNonceService nonceService,
+                                 AiTaskMemoryService memoryService,
+                                 AdminLogBuffer adminLogBuffer,
+                                 Clock clock,
+                                 TaskRuntimeService taskRuntimeService) {
         this.properties = properties;
         this.adminAccessService = adminAccessService;
         this.actions = actions;
@@ -70,6 +89,7 @@ public class BusinessActionService {
         this.memoryService = memoryService;
         this.auditLogger = new BusinessActionAuditLogger(adminLogBuffer);
         this.clock = clock;
+        this.taskRuntimeService = taskRuntimeService;
     }
 
     public LocalDate businessDate() { return LocalDate.now(clock); }
@@ -77,6 +97,19 @@ public class BusinessActionService {
     public boolean isAllowed(String presentedToken) {
         return properties.isEnabled()
                 && (!properties.isRequireAdmin() || adminAccessService.isAdmin(presentedToken));
+    }
+
+    /**
+     * Admission guard shared by legacy single actions and Task Runtime.
+     * The caller supplies only the trusted Java owner and resolved conversation.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasBlockingAction(String ownerUserId, String conversationId) {
+        if (ownerUserId == null || ownerUserId.isBlank()
+                || conversationId == null || conversationId.isBlank()) {
+            return false;
+        }
+        return actions.hasActiveByOwnerAndConversation(ownerUserId, conversationId);
     }
 
     /**
@@ -96,7 +129,7 @@ public class BusinessActionService {
                                            VerifiedIdentity identity,
                                            String conversationId) {
         return createPendingInternal(proposal, originTraceId, presentedToken, identity,
-                conversationId, null, null);
+                conversationId, null, null, null);
     }
 
     /**
@@ -111,8 +144,27 @@ public class BusinessActionService {
                                                 String conversationId,
                                                 String agentExecutionId,
                                                 String hitlWaitId) {
+        return createHitlPending(proposal, originTraceId, presentedToken, identity,
+                conversationId, agentExecutionId, hitlWaitId, null);
+    }
+
+    /**
+     * Task Runtime registration may coexist with the already-active action of
+     * the preceding task in the same conversation.  The task id is the
+     * trusted discriminator; legacy single-action callers keep the original
+     * one-active-action conversation rule.
+     */
+    @Transactional
+    public PendingActionView createHitlPending(BusinessActionProposal proposal,
+                                                String originTraceId,
+                                                String presentedToken,
+                                                VerifiedIdentity identity,
+                                                String conversationId,
+                                                String agentExecutionId,
+                                                String hitlWaitId,
+                                                String taskId) {
         return createPendingInternal(proposal, originTraceId, presentedToken, identity,
-                conversationId, agentExecutionId, hitlWaitId);
+                conversationId, agentExecutionId, hitlWaitId, taskId);
     }
 
     /** Preserve the service's authorization ordering before coordinator routing. */
@@ -166,13 +218,17 @@ public class BusinessActionService {
             audit(traceId == null ? action.originTraceId() : traceId, action,
                     ActionStatus.PENDING_CONFIRMATION, ActionStatus.EXPIRED,
                     "ACTION_EXPIRED", null, now);
+            synchronizeTaskRuntime(action, TaskExecutionStatus.EXPIRED);
             closeMemory(action, TaskStatus.ABANDONED);
             return actions.find(action.actionId());
         }
         // If the previous request committed EXPIRED but Python was
         // unavailable, retry the same authoritative continuation before
         // allowing a new request to inspect the checkpoint.
-        return actions.findLatestExpiredHitlByOwnerAndConversation(ownerUserId, conversationId);
+        Optional<PendingAction> expired = actions.findLatestExpiredHitlByOwnerAndConversation(
+                ownerUserId, conversationId);
+        expired.ifPresent(action -> synchronizeTaskRuntime(action, TaskExecutionStatus.EXPIRED));
+        return expired;
     }
 
     private PendingActionView createPendingInternal(BusinessActionProposal proposal,
@@ -181,7 +237,8 @@ public class BusinessActionService {
                                                      VerifiedIdentity identity,
                                                      String conversationId,
                                                      String agentExecutionId,
-                                                     String hitlWaitId) {
+                                                     String hitlWaitId,
+                                                     String taskId) {
         if (proposal == null) {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
                     "缺少 action_proposal。", null, null);
@@ -248,15 +305,16 @@ public class BusinessActionService {
         expired.forEach(action -> {
             audit(action.originTraceId(), action, ActionStatus.PENDING_CONFIRMATION,
                     ActionStatus.EXPIRED, "ACTION_EXPIRED", null, now);
+            synchronizeTaskRuntime(action, TaskExecutionStatus.EXPIRED);
             closeMemory(action, TaskStatus.ABANDONED);
         });
         if (actions.countActive() >= properties.getMaxPending()) {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
         }
-        // 同一会话至多一个活动动作：ai_task_memory 以 (user_id, conversation_id) 为唯一键，
-        // 多活动动作会互相终结对方的任务记忆（任一终态都会收口整条会话 Memory）。
-        // conversationId 为 null（无 Memory 关联的历史路径）时不做限制。
+        // 同一会话至多一个活动动作：Task Runtime 不能绕过这个 invariant；
+        // 正常 successor 创建时前序 action 已经 terminal。conversationId 为 null
+        //（无 Memory 关联的历史路径）时不做限制。
         if (conversationId != null && identity.userId() != null
                 && actions.hasActiveByOwnerAndConversation(identity.userId(), conversationId)) {
             throw new ActionException(HttpStatus.CONFLICT, "ACTION_CONVERSATION_IN_PROGRESS",
@@ -302,8 +360,18 @@ public class BusinessActionService {
         verifyNonce(action, confirmationNonce);
 
         if (action.status() == ActionStatus.SUCCEEDED) {
-            // 幂等重放：Memory 收口同样幂等（COMPLETED → COMPLETE 白名单内）
-            closeMemory(action, TaskStatus.COMPLETED);
+            if (isTaskRuntimeAction(action)) {
+                // Task Runtime replay 只验证当前 task 没有倒退；不能重新
+                // 关闭 conversation Memory，因为它可能已经属于 successor。
+                if (!taskRuntimeService.synchronizeReplayStatus(
+                        action.actionId(), taskStatusAfterConfirmation(action))) {
+                    throw new IllegalStateException("TaskExecution replay status conflict");
+                }
+            } else {
+                // Legacy 幂等重放：保持原有 Memory 收口语义。
+                synchronizeTaskRuntime(action, taskStatusAfterConfirmation(action));
+                closeMemory(action, TaskStatus.COMPLETED);
+            }
             return succeededResponse(action, traceId, true);
         }
         if (action.status() == ActionStatus.PROCESSING) {
@@ -335,6 +403,9 @@ public class BusinessActionService {
         actions.markSucceeded(action.actionId(), requestId, successMessage, now);
         audit(traceId, action, ActionStatus.PROCESSING, ActionStatus.SUCCEEDED,
                 "ACTION_SUCCEEDED", requestId, now);
+        // TaskExecution 与 PendingAction/业务表/Memory 必须在本事务内完成。
+        // Python resume 和后续任务启动由 coordinator 在 commit 后执行。
+        synchronizeTaskRuntime(action, taskStatusAfterConfirmation(action));
         // 动作最终成功：Memory 在同一事务内收口为 COMPLETED，不再注入后续 Planner
         closeMemory(action, TaskStatus.COMPLETED);
         return new ActionExecutionResponse(action.actionId(), action.actionType(),
@@ -366,9 +437,10 @@ public class BusinessActionService {
                     "当前状态不能拒绝确认。", action);
         }
         actions.markFailed(action.actionId(), failureCode, now);
-        audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.FAILED,
-                failureCode, null, now);
-        closeMemory(action, TaskStatus.ABANDONED);
+            audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.FAILED,
+                    failureCode, null, now);
+            synchronizeTaskRuntime(action, TaskExecutionStatus.FAILED);
+            closeMemory(action, TaskStatus.ABANDONED);
         throw new ActionStaleException(action.actionId());
     }
 
@@ -393,6 +465,7 @@ public class BusinessActionService {
         actions.markCancelled(action.actionId(), CANCELLED_MESSAGE, now);
         audit(traceId, action, ActionStatus.PENDING_CONFIRMATION, ActionStatus.CANCELLED,
                 "ACTION_CANCELLED", null, now);
+        synchronizeTaskRuntime(action, TaskExecutionStatus.CANCELLED);
         closeMemory(action, TaskStatus.ABANDONED);
         return new ActionExecutionResponse(action.actionId(), action.actionType(),
                 ActionStatus.CANCELLED, null, CANCELLED_MESSAGE, false, now,
@@ -418,6 +491,7 @@ public class BusinessActionService {
             actions.markExpired(action.actionId(), now);
             audit(action.originTraceId(), action, ActionStatus.PENDING_CONFIRMATION,
                     ActionStatus.EXPIRED, "ACTION_EXPIRED", null, now);
+            synchronizeTaskRuntime(action, TaskExecutionStatus.EXPIRED);
             closeMemory(action, TaskStatus.ABANDONED);
             throw new ActionExpiredAfterUpdateException(action.actionId());
         }
@@ -442,6 +516,25 @@ public class BusinessActionService {
         } else {
             memoryService.abandon(action.ownerUserId(), action.conversationId());
         }
+    }
+
+    private TaskExecutionStatus taskStatusAfterConfirmation(PendingAction action) {
+        return action.actionType() == BusinessActionType.EXPENSE_CLAIM
+                ? TaskExecutionStatus.WAITING_EXTERNAL : TaskExecutionStatus.COMPLETED;
+    }
+
+    private void synchronizeTaskRuntime(PendingAction action, TaskExecutionStatus target) {
+        if (taskRuntimeService == null || action == null) {
+            return;
+        }
+        if (!taskRuntimeService.synchronizeBusinessStatus(action.actionId(), target)) {
+            throw new IllegalStateException("TaskExecution business status transition conflict");
+        }
+    }
+
+    private boolean isTaskRuntimeAction(PendingAction action) {
+        return taskRuntimeService != null && action != null
+                && taskRuntimeService.findByActionId(action.actionId()).isPresent();
     }
 
     private void requireEnabledAndAdmin(String presentedToken) {

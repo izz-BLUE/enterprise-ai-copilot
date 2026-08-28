@@ -20,6 +20,12 @@ public class AgentRuntimeThreadIdService {
             "enterprise-ai-copilot:agent-runtime:v1".getBytes(StandardCharsets.UTF_8);
 
     public String generate(String trustedUserId, String resolvedConversationId) {
+        return generate(trustedUserId, resolvedConversationId, null);
+    }
+
+    /** Task Runtime namespace: one checkpoint thread per trusted task. */
+    public String generate(String trustedUserId, String resolvedConversationId,
+                           String taskId) {
         Objects.requireNonNull(trustedUserId, "trustedUserId 不能为空");
         Objects.requireNonNull(resolvedConversationId, "resolvedConversationId 不能为空");
         try {
@@ -29,6 +35,10 @@ public class AgentRuntimeThreadIdService {
             digest.update(trustedUserId.getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
             digest.update(resolvedConversationId.getBytes(StandardCharsets.UTF_8));
+            if (taskId != null) {
+                digest.update((byte) 0);
+                digest.update(taskId.getBytes(StandardCharsets.UTF_8));
+            }
             return "rt_" + HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 不可用", exception);

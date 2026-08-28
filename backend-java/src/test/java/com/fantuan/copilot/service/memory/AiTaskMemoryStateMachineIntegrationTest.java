@@ -140,6 +140,26 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     }
 
     @Test
+    void taskRuntimeNextTaskUsesExplicitTerminalReactivation() {
+        service.upsert(U1, CONV_A, "LEAVE_REQUEST", TaskStatus.ACTIVE,
+                "{\"task\":1}", "task one");
+        service.complete(U1, CONV_A);
+
+        assertThrows(MemoryWriteException.class, () ->
+                service.upsertActiveFromAgent(U1, CONV_A, "EXPENSE_CLAIM",
+                        java.util.Map.of("task", 2), "task two"),
+                "通用 Agent proposal 仍不能重新激活终态 Memory");
+
+        service.upsertActiveForNextTask(U1, CONV_A, "EXPENSE_CLAIM",
+                java.util.Map.of("task", 2), "task two");
+        AiTaskMemory next = service.find(U1, CONV_A).orElseThrow();
+        assertEquals(TaskStatus.ACTIVE, next.status());
+        assertEquals("EXPENSE_CLAIM", next.taskType());
+        assertEquals("{\"task\":2}", next.taskStateJson());
+        assertEquals("task two", next.summary());
+    }
+
+    @Test
     void completedCannotBeAbandoned() {
         service.upsert(U1, CONV_A, "GENERIC", TaskStatus.ACTIVE, "{}", "active");
         service.complete(U1, CONV_A);

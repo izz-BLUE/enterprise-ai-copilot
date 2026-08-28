@@ -68,6 +68,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
     @BeforeEach
     void resetDatabase() {
         reset(revalidationGateway, pythonAgentGateway);
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM expense_item");
         jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM ai_task_memory");

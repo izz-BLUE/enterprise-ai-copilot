@@ -102,11 +102,14 @@ Confirm 响应：
   "replayed": false,
   "completedAt": "2026-08-28T00:00:00Z",
   "originTraceId": "…",
-  "traceId": "…"
+  "traceId": "…",
+  "nextPendingAction": null
 }
 ```
 
 `type` 当前为 `ANNUAL_LEAVE_REQUEST` 或 `EXPENSE_CLAIM`；Action status 为 `PENDING_CONFIRMATION`、`PROCESSING`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`EXPIRED`。Confirm 的重复 UUID key 重放原结果；Action 不存在或 owner 不匹配统一收敛为安全的 not-found 语义。常见业务冲突为 409，revalidation 不可用为 503，系统错误为 5xx；响应不暴露 nonce digest、token 或内部异常。
+
+Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附带下一任务的 `nextPendingAction`。该字段仍是 Java PendingAction 视图；不存在时为 `null`。Task Runtime 的 Expense 确认会先让当前 Python task graph `END`，再由 Java 绑定 ExpenseClaim 的外部关联并提交 OA，不进入 Python `/agent/langgraph/external/resume`。
 
 ### Admin and demo endpoints
 
@@ -166,12 +169,13 @@ Python 不对公网提供业务入口；这些接口由 Java 或运行时内部�
 | `GET` | `/agent/ready` | Python readiness，含 Checkpoint availability | 不可用时非 2xx |
 | `GET` | `/agent/version` | build/version metadata | 200 |
 | `POST` | `/agent/chat` | Java → Python 稳定 RAG | `ChatResponse` |
+| `POST` | `/agent/tasks/decompose` | Java → Python 的无状态确定性双任务分解 | 只返回 `single`、`multi` 或 `unsupported`；不写 Checkpoint/业务状态 |
 | `POST` | `/agent/langgraph/chat` | Java → Python Agent | 200；busy 429；recovery conflict 409；checkpoint unavailable 503；运行失败 502 |
 | `POST` | `/agent/internal/expense/revalidate` | Java confirm-time 窄适配器 | 成功返回当前 trip/invoice facts；不可以时 fail-closed |
 | `POST` | `/agent/langgraph/hitl/resume` | Java-authoritative 用户确认恢复 | 只接受严格 HITL payload |
 | `POST` | `/agent/langgraph/external/resume` | Java-authoritative 外部审批恢复 | 只接受严格 external payload |
 
-内部 resume 请求使用 Java 注入的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Conversation-Id`、`X-Business-Date`、`X-Allow-Eval` 和 `X-Allow-Business-Actions`。Python 以 schema、latest checkpoint 和 correlation 再校验，不信任 payload 中可伪造的 owner/permission。
+内部 Agent 请求使用 Java 注入的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Conversation-Id`、`X-Business-Date`、`X-Allow-Eval` 和 `X-Allow-Business-Actions`。Task Runtime 另外使用 `X-Agent-Execution-Mode: TASK_RUNTIME` 与 Java 生成的 `X-Agent-Task-Id`；单业务兼容路径使用 `LEGACY_SINGLE`。Python 只把 execution mode 放在 trusted Runtime Context，LLM 和 AgentState 不能选择 external lifecycle。Python 以 schema、latest checkpoint 和 correlation 再校验，不信任 payload 中可伪造的 owner/permission。
 
 ### Confirm-time revalidation payload
 
@@ -233,6 +237,7 @@ Mock OA 不是浏览器 API，是独立模拟外部审批服务。
 - Java `/api/chat` 与 `/api/agent/langgraph/chat` 是浏览器/外部客户端的业务入口；Python 对应路由是内部 gateway contract。
 - `/api/internal/leave/**`、`/api/internal/expense/**` 是 Python read tools 的内部读取接口，不是公网业务 API。
 - `/agent/internal/expense/revalidate` 是 Java confirm-time adapter，不是前端验证接口。
+- `/agent/tasks/decompose` 是无状态、程序层确定性 decomposition；Java 校验 `task_text` 必须是原文有序连续 span，并负责 TaskExecution 生命周期。
 - `/api/webhooks/mock-oa/expense-approval` 是唯一 Mock OA webhook receiver；通知没有 status authority。
 - `WAITING_USER` 与 `WAITING_EXTERNAL` 使用不同的 Python resume endpoint；普通 chat 不跨 active wait。
 - 当前没有公开的 Java ExpenseClaim status 查询 API；Expense status read tool 使用上述 internal endpoint。

@@ -13,6 +13,7 @@ from app.agents.langgraph_agent import (
     resume_langgraph_agent,
     run_langgraph_agent,
 )
+from app.agents.runtime_context import ExecutionMode
 from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
 from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
@@ -63,9 +64,14 @@ from app.schemas.expense_revalidation_schema import (
 )
 from app.schemas.external_wait_schema import ExternalResumePayload
 from app.schemas.hitl_schema import HitlResumePayload
+from app.schemas.task_decomposition_schema import (
+    TaskDecompositionRequest,
+    TaskDecompositionResult,
+)
 from app.schemas.version_schema import VersionResponse
 from app.services.llm_service import call_llm
 from app.services.rag_service import process_chat
+from app.services.task_decomposition_service import decompose_write_tasks
 
 
 @asynccontextmanager
@@ -85,6 +91,7 @@ app = FastAPI(title='Agent Python Service', lifespan=lifespan)
 
 _BOUNDED_AI_PATHS = {
     '/agent/chat',
+    '/agent/tasks/decompose',
     '/agent/langgraph/chat',
     '/agent/langgraph/hitl/resume',
     '/agent/langgraph/external/resume',
@@ -152,6 +159,7 @@ def _build_memory_runtime_hook(
 def _busy_response(path: str, trace_id: str) -> JSONResponse:
     common_headers = {'X-Trace-Id': trace_id, 'Retry-After': '1'}
     if path in {
+        '/agent/tasks/decompose',
         '/agent/langgraph/chat',
         '/agent/langgraph/hitl/resume',
         '/agent/langgraph/external/resume',
@@ -174,6 +182,22 @@ def _busy_response(path: str, trace_id: str) -> JSONResponse:
             'success': False,
         }
     return JSONResponse(status_code=429, content=content, headers=common_headers)
+
+
+def _trusted_execution_mode(req: Request, trace_id: str,
+                            task_id: str | None) -> tuple[ExecutionMode | None, JSONResponse | None]:
+    raw = (req.headers.get('x-agent-execution-mode') or 'LEGACY_SINGLE').strip()
+    if raw not in ('LEGACY_SINGLE', 'TASK_RUNTIME'):
+        return None, _checkpoint_failure_response(trace_id, status_code=400)
+    if raw == 'TASK_RUNTIME' and (task_id is None or not task_id.strip()):
+        return None, _checkpoint_failure_response(trace_id, status_code=400)
+    return raw, None
+
+
+def _task_input_message(request: ChatRequest, execution_mode: ExecutionMode) -> str:
+    if execution_mode != 'TASK_RUNTIME' or not request.clarificationContext:
+        return request.message
+    return f'{request.message}\n补充信息：{request.clarificationContext}'
 
 
 @app.middleware('http')
@@ -410,14 +434,29 @@ def chat(request: ChatRequest, req: Request) -> ChatResponse | JSONResponse:
     return response
 
 
+@app.post('/agent/tasks/decompose', response_model=TaskDecompositionResult)
+def decompose_tasks(request: TaskDecompositionRequest, req: Request) -> TaskDecompositionResult:
+    """Stateless, deterministic decomposition; no checkpoint or lifecycle state."""
+    trace_id = req.state.trace_id
+    logger.info('[%s] 收到 Task decomposition 请求 (len=%d)', trace_id, len(request.message))
+    return decompose_write_tasks(request.message)
+
+
 @app.post('/agent/langgraph/chat', response_model=AgentResponse)
 def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONResponse:
     trace_id = req.state.trace_id
     logger.info('[%s] 收到 LangGraph Agent 请求 (len=%d)', trace_id, len(request.message))
 
-    if _validate_message_length(request.message, trace_id):
+    execution_mode, mode_error = _trusted_execution_mode(req, trace_id, request.taskId)
+    if mode_error is not None:
+        return mode_error
+    if execution_mode == 'TASK_RUNTIME' and LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
+        return _checkpoint_failure_response(trace_id, status_code=503)
+    task_message = _task_input_message(request, execution_mode)
+
+    if _validate_message_length(task_message, trace_id):
         logger.warning('[%s] 输入过长 (len=%d > %d)', trace_id,
-                       len(request.message), MAX_MESSAGE_LENGTH)
+                       len(task_message), MAX_MESSAGE_LENGTH)
         response = AgentResponse(
             answer='输入内容过长，请精简后重试。',
             route='error',
@@ -487,7 +526,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         recovery = checkpoint_runtime.inspect_recovery(
                             graph=graph,
                             thread_id=runtime_thread_id,
-                            question=request.message,
+                            question=task_message,
                             business_date=business_date,
                             employee_id=employee_id,
                             allow_eval=allow_eval,
@@ -576,7 +615,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         return _checkpoint_failure_response(trace_id, status_code=503)
 
                     result = run_langgraph_agent(
-                        request.message,
+                        task_message,
                         allow_eval=allow_eval,
                         allow_business_actions=allow_business_actions,
                         business_date=business_date,
@@ -587,6 +626,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         execution_history=execution_history,
                         graph=graph,
                         runtime_thread_id=runtime_thread_id,
+                        execution_mode=execution_mode,
                     )
             finally:
                 # Memory Pipeline 在 guard 外运行；它不是 Checkpoint 的写入步骤。
@@ -601,7 +641,9 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                 'use_planner': AGENT_LOOP_ENABLED,
                 'memory_context': memory_context,
             }
-            result = run_langgraph_agent(request.message, **agent_kwargs)
+            if execution_mode == 'TASK_RUNTIME':
+                agent_kwargs['execution_mode'] = execution_mode
+            result = run_langgraph_agent(task_message, **agent_kwargs)
 
         # Memory 提案是出口层旁路；任何 Pipeline 失败都不得阻断主响应。
         # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
@@ -663,6 +705,10 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
     Unlike normal chat, this path never runs the Memory proposal pipeline.
     """
     trace_id = req.state.trace_id
+    execution_mode, mode_error = _trusted_execution_mode(
+        req, trace_id, req.headers.get('x-agent-task-id'))
+    if mode_error is not None:
+        return mode_error
     if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
         return _checkpoint_failure_response(trace_id, status_code=503)
 
@@ -715,6 +761,7 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
                 business_date=business_date,
                 trace_id=trace_id,
                 employee_id=employee_id,
+                execution_mode=execution_mode,
             )
         elif decision.mode is RecoveryMode.HITL_CONTINUATION:
             # Approval has already been checkpointed; only deterministic
@@ -727,6 +774,7 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
                 business_date=business_date,
                 trace_id=trace_id,
                 employee_id=employee_id,
+                execution_mode=execution_mode,
             )
         elif decision.mode is RecoveryMode.HITL_COMPLETED:
             snapshot = graph.get_state(
@@ -780,6 +828,12 @@ def langgraph_external_resume(
 ) -> AgentResponse | JSONResponse:
     """Resume one durable external expense approval with Java authority."""
     trace_id = req.state.trace_id
+    execution_mode, mode_error = _trusted_execution_mode(
+        req, trace_id, req.headers.get('x-agent-task-id'))
+    if mode_error is not None:
+        return mode_error
+    if execution_mode == 'TASK_RUNTIME':
+        return _external_resume_conflict_response(trace_id)
     if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
         return _checkpoint_failure_response(trace_id, status_code=503)
 
@@ -831,6 +885,7 @@ def langgraph_external_resume(
                 business_date=business_date,
                 trace_id=trace_id,
                 employee_id=employee_id,
+                execution_mode=execution_mode,
             )
         elif decision.mode is RecoveryMode.EXTERNAL_CONTINUATION:
             result = resume_langgraph_agent(
@@ -841,6 +896,7 @@ def langgraph_external_resume(
                 business_date=business_date,
                 trace_id=trace_id,
                 employee_id=employee_id,
+                execution_mode=execution_mode,
             )
         elif decision.mode is RecoveryMode.EXTERNAL_COMPLETED:
             snapshot = graph.get_state(

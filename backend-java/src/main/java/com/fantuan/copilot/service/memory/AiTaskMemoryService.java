@@ -140,6 +140,31 @@ public class AiTaskMemoryService {
     }
 
     /**
+     * Java Task Runtime 专用的下一 task Memory 入口。
+     * 普通 Agent proposal 仍禁止终态重新激活；这里只有在前一 task 已由
+     * Java terminal authority 收口后，才把同一 conversation 的新 task
+     * 上下文置为 ACTIVE。Memory 仍不是 TaskExecution 的状态权威。
+     */
+    public void upsertActiveForNextTask(String userId, String conversationId,
+                                        String taskType, Map<String, Object> taskState,
+                                        String summary) {
+        requireOwner("userId", userId);
+        requireOwner("conversationId", conversationId);
+        String safeTaskType = sanitizeTaskType(taskType);
+        Map<String, Object> sanitizedState = sanitizeTaskStateMap(taskState);
+        String safeJson = serializeTaskState(sanitizedState);
+        String safeSummary = sanitizeSummary(summary);
+        if (repository.reactivateTerminalForNextTask(userId, conversationId,
+                safeTaskType, safeJson, safeSummary)) {
+            return;
+        }
+        if (!repository.upsert(userId, conversationId, safeTaskType,
+                TaskStatus.ACTIVE, safeJson, safeSummary)) {
+            throw stateConflict(userId, conversationId, TaskStatus.ACTIVE);
+        }
+    }
+
+    /**
      * 便捷 upsert：默认值填充，用于 P0 阶段绝大多数"先存一个空记录"的入口。
      */
     public void upsert(String userId, String conversationId) {

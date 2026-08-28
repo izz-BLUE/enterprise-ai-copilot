@@ -25,8 +25,16 @@ public record InternalAgentChatRequest(
         @Size(max = 2000, message = "message 长度不能超过 2000 字符")
         String message,
 
-        MemoryContextView memoryContext
+        MemoryContextView memoryContext,
+
+        String taskId,
+
+        String clarificationContext
 ) {
+
+    public InternalAgentChatRequest(String message, MemoryContextView memoryContext) {
+        this(message, memoryContext, null, null);
+    }
 
     /**
      * Memory 视图（内部接口用）。大小上限与 ai_task_memory 表 CHECK 约束对齐：

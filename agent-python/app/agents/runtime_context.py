@@ -6,7 +6,9 @@ snapshot as trusted input.
 """
 
 from datetime import date
-from typing import TypedDict
+from typing import Literal, TypedDict
+
+ExecutionMode = Literal['LEGACY_SINGLE', 'TASK_RUNTIME']
 
 
 class AgentRuntimeContext(TypedDict):
@@ -18,3 +20,4 @@ class AgentRuntimeContext(TypedDict):
     business_date: date | None
     trace_id: str
     deadline_monotonic: float
+    execution_mode: ExecutionMode

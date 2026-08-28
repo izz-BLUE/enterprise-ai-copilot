@@ -14,9 +14,29 @@ public record ActionExecutionResponse(
         boolean replayed,
         Instant completedAt,
         String originTraceId,
-        String traceId) {
+        String traceId,
+        PendingActionView nextPendingAction) {
+    /** Compatibility constructor for the single-action response contract. */
+    public ActionExecutionResponse(String actionId,
+                                   BusinessActionType type,
+                                   ActionStatus status,
+                                   String requestId,
+                                   String message,
+                                   boolean replayed,
+                                   Instant completedAt,
+                                   String originTraceId,
+                                   String traceId) {
+        this(actionId, type, status, requestId, message, replayed, completedAt,
+                originTraceId, traceId, null);
+    }
+
     public ActionExecutionResponse replayedFor(String currentTraceId) {
         return new ActionExecutionResponse(actionId, type, status, requestId, message, true,
-                completedAt, originTraceId, currentTraceId);
+                completedAt, originTraceId, currentTraceId, nextPendingAction);
+    }
+
+    public ActionExecutionResponse withNextPendingAction(PendingActionView nextAction) {
+        return new ActionExecutionResponse(actionId, type, status, requestId, message, replayed,
+                completedAt, originTraceId, traceId, nextAction);
     }
 }

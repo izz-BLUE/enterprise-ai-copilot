@@ -96,6 +96,26 @@ public class JdbcAiTaskMemoryRepository implements AiTaskMemoryRepository {
         return affected > 0;
     }
 
+    @Override
+    public boolean reactivateTerminalForNextTask(String userId, String conversationId,
+                                                 String taskType, String taskStateJson,
+                                                 String summary) {
+        int affected = jdbc.update("""
+                UPDATE ai_task_memory
+                SET task_type = :taskType, status = 'ACTIVE',
+                    task_state_json = :taskStateJson, summary = :summary,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = :userId AND conversation_id = :conversationId
+                  AND status IN ('COMPLETED', 'ABANDONED')
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("conversationId", conversationId)
+                .addValue("taskType", taskType)
+                .addValue("taskStateJson", taskStateJson)
+                .addValue("summary", summary));
+        return affected == 1;
+    }
+
     /** 状态机合法来源集合：目标状态可从哪些现有状态转换而来。 */
     private static List<String> allowedFrom(TaskStatus target) {
         return switch (target) {

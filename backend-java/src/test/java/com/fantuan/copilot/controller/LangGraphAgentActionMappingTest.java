@@ -8,6 +8,7 @@ import com.fantuan.copilot.dto.AgentChatResponse;
 import com.fantuan.copilot.dto.ChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
@@ -15,10 +16,18 @@ import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.ActionStatus;
+import com.fantuan.copilot.model.task.TaskExecution;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.ActionException;
+import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
+import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,8 +40,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -300,4 +311,183 @@ class LangGraphAgentActionMappingTest {
             SecurityContextHolder.clearContext();
         }
     }
+
+    @Test
+    void taskRuntimeWaitingUserPersistsMemoryAfterAtomicActionLink() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        AgentRuntimeThreadIdService threadIds = mock(AgentRuntimeThreadIdService.class);
+        AgentRuntimeThreadExecutionGuard guard = mock(AgentRuntimeThreadExecutionGuard.class);
+        BusinessActionHitlCoordinator hitl = mock(BusinessActionHitlCoordinator.class);
+        TaskRuntimeService runtime = mock(TaskRuntimeService.class);
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution task = new TaskExecution("group-1", "task-1", identity.userId(),
+                "conv-1", 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 1), "私事", HalfDay.NONE);
+        HitlWaitMarker wait = new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + "b".repeat(64), "ex_" + "a".repeat(32),
+                BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        PendingActionView pending = new PendingActionView("act-1",
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, ActionStatus.PENDING_CONFIRMATION,
+                "请假", null, "nonce", Instant.now(), true);
+        AgentMemoryProposal memory = new AgentMemoryProposal(
+                "LEAVE_REQUEST", Map.of("waiting_for", "confirmation"), "等待确认");
+
+        when(identityContext.require(any())).thenReturn(identity);
+        when(admin.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
+        when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
+                .thenReturn("task-thread");
+        when(guard.tryAcquire("conversation-thread")).thenReturn(true);
+        when(hitl.reconcileExpiredBeforeChat("trace", "admin", identity, "conv-1"))
+                .thenReturn(true);
+        when(runtime.reconcile(identity.userId(), "conv-1")).thenReturn(Optional.of(task));
+        when(memoryService.find(identity.userId(), "conv-1")).thenReturn(Optional.empty());
+        when(gateway.post(eq("/agent/langgraph/chat"), any(), any(),
+                eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
+                new PythonAgentResponse("请确认", "action", true, "business_action", "",
+                        List.of(), true, "trace", proposal, List.of(), memory, wait, null));
+        when(runtime.matchesTaskType(task, TaskType.LEAVE_REQUEST)).thenReturn(true);
+        when(hitl.registerWait(eq(proposal), eq(wait), eq("trace"), eq("admin"),
+                eq(identity), eq("conv-1"), eq("task-1"))).thenReturn(pending);
+        when(runtime.markWaitingUser("task-1", "act-1")).thenReturn(true);
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, admin, actionService, identityContext, memoryService,
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("trace");
+        when(request.getHeader("X-Admin-Token")).thenReturn("admin");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("request", "conv-1"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        var order = inOrder(runtime, memoryService);
+        order.verify(runtime).markWaitingUser("task-1", "act-1");
+        order.verify(memoryService).upsertActiveFromAgent(identity.userId(), "conv-1",
+                "LEAVE_REQUEST", Map.of("waiting_for", "confirmation"), "等待确认");
+    }
+
+    @Test
+    void taskRuntimeClarificationPersistsMemoryAfterWaitingState() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        AgentRuntimeThreadIdService threadIds = mock(AgentRuntimeThreadIdService.class);
+        AgentRuntimeThreadExecutionGuard guard = mock(AgentRuntimeThreadExecutionGuard.class);
+        TaskRuntimeService runtime = mock(TaskRuntimeService.class);
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution task = new TaskExecution("group-1", "task-1", identity.userId(),
+                "conv-1", 1, TaskType.EXPENSE_CLAIM, "报销", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AgentMemoryProposal memory = new AgentMemoryProposal(
+                "EXPENSE_CLAIM", Map.of("waiting_for", "invoice"), "等待补充发票");
+
+        when(identityContext.require(any())).thenReturn(identity);
+        when(admin.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
+        when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
+                .thenReturn("task-thread");
+        when(guard.tryAcquire("conversation-thread")).thenReturn(true);
+        when(runtime.reconcile(identity.userId(), "conv-1")).thenReturn(Optional.of(task));
+        when(memoryService.find(identity.userId(), "conv-1")).thenReturn(Optional.empty());
+        when(gateway.post(eq("/agent/langgraph/chat"), any(), any(),
+                eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
+                new PythonAgentResponse("请补充发票", "action", true, "business_action", "",
+                        List.of(), true, "trace", null, List.of("invoice"), memory));
+        when(runtime.markWaitingClarification("task-1")).thenReturn(true);
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, admin, actionService, identityContext, memoryService,
+                new AdminLogBuffer(), threadIds, guard, null, runtime);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("trace");
+        when(request.getHeader("X-Admin-Token")).thenReturn("admin");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("request", "conv-1"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(runtime).markWaitingClarification("task-1");
+        verify(memoryService).upsertActiveFromAgent(identity.userId(), "conv-1",
+                "EXPENSE_CLAIM", Map.of("waiting_for", "invoice"), "等待补充发票");
+    }
+
+    @Test
+    void taskRuntimeFailureAbandonsMemoryBeforeSuccessorContinuation() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        AgentRuntimeThreadIdService threadIds = mock(AgentRuntimeThreadIdService.class);
+        AgentRuntimeThreadExecutionGuard guard = mock(AgentRuntimeThreadExecutionGuard.class);
+        BusinessActionHitlCoordinator hitl = mock(BusinessActionHitlCoordinator.class);
+        TaskRuntimeService runtime = mock(TaskRuntimeService.class);
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution task = new TaskExecution("group-1", "task-1", identity.userId(),
+                "conv-1", 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AgentMemoryProposal staleMemory = new AgentMemoryProposal(
+                "LEAVE_REQUEST", Map.of("step", "failed"), "旧任务结果");
+
+        when(identityContext.require(any())).thenReturn(identity);
+        when(admin.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
+        when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
+                .thenReturn("task-thread");
+        when(guard.tryAcquire("conversation-thread")).thenReturn(true);
+        when(hitl.reconcileExpiredBeforeChat("trace", "admin", identity, "conv-1"))
+                .thenReturn(true);
+        when(runtime.reconcile(identity.userId(), "conv-1")).thenReturn(Optional.of(task));
+        when(memoryService.find(identity.userId(), "conv-1")).thenReturn(Optional.empty());
+        when(gateway.post(eq("/agent/langgraph/chat"), any(), any(),
+                eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
+                new PythonAgentResponse("无法继续", "action", true, "business_action", "",
+                        List.of(), true, "trace", null, List.of(), staleMemory));
+        when(runtime.markTerminal("task-1", TaskExecutionStatus.FAILED)).thenReturn(true);
+        when(hitl.startNextTaskAfterTerminal(task, identity, "admin", "trace"))
+                .thenReturn(null);
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, admin, actionService, identityContext, memoryService,
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("trace");
+        when(request.getHeader("X-Admin-Token")).thenReturn("admin");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("request", "conv-1"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(memoryService).abandon(identity.userId(), "conv-1");
+        verify(memoryService, never()).upsertActiveFromAgent(
+                anyString(), anyString(), any(), any(), anyString());
+        var order = inOrder(runtime, memoryService, hitl);
+        order.verify(runtime).markTerminal("task-1", TaskExecutionStatus.FAILED);
+        order.verify(memoryService).abandon(identity.userId(), "conv-1");
+        order.verify(hitl).startNextTaskAfterTerminal(task, identity, "admin", "trace");
+    }
+
 }
