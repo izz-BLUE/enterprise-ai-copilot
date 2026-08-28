@@ -8,7 +8,10 @@ Proposal 业务字段。
 第一版使用规则抽取（与 annual_leave_input_service 一致的确定性风格），
 不调用 LLM：
 - 从 question 提取"报销/报账"业务词命中（意图判定）
-- 从成功 travel_record observation 中按用户显式提到的目的地 / trip_id 匹配 trip
+- 从成功 travel_record observation 中按显式 trip_id / 目的地匹配 trip
+- 支持主 Demo 的确定性相对语义："最近/最新 + 已批准"选择最新 APPROVED trip
+- "对应发票/相关发票"只从已选 trip 的 expense_documents 推导，并仍要求
+  invoice_verify 成功，不能绕过验真事实
 - 缺 trip_id 或发票明细时返回固定顺序 missing_fields（V2 §十五）
 """
 
@@ -30,6 +33,15 @@ _QUERY_NOISE_EXPRESSIONS = (
 )
 
 _TRIP_ID_PATTERN = re.compile(r"TRIP-[0-9A-Za-z-]+")
+
+# 相对选择只在用户同时表达“最近/最新”和“已批准/已通过”时生效，避免把
+# “最近出差”误选成仍处于 PENDING 的记录。
+_LATEST_TRIP_EXPRESSIONS = ("最近一次", "最近的", "最近", "最新一次", "最新的", "最新")
+_APPROVED_TRIP_EXPRESSIONS = ("已批准", "批准的", "已通过", "通过的", "approved")
+_CORRESPONDING_INVOICE_EXPRESSIONS = (
+    "对应发票", "对应的发票", "相关发票", "相关的发票", "对应费用", "对应的费用",
+    "全部发票", "所有发票", "全部费用", "所有费用",
+)
 
 
 class ExpenseInputError(ValueError):
@@ -57,7 +69,7 @@ def is_expense_claim_intent(question: str) -> bool:
 
 
 def extract_trip_reference(question: str) -> str | None:
-    """从问题里抽取 trip_id 引用；没有显式 trip_id 时返回 None（走 Clarification）。"""
+    """从问题里抽取 trip_id 引用；没有显式 trip_id 时返回 None。"""
     match = _TRIP_ID_PATTERN.search(question)
     return match.group(0) if match else None
 
@@ -116,6 +128,37 @@ class ExpenseProposalContextLike:
         return str(getattr(self._value, "policy_context", "") or "")
 
 
+def _wants_latest_approved_trip(question: str) -> bool:
+    lowered = question.lower()
+    return (
+        any(expression in lowered for expression in _LATEST_TRIP_EXPRESSIONS)
+        and any(expression in lowered for expression in _APPROVED_TRIP_EXPRESSIONS)
+    )
+
+
+def _latest_approved_trip(trips: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """从已过滤为 APPROVED 的 trips 中确定性选择最新记录。
+
+    fixture/业务接口日期均为 ISO-8601 YYYY-MM-DD，因此字符串排序与日期排序一致。
+    先按 end_date，再按 start_date、trip_id 做稳定 tie-break；缺字段按空字符串处理。
+    """
+    if not trips:
+        return None
+    return max(
+        trips,
+        key=lambda trip: (
+            str(trip.get("end_date") or ""),
+            str(trip.get("start_date") or ""),
+            str(trip.get("trip_id") or ""),
+        ),
+    )
+
+
+def _wants_corresponding_invoices(question: str) -> bool:
+    lowered = question.lower()
+    return any(expression in lowered for expression in _CORRESPONDING_INVOICE_EXPRESSIONS)
+
+
 def analyze_expense_input(
     question: str,
     *,
@@ -130,7 +173,16 @@ def analyze_expense_input(
     trips = find_trip_records(context)
     verified_invoices = find_invoice_records(context)
 
-    # 用户未显式给 trip_id 但问题含目的地：从 APPROVED trips 按目的地匹配（确定性）
+    # 用户未显式给 trip_id 时，先处理项目主 Demo 的相对选择语义：
+    # “最近/最新 + 已批准/已通过”只会从 APPROVED 集合选最新，绝不会选 PENDING。
+    if trip_id is None and _wants_latest_approved_trip(normalized):
+        latest_trip = _latest_approved_trip(trips)
+        if latest_trip is not None:
+            candidate = latest_trip.get("trip_id")
+            if isinstance(candidate, str) and candidate:
+                trip_id = candidate
+
+    # 仍未确定 trip 时，再按用户显式目的地匹配 APPROVED trip（保持旧行为）。
     if trip_id is None:
         for trip in trips:
             destination = trip.get("destination", "")
@@ -138,29 +190,40 @@ def analyze_expense_input(
                 trip_id = trip.get("trip_id")
                 break
 
-    # 确定 trip 后：如果用户未显式给 INV 引用，从 trip 的 expense_documents 按
-    # 用户提到的类别（酒店/打车/高铁等）确定性匹配。
+    # 确定 trip 后：
+    # 1. 用户显式给 INV → 原样保留，后续必须通过 verified_invoices 检查；
+    # 2. 用户说“对应/相关/全部发票” → 取该 trip 的全部 expense_documents；
+    # 3. 否则保持旧规则，按用户提到的费用类别匹配。
     if invoice_ids:
-        # 只保留用户显式提到的发票（必须已验真，否则走 Clarification）
-        user_invoice_ids = [inv_id for inv_id in invoice_ids]
-        invoice_ids = user_invoice_ids
+        invoice_ids = list(invoice_ids)
     elif trip_id is not None:
         matched_trip = next((trip for trip in trips if trip.get("trip_id") == trip_id), None)
         if matched_trip:
             docs = matched_trip.get("expense_documents", []) or []
-            implied_invoice_ids = [
-                doc.get("invoice_id")
-                for doc in docs
-                if doc.get("invoice_id") and _category_match(doc, normalized)
-            ]
+            if _wants_corresponding_invoices(normalized):
+                implied_invoice_ids = [
+                    doc.get("invoice_id")
+                    for doc in docs
+                    if doc.get("invoice_id")
+                ]
+            else:
+                implied_invoice_ids = [
+                    doc.get("invoice_id")
+                    for doc in docs
+                    if doc.get("invoice_id") and _category_match(doc, normalized)
+                ]
             invoice_ids = [inv_id for inv_id in implied_invoice_ids if inv_id]
 
     missing_fields: list[Literal["trip_id", "expense_items", "invoice_ids"]] = []
     if trip_id is None:
         missing_fields.append("trip_id")
-    # 存在性判定：声明的发票必须已在 context 中验真成功
-    if set(invoice_ids) and not set(invoice_ids).issubset(
-            {inv.get("invoice_id") for inv in verified_invoices}):
+
+    # 所有自然语言推导出的 invoice_ids 仍必须已经由 invoice_verify_tool 成功验真；
+    # 相对选择/“对应发票”仅用于选择，不提升任何业务事实可信度。
+    verified_invoice_ids = {
+        inv.get("invoice_id") for inv in verified_invoices if inv.get("invoice_id")
+    }
+    if set(invoice_ids) and not set(invoice_ids).issubset(verified_invoice_ids):
         missing_fields.append("invoice_ids")
     elif not invoice_ids:
         missing_fields.append("invoice_ids")
