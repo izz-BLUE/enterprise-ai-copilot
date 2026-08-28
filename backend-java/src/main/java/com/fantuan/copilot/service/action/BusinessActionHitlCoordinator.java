@@ -78,6 +78,32 @@ public class BusinessActionHitlCoordinator {
                 adminAccessService, externalApprovalCoordinator, null);
     }
 
+    /**
+     * Reconcile an expired approval before ordinary Chat reaches Python.
+     * The caller must already own the Java runtime-thread guard for the
+     * resolved (user, conversation) thread; this method never acquires or
+     * releases that guard around the resume and the following Chat call.
+     */
+    public boolean reconcileExpiredBeforeChat(String traceId, String presentedToken,
+                                              VerifiedIdentity identity,
+                                              String conversationId) {
+        if (identity == null || identity.userId() == null || identity.userId().isBlank()
+                || conversationId == null || conversationId.isBlank()) {
+            return true;
+        }
+        Optional<PendingAction> expired = actionService.reconcileExpiredForChat(
+                identity.userId(), conversationId, traceId);
+        if (expired == null || expired.isEmpty()) {
+            return true;
+        }
+        PendingAction action = expired.get();
+        if (action.hitlWaitId() == null || action.agentExecutionId() == null
+                || action.ownerUserId() == null || action.conversationId() == null) {
+            return true;
+        }
+        return tryResume(action, identity, presentedToken, traceId);
+    }
+
     /** Register the wait after Python has durably checkpointed the interrupt. */
     public PendingActionView registerWait(BusinessActionProposal proposal,
                                           HitlWaitMarker wait,
@@ -375,8 +401,8 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    private void tryResume(PendingAction action, VerifiedIdentity identity,
-                           String presentedToken, String traceId) {
+    private boolean tryResume(PendingAction action, VerifiedIdentity identity,
+                              String presentedToken, String traceId) {
         HitlResumePayload.HitlDecision decision = switch (action.status()) {
             case SUCCEEDED -> HitlResumePayload.HitlDecision.CONFIRMED;
             case CANCELLED -> HitlResumePayload.HitlDecision.CANCELLED;
@@ -385,25 +411,26 @@ public class BusinessActionHitlCoordinator {
             default -> null;
         };
         if (decision == null) {
-            return;
+            return true;
         }
         ActionStatus status = action.status();
-        tryResume(action, identity, presentedToken, traceId,
+        return tryResume(action, identity, presentedToken, traceId,
                 new HitlResumePayload(1, action.hitlWaitId(), action.agentExecutionId(),
                         decision, action.actionId(), action.actionType(), status,
                         action.requestId(), canonicalMessage(action, status, null)));
     }
 
-    private void tryResume(PendingAction action, VerifiedIdentity identity,
-                           String presentedToken, String traceId,
-                           HitlResumePayload payload) {
+    private boolean tryResume(PendingAction action, VerifiedIdentity identity,
+                               String presentedToken, String traceId,
+                               HitlResumePayload payload) {
         try {
-            postResume(action.ownerUserId(), identity.employeeId(), action.conversationId(),
-                    presentedToken, traceId, payload);
+            return postResume(action.ownerUserId(), identity.employeeId(), action.conversationId(),
+                    presentedToken, traceId, payload) != null;
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(action.actionId()),
                     exception.getClass().getSimpleName());
+            return false;
         }
     }
 

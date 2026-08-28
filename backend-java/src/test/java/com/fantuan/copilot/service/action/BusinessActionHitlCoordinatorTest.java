@@ -95,6 +95,50 @@ class BusinessActionHitlCoordinatorTest {
     }
 
     @Test
+    void unexpiredOrMissingChatActionDoesNotResumePythonCheckpoint() {
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-trace"))
+                .thenReturn(Optional.empty());
+
+        assertTrue(coordinator.reconcileExpiredBeforeChat(
+                "chat-trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        verify(actionService).reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-trace");
+        verifyNoInteractions(pythonAgentGateway);
+    }
+
+    @Test
+    void expiredChatActionUsesExistingExpiredResumeWithoutTakingGuardAgain() {
+        when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
+                .thenReturn(RUNTIME_THREAD_ID);
+        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(false);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        PendingAction expired = terminalAction(ActionStatus.EXPIRED);
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-expired"))
+                .thenReturn(Optional.of(expired));
+        doReturn(new PythonAgentResponse("expired", "action", true, "business_action", "",
+                List.of(), true, "resume-trace", null, List.of(), null))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-expired"));
+
+        assertTrue(coordinator.reconcileExpiredBeforeChat(
+                "chat-expired", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        ArgumentCaptor<HitlResumePayload> payload = ArgumentCaptor.forClass(HitlResumePayload.class);
+        verify(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), payload.capture(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-expired"));
+        assertEquals(HitlResumePayload.HitlDecision.EXPIRED, payload.getValue().decision());
+        assertEquals(ActionStatus.EXPIRED, payload.getValue().actionStatus());
+        assertEquals(ACTION_ID, payload.getValue().actionId());
+        assertEquals("该申请草稿已过期，请重新生成。", payload.getValue().message());
+        verify(threadGuard, never()).tryAcquire(anyString());
+        verify(threadGuard, never()).release(anyString());
+    }
+
+    @Test
     void confirmCommitsJavaActionBeforeBestEffortPythonResume() {
         stubResumeDependencies();
         PendingAction pending = pendingAction();

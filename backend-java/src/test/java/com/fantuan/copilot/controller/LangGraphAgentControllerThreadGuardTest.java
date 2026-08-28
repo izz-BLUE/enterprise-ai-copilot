@@ -12,14 +12,20 @@ import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.gateway.python.PythonAgentTransportException;
 import com.fantuan.copilot.identity.IdentityContext;
 import com.fantuan.copilot.identity.VerifiedIdentity;
+import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.repository.action.PendingActionRepository;
+import com.fantuan.copilot.service.action.ExpenseExternalApprovalCoordinator;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.dto.action.HitlResumePayload;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -178,6 +184,55 @@ class LangGraphAgentControllerThreadGuardTest {
                 any(), anyString(), anyString(), any(), anyString());
         assertTrue(guard.tryAcquire(threadId()));
         guard.release(threadId());
+    }
+
+    @Test
+    void expiredApprovalIsResumedBeforeSameChatStartsNewPythonExecution() {
+        PendingAction expired = mock(PendingAction.class);
+        when(expired.actionId()).thenReturn("act-expired");
+        when(expired.actionType()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        when(expired.status()).thenReturn(ActionStatus.EXPIRED);
+        when(expired.ownerUserId()).thenReturn(USER_ID);
+        when(expired.conversationId()).thenReturn(CONVERSATION_ID);
+        when(expired.agentExecutionId()).thenReturn("ex_" + "a".repeat(32));
+        when(expired.hitlWaitId()).thenReturn("wait_" + "b".repeat(64));
+        when(businessActionService.reconcileExpiredForChat(
+                USER_ID, CONVERSATION_ID, "expired-chat"))
+                .thenReturn(Optional.of(expired));
+
+        PendingActionRepository actions = mock(PendingActionRepository.class);
+        BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
+                businessActionService, actions, pythonAgentGateway, threadIdService,
+                guard, adminAccessService, mock(ExpenseExternalApprovalCoordinator.class));
+        LangGraphAgentController controllerWithHitl = new LangGraphAgentController(
+                pythonAgentGateway, adminAccessService, businessActionService,
+                identityContext, memoryService, new AdminLogBuffer(),
+                threadIdService, guard, coordinator);
+
+        doAnswer(invocation -> {
+            assertFalse(guard.tryAcquire(threadId()));
+            return response(null);
+        }).when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"),
+                any(HitlResumePayload.class), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("expired-chat"));
+        doAnswer(invocation -> {
+            assertFalse(guard.tryAcquire(threadId()));
+            return response(null);
+        }).when(pythonAgentGateway).post(eq("/agent/langgraph/chat"),
+                any(InternalAgentChatRequest.class), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("expired-chat"));
+
+        var response = controllerWithHitl.langgraphChat(
+                new ChatRequest("继续报销", CONVERSATION_ID), request("expired-chat"));
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        var order = org.mockito.Mockito.inOrder(pythonAgentGateway);
+        order.verify(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"),
+                any(HitlResumePayload.class), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("expired-chat"));
+        order.verify(pythonAgentGateway).post(eq("/agent/langgraph/chat"),
+                any(InternalAgentChatRequest.class), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("expired-chat"));
     }
 
     @Test
