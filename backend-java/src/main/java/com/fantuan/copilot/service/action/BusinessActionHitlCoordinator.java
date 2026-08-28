@@ -500,10 +500,6 @@ public class BusinessActionHitlCoordinator {
             if (response == null || response.externalWait() != null) {
                 throw new TaskRuntimeException("Task Runtime 新任务返回了不允许的 external wait。 ");
             }
-            if (memoryCoordinator != null) {
-                memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
-                        task.conversationId(), traceId);
-            }
             if (response.hitlWait() != null && response.actionProposal() == null) {
                 throw new TaskRuntimeException("Task Runtime HITL wait 缺少业务 Proposal。 ");
             }
@@ -523,16 +519,27 @@ public class BusinessActionHitlCoordinator {
                         task.taskId(), pending.actionId())) {
                     throw new TaskRuntimeException("Task Runtime 下一任务 PendingAction 关联失败。 ");
                 }
+                if (memoryCoordinator != null) {
+                    memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
+                            task.conversationId(), traceId);
+                }
                 return pending;
             }
             if (response.missingFields() != null && !response.missingFields().isEmpty()) {
                 if (!taskRuntimeService.markWaitingClarification(task.taskId())) {
                     throw new TaskRuntimeException("Task Runtime clarification 状态冲突。 ");
                 }
+                if (memoryCoordinator != null) {
+                    memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
+                            task.conversationId(), traceId);
+                }
                 return null;
             }
             if (!taskRuntimeService.markTerminal(task.taskId(), TaskExecutionStatus.FAILED)) {
                 throw new TaskRuntimeException("Task Runtime 下一任务未产生可执行结果。 ");
+            }
+            if (memoryCoordinator != null) {
+                memoryCoordinator.abandon(identity.userId(), task.conversationId(), traceId);
             }
             return null;
         } catch (RuntimeException exception) {

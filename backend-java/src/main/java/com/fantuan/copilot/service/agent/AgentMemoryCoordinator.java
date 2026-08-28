@@ -63,4 +63,13 @@ public final class AgentMemoryCoordinator {
                     traceId, exception.getClass().getSimpleName());
         }
     }
+
+    public void abandon(String userId, String conversationId, String traceId) {
+        try {
+            memoryService.abandon(userId, conversationId);
+        } catch (RuntimeException exception) {
+            log.warn("[{}] Task Memory 终态收口失败: type={}", traceId,
+                    exception.getClass().getSimpleName());
+        }
+    }
 }

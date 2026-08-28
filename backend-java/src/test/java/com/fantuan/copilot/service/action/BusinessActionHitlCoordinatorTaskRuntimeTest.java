@@ -3,6 +3,10 @@ package com.fantuan.copilot.service.action;
 import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
+import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
+import com.fantuan.copilot.dto.action.PendingActionView;
+import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
@@ -15,6 +19,7 @@ import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,6 +59,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
     @Mock AdminAccessService adminAccessService;
     @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
     @Mock TaskRuntimeService taskRuntimeService;
+    @Mock AiTaskMemoryService memoryService;
 
     @Test
     void taskRuntimeExpenseConfirmEndsCurrentGraphAndUsesJavaExternalHandoff() {
@@ -112,5 +118,137 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 action, committed, "trace");
         verify(pythonAgentGateway, never()).post(eq("/agent/langgraph/external/resume"),
                 any(), any(HttpHeaders.class), eq(PythonAgentResponse.class), anyString());
+    }
+
+    @Test
+    void nextTaskFailureDoesNotPersistItsMemoryProposal() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = new TaskExecution("group-1", TASK_ID, USER_ID,
+                CONVERSATION_ID, 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.COMPLETED, null, Instant.now(), Instant.now(), Instant.now());
+        TaskExecution next = new TaskExecution("group-1", "task-2", USER_ID,
+                CONVERSATION_ID, 2, TaskType.EXPENSE_CLAIM, "报销", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AgentMemoryProposal proposal = new AgentMemoryProposal(
+                "EXPENSE_CLAIM", java.util.Map.of("step", "invalid"), "should not survive");
+
+        when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn(THREAD_ID);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
+                .thenReturn(new PythonAgentResponse("失败", "action", true,
+                        "business_action", "", List.of(), true, "trace", null, List.of(), proposal));
+        when(taskRuntimeService.markTerminal("task-2", TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+
+        BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
+                actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null,
+                taskRuntimeService, memoryService);
+
+        assertNull(coordinator.startNextTaskAfterTerminal(current, identity, "admin", "trace"));
+        verify(taskRuntimeService).markTerminal("task-2", TaskExecutionStatus.FAILED);
+        verify(memoryService).abandon(USER_ID, CONVERSATION_ID);
+        verify(memoryService, never()).upsertActiveForNextTask(
+                anyString(), anyString(), anyString(), any(), anyString());
+        var order = org.mockito.Mockito.inOrder(taskRuntimeService, memoryService);
+        order.verify(taskRuntimeService).markTerminal("task-2", TaskExecutionStatus.FAILED);
+        order.verify(memoryService).abandon(USER_ID, CONVERSATION_ID);
+    }
+
+    @Test
+    void nextTaskPersistsMemoryOnlyAfterWaitingUserTransition() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = new TaskExecution("group-1", TASK_ID, USER_ID,
+                CONVERSATION_ID, 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.COMPLETED, null, Instant.now(), Instant.now(), Instant.now());
+        TaskExecution next = new TaskExecution("group-1", "task-2", USER_ID,
+                CONVERSATION_ID, 2, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 1), "私事", com.fantuan.copilot.model.action.HalfDay.NONE);
+        HitlWaitMarker wait = new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + "b".repeat(64), "ex_" + "a".repeat(32),
+                BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        PendingActionView pending = new PendingActionView("act-2",
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, ActionStatus.PENDING_CONFIRMATION,
+                "请假", null, "nonce", Instant.now(), true);
+        AgentMemoryProposal memory = new AgentMemoryProposal(
+                "LEAVE_REQUEST", java.util.Map.of("task", 2), "等待确认");
+
+        when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn(THREAD_ID);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
+                .thenReturn(new PythonAgentResponse("请确认", "action", true,
+                        "business_action", "", List.of(), true, "trace", proposal,
+                        List.of(), memory, wait, null));
+        when(taskRuntimeService.matchesTaskType(next, TaskType.LEAVE_REQUEST)).thenReturn(true);
+        when(actionService.createHitlPending(eq(proposal), eq("trace"), eq("admin"),
+                eq(identity), eq(CONVERSATION_ID), eq(wait.executionId()), eq(wait.waitId()),
+                eq("task-2"))).thenReturn(pending);
+        when(actions.findByHitlWaitId(wait.waitId())).thenReturn(Optional.empty());
+        when(taskRuntimeService.markWaitingUser("task-2", "act-2")).thenReturn(true);
+
+        BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
+                actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null,
+                taskRuntimeService, memoryService);
+
+        assertEquals(pending, coordinator.startNextTaskAfterTerminal(
+                current, identity, "admin", "trace"));
+        var order = org.mockito.Mockito.inOrder(taskRuntimeService, memoryService);
+        order.verify(taskRuntimeService).markWaitingUser("task-2", "act-2");
+        order.verify(memoryService).upsertActiveForNextTask(USER_ID, CONVERSATION_ID,
+                "LEAVE_REQUEST", java.util.Map.of("task", 2), "等待确认");
+    }
+
+    @Test
+    void nextTaskPersistsMemoryOnlyAfterClarificationTransition() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = new TaskExecution("group-1", TASK_ID, USER_ID,
+                CONVERSATION_ID, 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.COMPLETED, null, Instant.now(), Instant.now(), Instant.now());
+        TaskExecution next = new TaskExecution("group-1", "task-2", USER_ID,
+                CONVERSATION_ID, 2, TaskType.EXPENSE_CLAIM, "报销", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AgentMemoryProposal memory = new AgentMemoryProposal(
+                "EXPENSE_CLAIM", java.util.Map.of("waiting_for", "invoice"), "等待补充");
+
+        when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn(THREAD_ID);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
+                .thenReturn(new PythonAgentResponse("请补充发票", "action", true,
+                        "business_action", "", List.of(), true, "trace", null,
+                        List.of("invoice"), memory));
+        when(taskRuntimeService.markWaitingClarification("task-2")).thenReturn(true);
+
+        BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
+                actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null,
+                taskRuntimeService, memoryService);
+
+        assertNull(coordinator.startNextTaskAfterTerminal(current, identity, "admin", "trace"));
+        var order = org.mockito.Mockito.inOrder(taskRuntimeService, memoryService);
+        order.verify(taskRuntimeService).markWaitingClarification("task-2");
+        order.verify(memoryService).upsertActiveForNextTask(USER_ID, CONVERSATION_ID,
+                "EXPENSE_CLAIM", java.util.Map.of("waiting_for", "invoice"), "等待补充");
     }
 }

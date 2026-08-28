@@ -299,6 +299,7 @@ public class LangGraphAgentController {
 
         PythonAgentResponse pythonResponse;
         PendingActionView pendingAction = null;
+        boolean persistResponseMemory = true;
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Allow-Eval", String.valueOf(allowEval));
@@ -397,6 +398,9 @@ public class LangGraphAgentController {
                             taskExecution.taskId(), pendingAction.actionId())) {
                         throw new TaskRuntimeException("Task Runtime PendingAction 关联失败。");
                     }
+                    memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
+                            conversationId, traceId);
+                    persistResponseMemory = false;
                 }
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
@@ -424,6 +428,13 @@ public class LangGraphAgentController {
             return AgentResponseFactory.actionFailure(traceId, "Task Runtime clarification 状态冲突。");
         }
         if (taskExecution != null && pendingAction == null
+                && pythonResponse.missingFields() != null
+                && !pythonResponse.missingFields().isEmpty()) {
+            memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
+                    conversationId, traceId);
+            persistResponseMemory = false;
+        }
+        if (taskExecution != null && pendingAction == null
                 && (pythonResponse.missingFields() == null
                 || pythonResponse.missingFields().isEmpty())) {
             if (!taskRuntimeService.markTerminal(taskExecution.taskId(),
@@ -431,13 +442,17 @@ public class LangGraphAgentController {
                 return AgentResponseFactory.actionFailure(traceId,
                         "Task Runtime 未产生可执行的业务动作。");
             }
+            memoryCoordinator.abandon(identity.userId(), conversationId, traceId);
             if (hitlCoordinator != null) {
                 pendingAction = hitlCoordinator.startNextTaskAfterTerminal(taskExecution,
                         identity, presentedToken, traceId);
             }
+            persistResponseMemory = false;
         }
-        memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
-                conversationId, traceId);
+        if (persistResponseMemory) {
+            memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
+                    conversationId, traceId);
+        }
         eventRecorder.record(traceId, "AGENT_REQUEST_COMPLETED",
                 AdminLogEvent.LEVEL_INFO, started);
         AgentChatResponse publicResponse = AgentChatResponse.fromPython(pythonResponse, pendingAction);
