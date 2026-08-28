@@ -22,7 +22,7 @@ from langgraph.types import Command, interrupt
 from app.agents.action_proposal_policy import PROPOSAL_TOOL_NAMES, is_confirmable_action_proposal
 from app.agents.execution_history_policy import merge_execution_history
 from app.agents.planner_node import planner_node
-from app.agents.runtime_context import AgentRuntimeContext
+from app.agents.runtime_context import AgentRuntimeContext, ExecutionMode
 from app.agents.tool_executor_node import tool_executor_node
 from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
 from app.guards.safety_guard import check_user_query_safety
@@ -376,6 +376,17 @@ def _should_wait_for_external_approval(state: AgentState) -> bool:
     return True
 
 
+def _approval_route(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> str:
+    """Select external lifecycle from Java's trusted context only."""
+    if runtime.context.get('execution_mode', 'LEGACY_SINGLE') == 'TASK_RUNTIME':
+        return 'finalize_node'
+    return (
+        'prepare_external_wait_node'
+        if _should_wait_for_external_approval(state)
+        else 'finalize_node'
+    )
+
+
 def prepare_external_wait_node(state: AgentState) -> dict:
     """Persist deterministic correlation without calling any external system."""
     if not _should_wait_for_external_approval(state):
@@ -498,11 +509,7 @@ def compile_agent_loop_graph(
         graph.add_edge("prepare_hitl_node", "approval_node")
         graph.add_conditional_edges(
             "approval_node",
-            lambda state: (
-                "prepare_external_wait_node"
-                if _should_wait_for_external_approval(state)
-                else "finalize_node"
-            ),
+            _approval_route,
             {
                 "prepare_external_wait_node": "prepare_external_wait_node",
                 "finalize_node": "finalize_node",
@@ -693,6 +700,7 @@ def run_langgraph_agent(
     execution_history: list[dict] | None = None,
     graph: Any | None = None,
     runtime_thread_id: str | None = None,
+    execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
     """运行 LangGraph Agent。
 
@@ -744,6 +752,7 @@ def run_langgraph_agent(
         business_date=business_date,
         trace_id=trace_id,
         employee_id=employee_id,
+        execution_mode=execution_mode,
     )
     config = _build_graph_config(runtime_thread_id, trace_id)
     if runtime_thread_id:
@@ -762,6 +771,7 @@ def _build_runtime_context(
     business_date: date | None,
     trace_id: str,
     employee_id: str,
+    execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> AgentRuntimeContext:
     """Build trusted context from the current request only."""
     return {
@@ -771,6 +781,7 @@ def _build_runtime_context(
         "business_date": business_date,
         "trace_id": trace_id,
         "deadline_monotonic": monotonic() + AGENT_REQUEST_TIMEOUT_SECONDS,
+        "execution_mode": execution_mode,
     }
 
 
@@ -793,6 +804,7 @@ def resume_langgraph_agent(
     business_date: date | None = None,
     trace_id: str = '',
     employee_id: str = '',
+    execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
     """Resume the latest pending Planner-first checkpoint with fresh trusted context."""
     runtime_context = _build_runtime_context(
@@ -801,6 +813,7 @@ def resume_langgraph_agent(
         business_date=business_date,
         trace_id=trace_id,
         employee_id=employee_id,
+        execution_mode=execution_mode,
     )
     return dict(graph.invoke(
         None,
@@ -820,6 +833,7 @@ def resume_hitl_langgraph_agent(
     business_date: date | None = None,
     trace_id: str = '',
     employee_id: str = '',
+    execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
     """Resume the active approval interrupt with Java's validated result."""
     runtime_context = _build_runtime_context(
@@ -828,6 +842,7 @@ def resume_hitl_langgraph_agent(
         business_date=business_date,
         trace_id=trace_id,
         employee_id=employee_id,
+        execution_mode=execution_mode,
     )
     return dict(graph.invoke(
         Command(resume=payload.model_dump()),
@@ -847,6 +862,7 @@ def resume_external_langgraph_agent(
     business_date: date | None = None,
     trace_id: str = '',
     employee_id: str = '',
+    execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
     """Resume the active external interrupt with fresh trusted Runtime Context."""
     runtime_context = _build_runtime_context(
@@ -855,6 +871,7 @@ def resume_external_langgraph_agent(
         business_date=business_date,
         trace_id=trace_id,
         employee_id=employee_id,
+        execution_mode=execution_mode,
     )
     return dict(graph.invoke(
         Command(resume=payload.model_dump()),

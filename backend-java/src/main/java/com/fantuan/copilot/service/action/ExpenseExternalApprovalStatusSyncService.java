@@ -6,6 +6,8 @@ import com.fantuan.copilot.gateway.expense.ExternalApprovalSubmissionResult;
 import com.fantuan.copilot.gateway.expense.MockOaExpenseApprovalGateway;
 import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,23 +24,34 @@ public class ExpenseExternalApprovalStatusSyncService {
     private final ExpenseApprovalGateway approvalGateway;
     private final TransactionOperations transactions;
     private final ExpenseExternalResumeCoordinator resumeCoordinator;
+    private final TaskRuntimeService taskRuntimeService;
 
     @Autowired
     public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
                                                     ExpenseApprovalGateway approvalGateway,
                                                     TransactionOperations transactions,
-                                                    ExpenseExternalResumeCoordinator resumeCoordinator) {
+                                                    ExpenseExternalResumeCoordinator resumeCoordinator,
+                                                    TaskRuntimeService taskRuntimeService) {
         this.claims = claims;
         this.approvalGateway = approvalGateway;
         this.transactions = transactions;
         this.resumeCoordinator = resumeCoordinator;
+        this.taskRuntimeService = taskRuntimeService;
     }
 
     /** Compatibility constructor for focused status-sync unit tests without B3 wiring. */
     public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
                                                     ExpenseApprovalGateway approvalGateway,
                                                     TransactionOperations transactions) {
-        this(claims, approvalGateway, transactions, null);
+        this(claims, approvalGateway, transactions, null, null);
+    }
+
+    /** Compatibility constructor for focused tests that provide B3 wiring. */
+    public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
+                                                    ExpenseApprovalGateway approvalGateway,
+                                                    TransactionOperations transactions,
+                                                    ExpenseExternalResumeCoordinator resumeCoordinator) {
+        this(claims, approvalGateway, transactions, resumeCoordinator, null);
     }
 
     public void sync(String externalRequestId) {
@@ -70,12 +83,28 @@ public class ExpenseExternalApprovalStatusSyncService {
 
         ExpenseStatus terminal = "APPROVED".equals(authoritative.status())
                 ? ExpenseStatus.APPROVED : ExpenseStatus.REJECTED;
-        transactions.executeWithoutResult(ignored ->
-                claims.applyExternalApprovalStatus(externalRequestId, terminal));
-        if (resumeCoordinator != null) {
-            // The terminal ExpenseClaim transaction has committed before this
-            // best-effort Python continuation starts.
-            resumeCoordinator.tryResume(claim.expenseId());
+        boolean taskRuntimeClaim = isTaskRuntimeClaim(claim);
+        TaskExecutionStatus taskStatus = terminal == ExpenseStatus.APPROVED
+                ? TaskExecutionStatus.COMPLETED : TaskExecutionStatus.FAILED;
+        transactions.executeWithoutResult(ignored -> {
+            claims.applyExternalApprovalStatus(externalRequestId, terminal);
+            if (taskRuntimeClaim
+                    && !taskRuntimeService.synchronizeBusinessStatus(
+                    claim.sourceActionId(), taskStatus)) {
+                throw new IllegalStateException("Task Runtime external terminal transition conflict");
+            }
+        });
+        if (!taskRuntimeClaim) {
+            // The terminal ExpenseClaim and TaskExecution update above are
+            // complete before legacy Python continuation starts.
+            if (resumeCoordinator != null) {
+                resumeCoordinator.tryResume(claim.expenseId());
+            }
         }
+    }
+
+    private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
+        return taskRuntimeService != null && claim != null
+                && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 }

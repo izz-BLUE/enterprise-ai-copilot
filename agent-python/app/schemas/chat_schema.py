@@ -35,6 +35,8 @@ class ChatRequest(BaseModel):
 
     message: str
     memoryContext: MemoryContext | None = None
+    taskId: str | None = Field(default=None, max_length=64)
+    clarificationContext: str | None = Field(default=None, max_length=4000)
 
 
 class ChatResponse(BaseModel):

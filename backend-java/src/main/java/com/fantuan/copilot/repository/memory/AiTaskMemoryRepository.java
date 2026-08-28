@@ -14,7 +14,9 @@ import java.util.Optional;
  *   - ACTIVE → 允许写入任意状态（UPSERT 续写 / COMPLETE / ABANDON 终结）；
  *   - COMPLETED → 仅允许幂等重放 COMPLETE；
  *   - ABANDONED → 仅允许幂等重放 ABANDON；
- *   - 其余组合（终态重新激活 / 无记录直接终结）由 SQL 条件拒绝并返回 false。
+ *   - 其余通用组合（终态重新激活 / 无记录直接终结）由 SQL 条件拒绝并返回 false；
+ *   - Task Runtime 的下一 task 激活使用显式的 reactivateTerminalForNextTask，
+ *     不改变普通 Agent proposal 的终态保护。
  */
 public interface AiTaskMemoryRepository {
     /** 按 (userId, conversationId) 复合主键读取；不存在返回 Optional.empty()。 */
@@ -35,6 +37,11 @@ public interface AiTaskMemoryRepository {
      * 记录不存在或已是另一终态时返回 false（不抛错，供业务侧无副作用调用）。
      */
     boolean transitionToTerminal(String userId, String conversationId, TaskStatus target);
+
+    /** Java Task Runtime 专用：终结的前一 task 完成后，激活下一 task 的新上下文。 */
+    boolean reactivateTerminalForNextTask(String userId, String conversationId,
+                                          String taskType, String taskStateJson,
+                                          String summary);
 
     /** 按 (userId, conversationId) 删除；返回受影响行数（0 = 不存在或不属于该用户）。 */
     int delete(String userId, String conversationId);

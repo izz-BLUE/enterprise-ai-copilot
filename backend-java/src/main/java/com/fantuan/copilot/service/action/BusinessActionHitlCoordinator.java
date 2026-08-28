@@ -1,5 +1,6 @@
 package com.fantuan.copilot.service.action;
 
+import com.fantuan.copilot.dto.InternalAgentChatRequest;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.BusinessActionProposal;
@@ -13,8 +14,15 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
+import com.fantuan.copilot.service.agent.AgentMemoryCoordinator;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.model.task.TaskExecution;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
+import com.fantuan.copilot.service.task.TaskRuntimeException;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +54,8 @@ public class BusinessActionHitlCoordinator {
     private final AdminAccessService adminAccessService;
     private final ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
     private final ExpenseConfirmRevalidationService expenseRevalidation;
+    private final TaskRuntimeService taskRuntimeService;
+    private final AgentMemoryCoordinator memoryCoordinator;
 
     @Autowired
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
@@ -55,7 +65,9 @@ public class BusinessActionHitlCoordinator {
                                          AgentRuntimeThreadExecutionGuard threadGuard,
                                          AdminAccessService adminAccessService,
                                          ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
-                                         ExpenseConfirmRevalidationService expenseRevalidation) {
+                                         ExpenseConfirmRevalidationService expenseRevalidation,
+                                         TaskRuntimeService taskRuntimeService,
+                                         AiTaskMemoryService memoryService) {
         this.actionService = actionService;
         this.actions = actions;
         this.pythonAgentGateway = pythonAgentGateway;
@@ -64,6 +76,8 @@ public class BusinessActionHitlCoordinator {
         this.adminAccessService = adminAccessService;
         this.externalApprovalCoordinator = externalApprovalCoordinator;
         this.expenseRevalidation = expenseRevalidation;
+        this.taskRuntimeService = taskRuntimeService;
+        this.memoryCoordinator = memoryService == null ? null : new AgentMemoryCoordinator(memoryService);
     }
 
     /** Compatibility constructor for focused tests that do not exercise expense revalidation. */
@@ -75,7 +89,21 @@ public class BusinessActionHitlCoordinator {
                                          AdminAccessService adminAccessService,
                                          ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
         this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null);
+                adminAccessService, externalApprovalCoordinator, null, null, null);
+    }
+
+    /** Compatibility constructor for tests that exercise expense revalidation. */
+    public BusinessActionHitlCoordinator(BusinessActionService actionService,
+                                         PendingActionRepository actions,
+                                         PythonAgentGateway pythonAgentGateway,
+                                         AgentRuntimeThreadIdService threadIdService,
+                                         AgentRuntimeThreadExecutionGuard threadGuard,
+                                         AdminAccessService adminAccessService,
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
+                                         ExpenseConfirmRevalidationService expenseRevalidation) {
+        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
+                null, null);
     }
 
     /**
@@ -101,6 +129,16 @@ public class BusinessActionHitlCoordinator {
                 || action.ownerUserId() == null || action.conversationId() == null) {
             return true;
         }
+        TaskExecution task = taskRuntimeService == null ? null
+                : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
+        if (task != null) {
+            // Expiration and TaskExecution terminalization are committed by
+            // BusinessActionService together.  Python is only a best-effort
+            // checkpoint cleanup and must not gate the next task.
+            tryResume(action, identity, presentedToken, traceId);
+            startNextTask(task, identity, presentedToken, traceId);
+            return true;
+        }
         return tryResume(action, identity, presentedToken, traceId);
     }
 
@@ -111,11 +149,24 @@ public class BusinessActionHitlCoordinator {
                                           String presentedToken,
                                           VerifiedIdentity identity,
                                           String conversationId) {
+        return registerWait(proposal, wait, originTraceId, presentedToken, identity,
+                conversationId, null);
+    }
+
+    public PendingActionView registerWait(BusinessActionProposal proposal,
+                                          HitlWaitMarker wait,
+                                          String originTraceId,
+                                          String presentedToken,
+                                          VerifiedIdentity identity,
+                                          String conversationId,
+                                          String taskId) {
         validateWaitAndProposal(proposal, wait);
         try {
-            PendingActionView view = actionService.createHitlPending(
-                    proposal, originTraceId, presentedToken, identity,
-                    conversationId, wait.executionId(), wait.waitId());
+            PendingActionView view = taskId == null
+                    ? actionService.createHitlPending(proposal, originTraceId, presentedToken,
+                    identity, conversationId, wait.executionId(), wait.waitId())
+                    : actionService.createHitlPending(proposal, originTraceId, presentedToken,
+                    identity, conversationId, wait.executionId(), wait.waitId(), taskId);
 
             // A Java commit may have succeeded before the HTTP response was lost.
             // Reconcile that terminal row without creating a second action.
@@ -134,8 +185,16 @@ public class BusinessActionHitlCoordinator {
                 // so a retry can perform Memory -> Graph in that order.
                 actionService.abandonMemoryAfterHitlRejection(
                         identity, conversationId);
-                tryResumeRejected(wait, identity, conversationId,
-                        presentedToken, originTraceId);
+                if (taskId != null && taskRuntimeService != null) {
+                    taskRuntimeService.markTerminal(taskId, TaskExecutionStatus.FAILED);
+                    tryResumeRejected(wait, identity, conversationId,
+                            presentedToken, originTraceId, taskId);
+                    startNextTask(taskRuntimeService.findByTaskId(taskId).orElse(null),
+                            identity, presentedToken, originTraceId);
+                } else {
+                    tryResumeRejected(wait, identity, conversationId,
+                            presentedToken, originTraceId);
+                }
             }
             throw exception;
         }
@@ -159,9 +218,11 @@ public class BusinessActionHitlCoordinator {
                 ActionExecutionResponse response = actionService.confirm(
                         actionId, confirmationNonce, idempotencyKey, presentedToken,
                         traceId, identity);
-                guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
-                        identity, presentedToken, traceId, guardKey);
-                return response;
+                ReconcileResult reconciliation = reconcileAfterCommittedAction(
+                        actionId, routing, response, identity, presentedToken, traceId, guardKey);
+                guardReleased = reconciliation.guardReleased();
+                return reconciliation.nextPendingAction() == null ? response
+                        : response.withNextPendingAction(reconciliation.nextPendingAction());
             } catch (ActionExpiredAfterUpdateException exception) {
                 reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
                         HitlResumePayload.HitlDecision.EXPIRED, ActionStatus.EXPIRED,
@@ -240,9 +301,11 @@ public class BusinessActionHitlCoordinator {
                 ActionExecutionResponse response = actionService.cancel(
                         actionId, confirmationNonce, presentedToken, traceId,
                         identity);
-                guardReleased = reconcileAfterCommittedAction(actionId, routing, response,
-                        identity, presentedToken, traceId, guardKey);
-                return response;
+                ReconcileResult reconciliation = reconcileAfterCommittedAction(
+                        actionId, routing, response, identity, presentedToken, traceId, guardKey);
+                guardReleased = reconciliation.guardReleased();
+                return reconciliation.nextPendingAction() == null ? response
+                        : response.withNextPendingAction(reconciliation.nextPendingAction());
             } catch (ActionExpiredAfterUpdateException exception) {
                 reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
                         HitlResumePayload.HitlDecision.EXPIRED, ActionStatus.EXPIRED,
@@ -305,16 +368,23 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    private boolean reconcileAfterCommittedAction(String actionId, PendingAction routing,
-                                                  ActionExecutionResponse response,
-                                                  VerifiedIdentity identity,
-                                                  String presentedToken,
-                                                  String traceId,
-                                                  String guardKey) {
+    private ReconcileResult reconcileAfterCommittedAction(String actionId, PendingAction routing,
+                                                          ActionExecutionResponse response,
+                                                          VerifiedIdentity identity,
+                                                          String presentedToken,
+                                                          String traceId,
+                                                          String guardKey) {
         PendingAction action = actions.find(actionId).orElse(routing);
+        TaskExecution task = taskRuntimeService == null ? null
+                : taskRuntimeService.findByActionId(actionId).orElse(null);
+        if (task != null) {
+            return reconcileTaskRuntimeAction(task, action, response, identity,
+                    presentedToken, traceId, guardKey);
+        }
         if (response.status() == ActionStatus.SUCCEEDED) {
             if (action.actionType() == com.fantuan.copilot.model.action.BusinessActionType.EXPENSE_CLAIM) {
-                return reconcileConfirmedExpense(action, response, identity, presentedToken, traceId, guardKey);
+                return new ReconcileResult(reconcileConfirmedExpense(action, response, identity,
+                        presentedToken, traceId, guardKey), null);
             }
             reconcileTerminal(actionId, action, identity, presentedToken, traceId,
                     HitlResumePayload.HitlDecision.CONFIRMED, ActionStatus.SUCCEEDED,
@@ -324,7 +394,230 @@ public class BusinessActionHitlCoordinator {
                     HitlResumePayload.HitlDecision.CANCELLED, ActionStatus.CANCELLED,
                     response.message(), null);
         }
-        return false;
+        return new ReconcileResult(false, null);
+    }
+
+    private ReconcileResult reconcileTaskRuntimeAction(TaskExecution task,
+                                                       PendingAction action,
+                                                       ActionExecutionResponse response,
+                                                       VerifiedIdentity identity,
+                                                       String presentedToken,
+                                                       String traceId,
+                                                       String guardKey) {
+        if (task == null || action == null || response == null) {
+            return new ReconcileResult(false, null);
+        }
+        if (task.status().isTerminal()) {
+            // The Java transaction may already have committed the current
+            // task's terminal state before this continuation is entered.  That
+            // state is not a reason to stop the queue: deterministically
+            // reconcile the next runnable task as well.  WAITING_EXTERNAL is
+            // intentionally handled by the Expense branch below so its
+            // task-specific Python graph can still be closed first.
+            return new ReconcileResult(false, startNextTask(task, identity,
+                    presentedToken, traceId));
+        }
+
+        if (response.status() == ActionStatus.SUCCEEDED
+                && action.actionType() == BusinessActionType.EXPENSE_CLAIM) {
+            try {
+                PythonAgentResponse resumed = postTaskRuntimeResume(action, identity,
+                        presentedToken, traceId, new HitlResumePayload(
+                                1, action.hitlWaitId(), action.agentExecutionId(),
+                                HitlResumePayload.HitlDecision.CONFIRMED, action.actionId(),
+                                action.actionType(), ActionStatus.SUCCEEDED, response.requestId(),
+                                canonicalMessage(action, ActionStatus.SUCCEEDED, response.message())));
+                if (!isSuccessful(resumed) || resumed.externalWait() != null) {
+                    throw new TaskRuntimeException(
+                            "TASK_RUNTIME Expense HITL resume 不得进入 WAITING_EXTERNAL。 ");
+                }
+            } catch (RuntimeException exception) {
+                log.warn("[{}] TASK_RUNTIME_GRAPH_CLEANUP_PENDING actionIdPrefix={} errorType={}",
+                        traceId, BusinessActionService.auditRef(action.actionId()),
+                        exception.getClass().getSimpleName());
+            }
+            try {
+                // The Java transaction already made this task WAITING_EXTERNAL.
+                // External handoff and next-task startup are independent of
+                // Python checkpoint cleanup.
+                if (!externalApprovalCoordinator.registerTaskRuntimeAndDispatch(
+                        action, response, traceId)) {
+                    log.warn("[{}] TASK_RUNTIME_EXTERNAL_HANDOFF_PENDING actionIdPrefix={}",
+                            traceId, BusinessActionService.auditRef(action.actionId()));
+                }
+            } catch (RuntimeException exception) {
+                log.warn("[{}] TASK_RUNTIME_EXTERNAL_HANDOFF_PENDING actionIdPrefix={} errorType={}",
+                        traceId, BusinessActionService.auditRef(action.actionId()),
+                        exception.getClass().getSimpleName());
+            }
+            return new ReconcileResult(false, startNextTask(task, identity,
+                    presentedToken, traceId));
+        }
+
+        ActionStatus terminalActionStatus = response.status();
+        HitlResumePayload.HitlDecision decision = terminalActionStatus == ActionStatus.CANCELLED
+                ? HitlResumePayload.HitlDecision.CANCELLED
+                : terminalActionStatus == ActionStatus.SUCCEEDED
+                ? HitlResumePayload.HitlDecision.CONFIRMED : null;
+        if (decision == null) {
+            return new ReconcileResult(false, null);
+        }
+        try {
+            PythonAgentResponse resumed = postTaskRuntimeResume(action, identity,
+                    presentedToken, traceId, new HitlResumePayload(
+                            1, action.hitlWaitId(), action.agentExecutionId(), decision,
+                            action.actionId(), action.actionType(), terminalActionStatus,
+                            response.requestId(), canonicalMessage(action, terminalActionStatus,
+                                    response.message())));
+            if (!isSuccessful(resumed) || resumed.externalWait() != null) {
+                throw new TaskRuntimeException("Task Runtime HITL resume 未正常结束。 ");
+            }
+        } catch (RuntimeException exception) {
+            log.warn("[{}] TASK_RUNTIME_GRAPH_CLEANUP_PENDING actionIdPrefix={} errorType={}",
+                    traceId, BusinessActionService.auditRef(action.actionId()),
+                    exception.getClass().getSimpleName());
+        }
+        // The Java transaction already terminalized the action and task.
+        return new ReconcileResult(false, startNextTask(task, identity,
+                presentedToken, traceId));
+    }
+
+    private PendingActionView startNextTask(TaskExecution current,
+                                             VerifiedIdentity identity,
+                                             String presentedToken,
+                                             String traceId) {
+        if (current == null || taskRuntimeService == null) {
+            return null;
+        }
+        Optional<TaskExecution> next = taskRuntimeService.startNextRunnable(current.taskGroupId());
+        if (next.isEmpty()) {
+            return null;
+        }
+        TaskExecution task = next.get();
+        try {
+            PythonAgentResponse response = postTaskRuntimeChat(task, identity,
+                    presentedToken, traceId);
+            if (response == null || response.externalWait() != null) {
+                throw new TaskRuntimeException("Task Runtime 新任务返回了不允许的 external wait。 ");
+            }
+            if (memoryCoordinator != null) {
+                memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
+                        task.conversationId(), traceId);
+            }
+            if (response.hitlWait() != null && response.actionProposal() == null) {
+                throw new TaskRuntimeException("Task Runtime HITL wait 缺少业务 Proposal。 ");
+            }
+            if (response.hitlWait() != null && !response.hitlWait().structurallyValid()) {
+                throw new TaskRuntimeException("Task Runtime HITL wait 上下文无效。 ");
+            }
+            if (response.actionProposal() != null) {
+                if (!taskRuntimeService.matchesTaskType(task,
+                        taskType(response.actionProposal().actionType()))
+                        || response.hitlWait() == null) {
+                    throw new TaskRuntimeException("Task Runtime Proposal 与任务关联不匹配。 ");
+                }
+                PendingActionView pending = registerWait(response.actionProposal(),
+                        response.hitlWait(), traceId, presentedToken, identity,
+                        task.conversationId(), task.taskId());
+                if (pending == null || !taskRuntimeService.markWaitingUser(
+                        task.taskId(), pending.actionId())) {
+                    throw new TaskRuntimeException("Task Runtime 下一任务 PendingAction 关联失败。 ");
+                }
+                return pending;
+            }
+            if (response.missingFields() != null && !response.missingFields().isEmpty()) {
+                if (!taskRuntimeService.markWaitingClarification(task.taskId())) {
+                    throw new TaskRuntimeException("Task Runtime clarification 状态冲突。 ");
+                }
+                return null;
+            }
+            if (!taskRuntimeService.markTerminal(task.taskId(), TaskExecutionStatus.FAILED)) {
+                throw new TaskRuntimeException("Task Runtime 下一任务未产生可执行结果。 ");
+            }
+            return null;
+        } catch (RuntimeException exception) {
+            // The prior Java business fact is already authoritative.  A
+            // launch failure leaves this task PENDING so the next guarded Chat
+            // can deterministically retry the same task-specific thread.
+            taskRuntimeService.requeueAfterLaunchFailure(task.taskId());
+            log.warn("[{}] TASK_RUNTIME_NEXT_TASK_FAILED taskIdPrefix={} errorType={}",
+                    traceId, BusinessActionService.auditRef(task.taskId()),
+                    exception.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    /** Continue a Task Runtime group after a task ended without PendingAction. */
+    public PendingActionView startNextTaskAfterTerminal(TaskExecution current,
+                                                        VerifiedIdentity identity,
+                                                        String presentedToken,
+                                                        String traceId) {
+        return startNextTask(current, identity, presentedToken, traceId);
+    }
+
+    private PythonAgentResponse postTaskRuntimeChat(TaskExecution task,
+                                                    VerifiedIdentity identity,
+                                                    String presentedToken,
+                                                    String traceId) {
+        String runtimeThreadId = threadIdService.generate(identity.userId(),
+                task.conversationId(), task.taskId());
+        HttpHeaders headers = taskRuntimeHeaders(identity.employeeId(), task.conversationId(),
+                runtimeThreadId, task.taskId(), presentedToken);
+        return pythonAgentGateway.post("/agent/langgraph/chat",
+                new InternalAgentChatRequest(task.taskText(), null, task.taskId(),
+                        task.clarificationContext()), headers,
+                PythonAgentResponse.class, traceId);
+    }
+
+    private PythonAgentResponse postTaskRuntimeResume(PendingAction action,
+                                                       VerifiedIdentity identity,
+                                                       String presentedToken,
+                                                       String traceId,
+                                                       HitlResumePayload payload) {
+        String runtimeThreadId = threadIdService.generate(action.ownerUserId(),
+                action.conversationId(),
+                taskRuntimeService.findByActionId(action.actionId())
+                        .map(TaskExecution::taskId).orElseThrow(
+                                () -> new TaskRuntimeException("Task Runtime 关联任务不存在。")));
+        HttpHeaders headers = taskRuntimeHeaders(identity.employeeId(), action.conversationId(),
+                runtimeThreadId,
+                taskRuntimeService.findByActionId(action.actionId())
+                        .map(TaskExecution::taskId).orElseThrow(), presentedToken);
+        return pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
+                PythonAgentResponse.class, traceId);
+    }
+
+    private HttpHeaders taskRuntimeHeaders(String employeeId,
+                                           String conversationId,
+                                           String runtimeThreadId,
+                                           String taskId,
+                                           String presentedToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("X-Agent-Thread-Id", runtimeThreadId);
+        headers.set("X-Agent-Execution-Mode", "TASK_RUNTIME");
+        headers.set("X-Agent-Task-Id", taskId);
+        headers.set("X-Employee-Id", employeeId);
+        headers.set("X-Conversation-Id", conversationId);
+        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdmin(presentedToken)));
+        headers.set("X-Allow-Business-Actions",
+                Boolean.toString(actionService.isAllowed(presentedToken)));
+        headers.set("X-Business-Date", actionService.businessDate().toString());
+        return headers;
+    }
+
+    private TaskType taskType(BusinessActionType actionType) {
+        return switch (actionType) {
+            case ANNUAL_LEAVE_REQUEST -> TaskType.LEAVE_REQUEST;
+            case EXPENSE_CLAIM -> TaskType.EXPENSE_CLAIM;
+        };
+    }
+
+    private boolean isSuccessful(PythonAgentResponse response) {
+        return response != null && !Boolean.FALSE.equals(response.success());
+    }
+
+    private record ReconcileResult(boolean guardReleased,
+                                   PendingActionView nextPendingAction) {
     }
 
     private boolean reconcileConfirmedExpense(PendingAction action, ActionExecutionResponse response,
@@ -378,12 +671,28 @@ public class BusinessActionHitlCoordinator {
                 1, action.hitlWaitId(), action.agentExecutionId(), decision,
                 action.actionId(), action.actionType(), status, requestId,
                 canonicalMessage(action, status, message));
+        TaskExecution task = taskRuntimeService == null ? null
+                : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
+        if (task != null) {
+            tryResume(action, identity, presentedToken, traceId, payload);
+            // The action service committed the corresponding TaskExecution
+            // terminal state in the same transaction.  Resume failure cannot
+            // block deterministic next-task progression.
+            startNextTask(task, identity, presentedToken, traceId);
+            return;
+        }
         tryResume(action, identity, presentedToken, traceId, payload);
     }
 
     private void tryResumeRejected(HitlWaitMarker wait, VerifiedIdentity identity,
                                    String conversationId, String presentedToken,
                                    String traceId) {
+        tryResumeRejected(wait, identity, conversationId, presentedToken, traceId, null);
+    }
+
+    private void tryResumeRejected(HitlWaitMarker wait, VerifiedIdentity identity,
+                                   String conversationId, String presentedToken,
+                                   String traceId, String taskId) {
         if (identity == null || identity.userId() == null || identity.employeeId() == null
                 || conversationId == null || conversationId.isBlank()) {
             return;
@@ -392,13 +701,32 @@ public class BusinessActionHitlCoordinator {
                 1, wait.waitId(), wait.executionId(), HitlResumePayload.HitlDecision.REJECTED,
                 null, wait.actionType(), ActionStatus.FAILED, null, REJECTED_MESSAGE);
         try {
-            postResume(identity.userId(), identity.employeeId(), conversationId,
-                    presentedToken, traceId, payload);
+            if (taskId == null) {
+                postResume(identity.userId(), identity.employeeId(), conversationId,
+                        presentedToken, traceId, payload);
+            } else {
+                postTaskRuntimeWaitResume(identity.userId(), identity.employeeId(), conversationId,
+                        taskId, presentedToken, traceId, payload);
+            }
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_REJECTION_CONTINUATION_PENDING waitIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(wait.waitId()),
                     exception.getClass().getSimpleName());
         }
+    }
+
+    private PythonAgentResponse postTaskRuntimeWaitResume(String ownerUserId,
+                                                          String employeeId,
+                                                          String conversationId,
+                                                          String taskId,
+                                                          String presentedToken,
+                                                          String traceId,
+                                                          HitlResumePayload payload) {
+        String runtimeThreadId = threadIdService.generate(ownerUserId, conversationId, taskId);
+        HttpHeaders headers = taskRuntimeHeaders(employeeId, conversationId,
+                runtimeThreadId, taskId, presentedToken);
+        return pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
+                PythonAgentResponse.class, traceId);
     }
 
     private boolean tryResume(PendingAction action, VerifiedIdentity identity,
@@ -424,8 +752,9 @@ public class BusinessActionHitlCoordinator {
                                String presentedToken, String traceId,
                                HitlResumePayload payload) {
         try {
-            return postResume(action.ownerUserId(), identity.employeeId(), action.conversationId(),
-                    presentedToken, traceId, payload) != null;
+            PythonAgentResponse response = postResume(action.ownerUserId(), identity.employeeId(),
+                    action.conversationId(), presentedToken, traceId, payload);
+            return isSuccessful(response) && response.externalWait() == null;
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(action.actionId()),
@@ -437,7 +766,11 @@ public class BusinessActionHitlCoordinator {
     private PythonAgentResponse postResume(String ownerUserId, String employeeId, String conversationId,
                                            String presentedToken, String traceId,
                                            HitlResumePayload payload) {
-        String runtimeThreadId = threadIdService.generate(ownerUserId, conversationId);
+        TaskExecution task = taskRuntimeService == null || payload.actionId() == null ? null
+                : taskRuntimeService.findByActionId(payload.actionId()).orElse(null);
+        String runtimeThreadId = task == null
+                ? threadIdService.generate(ownerUserId, conversationId)
+                : threadIdService.generate(ownerUserId, conversationId, task.taskId());
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-Agent-Thread-Id", runtimeThreadId);
         headers.set("X-Employee-Id", employeeId);
@@ -446,6 +779,10 @@ public class BusinessActionHitlCoordinator {
                 Boolean.toString(actionService.isAllowed(presentedToken)));
         LocalDate businessDate = actionService.businessDate();
         headers.set("X-Business-Date", businessDate.toString());
+        if (task != null) {
+            headers.set("X-Agent-Execution-Mode", "TASK_RUNTIME");
+            headers.set("X-Agent-Task-Id", task.taskId());
+        }
         headers.set("X-Conversation-Id", conversationId);
         return pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
                 PythonAgentResponse.class, traceId);
