@@ -127,6 +127,27 @@ public class TaskRuntimeService {
                 target.isTerminal() ? now : null);
     }
 
+    /**
+     * Replay-only status check.  A replay must not rewrite a task that has
+     * already advanced beyond the original confirmation target, such as an
+     * Expense task completed by the external approval callback.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean synchronizeReplayStatus(String actionId, TaskExecutionStatus target) {
+        if (actionId == null || actionId.isBlank()) {
+            return true;
+        }
+        Optional<TaskExecution> current = executions.findByActionIdForUpdate(actionId);
+        if (current.isEmpty()) {
+            return true;
+        }
+        TaskExecutionStatus status = current.get().status();
+        return status == target
+                || (target == TaskExecutionStatus.WAITING_EXTERNAL
+                && (status == TaskExecutionStatus.COMPLETED
+                || status == TaskExecutionStatus.FAILED));
+    }
+
     /** Re-queue only a task that failed before its next durable wait was registered. */
     public boolean requeueAfterLaunchFailure(String taskId) {
         Instant now = clock.instant();
@@ -224,22 +245,11 @@ public class TaskRuntimeService {
                 TaskExecutionStatus.WAITING_CLARIFICATION, now, null);
     }
 
-    public boolean linkAction(String taskId, String actionId) {
-        return executions.linkAction(taskId, actionId, clock.instant());
-    }
-
     public boolean markWaitingUser(String taskId, String actionId) {
-        Optional<TaskExecution> current = executions.findByTaskId(taskId);
-        if (current.isPresent() && current.get().status() == TaskExecutionStatus.WAITING_USER
-                && actionId != null && actionId.equals(current.get().actionId())) {
-            return true;
-        }
-        if (!linkAction(taskId, actionId)) {
+        if (taskId == null || taskId.isBlank() || actionId == null || actionId.isBlank()) {
             return false;
         }
-        Instant now = clock.instant();
-        return executions.updateStatus(taskId, TaskExecutionStatus.RUNNING,
-                TaskExecutionStatus.WAITING_USER, now, null);
+        return executions.markWaitingUser(taskId, actionId, clock.instant());
     }
 
     public boolean markWaitingExternalByAction(String actionId) {

@@ -33,6 +33,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(properties = {
         "demo.auth.enabled=true",
@@ -48,6 +49,7 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
 
     @Autowired BusinessActionService actionService;
     @Autowired TaskExecutionRepository taskExecutions;
+    @Autowired TaskRuntimeService taskRuntimeService;
     @Autowired AiTaskMemoryService memoryService;
     @Autowired LeaveRequestRepository leaveRequests;
     @Autowired ExpenseClaimRepository expenseClaims;
@@ -106,6 +108,157 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
     }
 
     @Test
+    void taskRuntimeLeaveConfirmReplayDoesNotCloseSuccessorMemoryOrChangeSuccessor() {
+        memoryService.upsert(USER.userId(), CONVERSATION, "LEAVE_REQUEST",
+                TaskStatus.ACTIVE, "{}", "leave task");
+        PendingActionView first = actionService.createPending(
+                leaveProposal(), "replay-leave-first", null, USER, CONVERSATION);
+        saveTask("group-replay-leave", 1, first.actionId(), TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.WAITING_USER);
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "replay-leave-confirm", USER);
+
+        PendingActionView second = actionService.createPending(
+                expenseProposal(), "replay-leave-second", null, USER, CONVERSATION);
+        saveTask("group-replay-leave", 2, second.actionId(), TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.WAITING_USER);
+        memoryService.upsertActiveForNextTask(USER.userId(), CONVERSATION,
+                "EXPENSE_CLAIM", java.util.Map.of("task", 2), "expense task");
+        TaskExecution successorBefore = taskExecutions.findByTaskId("task-" + second.actionId())
+                .orElseThrow();
+        var memoryBefore = memoryService.find(USER.userId(), CONVERSATION).orElseThrow();
+
+        ActionExecutionResponse replay = actionService.confirm(
+                first.actionId(), first.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "replay-leave-again", USER);
+
+        assertTrue(replay.replayed());
+        assertEquals(successorBefore,
+                taskExecutions.findByTaskId("task-" + second.actionId()).orElseThrow());
+        var memoryAfter = memoryService.find(USER.userId(), CONVERSATION).orElseThrow();
+        assertEquals(TaskStatus.ACTIVE, memoryAfter.status());
+        assertEquals(memoryBefore.taskType(), memoryAfter.taskType());
+        assertEquals(memoryBefore.taskStateJson(), memoryAfter.taskStateJson());
+        assertEquals(memoryBefore.summary(), memoryAfter.summary());
+    }
+
+    @Test
+    void taskRuntimeExpenseWaitingExternalReplayDoesNotCloseSuccessorMemory() {
+        memoryService.upsert(USER.userId(), CONVERSATION, "EXPENSE_CLAIM",
+                TaskStatus.ACTIVE, "{}", "expense task");
+        PendingActionView first = actionService.createPending(
+                expenseProposal(), "replay-expense-first", null, USER, CONVERSATION);
+        saveTask("group-replay-expense", 1, first.actionId(), TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.WAITING_USER);
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "replay-expense-confirm", USER);
+
+        PendingActionView second = actionService.createPending(
+                leaveProposal(), "replay-expense-second", null, USER, CONVERSATION);
+        saveTask("group-replay-expense", 2, second.actionId(), TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.WAITING_USER);
+        memoryService.upsertActiveForNextTask(USER.userId(), CONVERSATION,
+                "LEAVE_REQUEST", java.util.Map.of("task", 2), "leave task");
+        TaskExecution successorBefore = taskExecutions.findByTaskId("task-" + second.actionId())
+                .orElseThrow();
+
+        ActionExecutionResponse replay = actionService.confirm(
+                first.actionId(), first.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "replay-expense-again", USER);
+
+        assertTrue(replay.replayed());
+        assertEquals(TaskExecutionStatus.WAITING_EXTERNAL,
+                taskExecutions.findByActionId(first.actionId()).orElseThrow().status());
+        assertEquals(successorBefore,
+                taskExecutions.findByTaskId("task-" + second.actionId()).orElseThrow());
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER.userId(), CONVERSATION).orElseThrow().status());
+        assertEquals("LEAVE_REQUEST",
+                memoryService.find(USER.userId(), CONVERSATION).orElseThrow().taskType());
+    }
+
+    @Test
+    void taskRuntimeExpenseTerminalReplayRemainsIdempotent() {
+        memoryService.upsert(USER.userId(), CONVERSATION, "EXPENSE_CLAIM",
+                TaskStatus.ACTIVE, "{}", "expense task");
+        PendingActionView first = actionService.createPending(
+                expenseProposal(), "replay-terminal-first", null, USER, CONVERSATION);
+        saveTask("group-replay-terminal", 1, first.actionId(), TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.WAITING_USER);
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "replay-terminal-confirm", USER);
+        assertTrue(taskRuntimeService.markTerminalByAction(
+                first.actionId(), TaskExecutionStatus.COMPLETED));
+
+        PendingActionView second = actionService.createPending(
+                leaveProposal(), "replay-terminal-second", null, USER, CONVERSATION);
+        saveTask("group-replay-terminal", 2, second.actionId(), TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.WAITING_USER);
+        memoryService.upsertActiveForNextTask(USER.userId(), CONVERSATION,
+                "LEAVE_REQUEST", java.util.Map.of("task", 2), "leave task");
+
+        ActionExecutionResponse replay = actionService.confirm(
+                first.actionId(), first.confirmationNonce(), UUID.randomUUID().toString(),
+                null, "replay-terminal-again", USER);
+
+        assertTrue(replay.replayed());
+        assertEquals(TaskExecutionStatus.COMPLETED,
+                taskExecutions.findByActionId(first.actionId()).orElseThrow().status());
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER.userId(), CONVERSATION).orElseThrow().status());
+        assertEquals("LEAVE_REQUEST",
+                memoryService.find(USER.userId(), CONVERSATION).orElseThrow().taskType());
+    }
+
+    @Test
+    void taskRuntimeSuccessorCanCreateAfterPreviousLeaveActionIsTerminal() {
+        PendingActionView first = actionService.createPending(
+                leaveProposal(), "runtime-first-leave", null, USER, CONVERSATION);
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "runtime-first-leave-confirm", USER);
+
+        PendingActionView second = actionService.createPending(
+                expenseProposal(), "runtime-second-expense", null, USER, CONVERSATION);
+
+        assertEquals(ActionStatus.PENDING_CONFIRMATION, actionStatus(second.actionId()));
+    }
+
+    @Test
+    void taskRuntimeSuccessorCanCreateAfterPreviousExpenseWaitsExternally() {
+        PendingActionView first = actionService.createPending(
+                expenseProposal(), "runtime-first-expense", null, USER, CONVERSATION);
+        saveTask("group-runtime", 1, first.actionId(), TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.WAITING_USER);
+        actionService.confirm(first.actionId(), first.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "runtime-first-expense-confirm", USER);
+
+        PendingActionView second = actionService.createPending(
+                leaveProposal(), "runtime-second-leave", null, USER, CONVERSATION);
+
+        assertEquals(ActionStatus.PENDING_CONFIRMATION, actionStatus(second.actionId()));
+        assertEquals(TaskExecutionStatus.WAITING_EXTERNAL,
+                taskExecutions.findByActionId(first.actionId()).orElseThrow().status());
+    }
+
+    @Test
+    void markWaitingUserRecoversRunningTaskWithExistingActionBinding() {
+        PendingActionView pending = actionService.createPending(
+                leaveProposal(), "runtime-recover", null, USER, CONVERSATION);
+        saveTask("group-recover", 1, pending.actionId(), TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.RUNNING);
+
+        String taskId = "task-" + pending.actionId();
+        assertTrue(taskRuntimeService.markWaitingUser(taskId, pending.actionId()));
+
+        TaskExecution recovered = taskExecutions.findByTaskId(taskId).orElseThrow();
+        assertEquals(TaskExecutionStatus.WAITING_USER, recovered.status());
+        assertEquals(pending.actionId(), recovered.actionId());
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM business_action WHERE conversation_id = ?",
+                Integer.class, CONVERSATION));
+    }
+
+    @Test
     void taskRuntimeTransitionConflictRollsBackBusinessFactAndMemory() {
         memoryService.upsert(USER.userId(), CONVERSATION, "LEAVE_REQUEST",
                 TaskStatus.ACTIVE, "{}", "leave task");
@@ -125,10 +278,15 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
     }
 
     private void saveTask(String actionId, TaskType type, TaskExecutionStatus status) {
+        saveTask("group-transaction", 1, actionId, type, status);
+    }
+
+    private void saveTask(String groupId, int sequenceNo, String actionId,
+                          TaskType type, TaskExecutionStatus status) {
         Instant now = Instant.now();
         taskExecutions.saveAll(List.of(new TaskExecution(
-                "group-transaction", "task-" + actionId, USER.userId(), CONVERSATION,
-                1, type, type == TaskType.LEAVE_REQUEST ? "请假" : "报销", null,
+                groupId, "task-" + actionId, USER.userId(), CONVERSATION,
+                sequenceNo, type, type == TaskType.LEAVE_REQUEST ? "请假" : "报销", null,
                 status, actionId, now, now, status.isTerminal() ? now : null)));
     }
 

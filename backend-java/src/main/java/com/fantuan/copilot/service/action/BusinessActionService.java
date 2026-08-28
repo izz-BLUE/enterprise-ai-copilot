@@ -299,10 +299,10 @@ public class BusinessActionService {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "ACTION_CAPACITY_EXCEEDED", "待确认申请数量已达到上限。", null, null);
         }
-        // 同一会话至多一个活动动作：ai_task_memory 以 (user_id, conversation_id) 为唯一键，
-        // 多活动动作会互相终结对方的任务记忆（任一终态都会收口整条会话 Memory）。
-        // conversationId 为 null（无 Memory 关联的历史路径）时不做限制。
-        if (taskId == null && conversationId != null && identity.userId() != null
+        // 同一会话至多一个活动动作：Task Runtime 不能绕过这个 invariant；
+        // 正常 successor 创建时前序 action 已经 terminal。conversationId 为 null
+        //（无 Memory 关联的历史路径）时不做限制。
+        if (conversationId != null && identity.userId() != null
                 && actions.hasActiveByOwnerAndConversation(identity.userId(), conversationId)) {
             throw new ActionException(HttpStatus.CONFLICT, "ACTION_CONVERSATION_IN_PROGRESS",
                     "当前会话已有待确认的申请，请先确认或取消后再发起新申请。", null, null);
@@ -347,9 +347,18 @@ public class BusinessActionService {
         verifyNonce(action, confirmationNonce);
 
         if (action.status() == ActionStatus.SUCCEEDED) {
-            // 幂等重放：Memory 收口同样幂等（COMPLETED → COMPLETE 白名单内）
-            synchronizeTaskRuntime(action, taskStatusAfterConfirmation(action));
-            closeMemory(action, TaskStatus.COMPLETED);
+            if (isTaskRuntimeAction(action)) {
+                // Task Runtime replay 只验证当前 task 没有倒退；不能重新
+                // 关闭 conversation Memory，因为它可能已经属于 successor。
+                if (!taskRuntimeService.synchronizeReplayStatus(
+                        action.actionId(), taskStatusAfterConfirmation(action))) {
+                    throw new IllegalStateException("TaskExecution replay status conflict");
+                }
+            } else {
+                // Legacy 幂等重放：保持原有 Memory 收口语义。
+                synchronizeTaskRuntime(action, taskStatusAfterConfirmation(action));
+                closeMemory(action, TaskStatus.COMPLETED);
+            }
             return succeededResponse(action, traceId, true);
         }
         if (action.status() == ActionStatus.PROCESSING) {
@@ -508,6 +517,11 @@ public class BusinessActionService {
         if (!taskRuntimeService.synchronizeBusinessStatus(action.actionId(), target)) {
             throw new IllegalStateException("TaskExecution business status transition conflict");
         }
+    }
+
+    private boolean isTaskRuntimeAction(PendingAction action) {
+        return taskRuntimeService != null && action != null
+                && taskRuntimeService.findByActionId(action.actionId()).isPresent();
     }
 
     private void requireEnabledAndAdmin(String presentedToken) {

@@ -1,6 +1,7 @@
 package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
+import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.identity.VerifiedIdentity;
@@ -94,6 +95,22 @@ class BusinessActionServiceTest {
         when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1")).thenReturn(true);
         assertCode("ACTION_CONVERSATION_IN_PROGRESS", () -> f.service.createPending(
                 standardProposal(), "o", ADMIN, USER_A, "conv-1"));
+        verify(f.actions, never()).saveNew(any());
+    }
+
+    @Test
+    void taskRuntimeDoesNotBypassSameConversationActiveActionGuard() {
+        Fixture f = fixture();
+        when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1"))
+                .thenReturn(true);
+        HitlWaitMarker wait = new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + "b".repeat(64), "ex_" + "a".repeat(32),
+                BusinessActionType.ANNUAL_LEAVE_REQUEST);
+
+        assertCode("ACTION_CONVERSATION_IN_PROGRESS", () -> f.service.createHitlPending(
+                standardProposal(), "o", ADMIN, USER_A, "conv-1",
+                wait.executionId(), wait.waitId(), "task-2"));
+        verify(f.actions).hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1");
         verify(f.actions, never()).saveNew(any());
     }
 

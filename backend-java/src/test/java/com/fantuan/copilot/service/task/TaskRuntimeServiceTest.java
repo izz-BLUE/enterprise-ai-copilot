@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -153,5 +154,17 @@ class TaskRuntimeServiceTest {
                 .orElseThrow().taskId());
         verify(executions, never()).updateStatus(any(), eq(TaskExecutionStatus.PENDING),
                 eq(TaskExecutionStatus.RUNNING), any(Instant.class), eq(null));
+    }
+
+    @Test
+    void markWaitingUserAtomicallyRecoversAnAlreadyLinkedRunningTask() {
+        when(executions.markWaitingUser("task-1", "action-1", NOW)).thenReturn(true);
+
+        TaskRuntimeService service = new TaskRuntimeService(executions, pythonAgentGateway,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertTrue(service.markWaitingUser("task-1", "action-1"));
+        verify(executions).markWaitingUser("task-1", "action-1", NOW);
+        verify(executions, never()).updateStatus(any(), any(), any(), any(), any());
     }
 }

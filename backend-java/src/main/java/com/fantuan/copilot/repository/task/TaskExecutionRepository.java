@@ -36,7 +36,7 @@ public interface TaskExecutionRepository {
     boolean updateStatusByActionId(String actionId, TaskExecutionStatus target,
                                    Instant updatedAt, Instant completedAt);
 
-    boolean linkAction(String taskId, String actionId, Instant updatedAt);
+    boolean markWaitingUser(String taskId, String actionId, Instant updatedAt);
 
     boolean updateClarificationContext(String taskId, String context, Instant updatedAt);
 }

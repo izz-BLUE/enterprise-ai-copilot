@@ -147,11 +147,13 @@ public class JdbcTaskExecutionRepository implements TaskExecutionRepository {
     }
 
     @Override
-    public boolean linkAction(String taskId, String actionId, Instant updatedAt) {
+    public boolean markWaitingUser(String taskId, String actionId, Instant updatedAt) {
         int changed = jdbc.update("""
                 UPDATE task_execution
-                SET action_id = :actionId, updated_at = :updatedAt
-                WHERE task_id = :taskId AND action_id IS NULL
+                SET status = 'WAITING_USER', action_id = :actionId, updated_at = :updatedAt
+                WHERE task_id = :taskId
+                  AND status IN ('RUNNING', 'WAITING_USER')
+                  AND (action_id IS NULL OR action_id = :actionId)
                 """, Map.of("taskId", taskId, "actionId", actionId,
                 "updatedAt", Timestamp.from(updatedAt)));
         return changed == 1;
