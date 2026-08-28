@@ -12,6 +12,7 @@ Proposal 业务字段。
 - 支持主 Demo 的确定性相对语义："最近/最新 + 已批准"选择最新 APPROVED trip
 - "对应发票/相关发票"只从已选 trip 的 expense_documents 推导，并仍要求
   invoice_verify 成功，不能绕过验真事实
+- 仅在用户显式填写"报销原因/报销说明/备注"时抽取 expense_reason；不概括、不生成
 - 缺 trip_id 或发票明细时返回固定顺序 missing_fields（V2 §十五）
 """
 
@@ -43,6 +44,22 @@ _CORRESPONDING_INVOICE_EXPRESSIONS = (
     "全部发票", "所有发票", "全部费用", "所有费用",
 )
 
+# 报销原因采用“强显式触发”策略：只有用户明确给该业务字段赋值时才抽取。
+# 例如：报销原因写“项目A售前支持” / 报销说明：客户现场实施 / 备注：陪同销售拜访。
+# 普通语义如“帮我报销最近一次客户拜访的出差”不属于显式填写，不抽取。
+_EXPLICIT_REASON_TRIGGER = re.compile(
+    r"(?:报销(?:原因|说明|备注|事由)|"
+    r"(?:原因|说明|备注)(?:写|填写|填|填成|写成)|"
+    r"备注(?=\s*[:：]))"
+    r"\s*(?:(?:是|为|写|填写|填|填成|写成)\s*)?(?:[:：]\s*)?",
+    re.IGNORECASE,
+)
+_REASON_NEXT_FIELD_BOUNDARY = re.compile(
+    r"[，,]\s*(?=(?:发票(?:编号|使用|用|选择)?|成本中心|申报金额|报销金额|出差记录)"
+    r"\s*(?:[:：]|为|是|用|选择|填|写))"
+)
+_REASON_QUOTES = {"“": "”", '"': '"', "'": "'", "‘": "’"}
+
 
 class ExpenseInputError(ValueError):
     pass
@@ -56,6 +73,7 @@ class ExpenseInputAnalysis(BaseModel):
     is_claim_intent: bool
     trip_id: str | None
     invoice_ids: list[str]
+    expense_reason: str | None
     missing_fields: list[Literal["trip_id", "expense_items", "invoice_ids"]]
 
 
@@ -77,6 +95,36 @@ def extract_trip_reference(question: str) -> str | None:
 def extract_invoice_references(question: str) -> list[str]:
     """从问题里抽取 INV-xxx 引用（用户在问题里明确提到的发票号）。"""
     return re.findall(r"INV-[0-9A-Za-z-]+", question)
+
+
+def extract_expense_reason(question: str) -> str | None:
+    """抽取用户显式填写的报销原因/说明；未显式填写时返回 None。
+
+    只截取用户原文，不做 LLM 总结或语义改写。带引号时取引号内文本；不带
+    引号时截到句号/分号/换行，或明显的下一个业务字段之前。
+    """
+    match = _EXPLICIT_REASON_TRIGGER.search(question)
+    if match is None:
+        return None
+
+    tail = question[match.end():].lstrip()
+    if not tail:
+        return None
+
+    opening_quote = tail[0]
+    closing_quote = _REASON_QUOTES.get(opening_quote)
+    if closing_quote is not None:
+        end = tail.find(closing_quote, 1)
+        value = tail[1:end] if end > 0 else tail[1:]
+    else:
+        sentence_end = re.search(r"[。；;\n]", tail)
+        value = tail[:sentence_end.start()] if sentence_end else tail
+        next_field = _REASON_NEXT_FIELD_BOUNDARY.search(value)
+        if next_field:
+            value = value[:next_field.start()]
+
+    normalized = value.strip().strip('“”"\'‘’').strip()
+    return normalized or None
 
 
 def find_trip_records(context: ExpenseProposalContextLike) -> list[dict[str, Any]]:
@@ -170,6 +218,7 @@ def analyze_expense_input(
 
     trip_id = extract_trip_reference(normalized)
     invoice_ids = extract_invoice_references(normalized)
+    expense_reason = extract_expense_reason(normalized)
     trips = find_trip_records(context)
     verified_invoices = find_invoice_records(context)
 
@@ -234,6 +283,7 @@ def analyze_expense_input(
         is_claim_intent=True,
         trip_id=trip_id,
         invoice_ids=invoice_ids,
+        expense_reason=expense_reason,
         missing_fields=missing_fields,
     )
 
