@@ -17,7 +17,7 @@ CREATE TABLE task_execution (
     completed_at TIMESTAMPTZ NULL,
     CONSTRAINT uq_task_execution_group_sequence UNIQUE (task_group_id, sequence_no),
     CONSTRAINT fk_task_execution_action FOREIGN KEY (action_id)
-        REFERENCES business_action(action_id),
+        REFERENCES business_action(action_id) ON DELETE SET NULL,
     CONSTRAINT ck_task_execution_sequence CHECK (sequence_no IN (1, 2)),
     CONSTRAINT ck_task_execution_type CHECK (task_type IN ('LEAVE_REQUEST', 'EXPENSE_CLAIM')),
     CONSTRAINT ck_task_execution_status CHECK (status IN (
