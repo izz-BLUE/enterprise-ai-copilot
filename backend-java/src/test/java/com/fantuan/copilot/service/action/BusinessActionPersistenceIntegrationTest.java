@@ -72,6 +72,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
     @BeforeEach
     void resetDatabase() {
         service = new TestActionService(actionService);
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");

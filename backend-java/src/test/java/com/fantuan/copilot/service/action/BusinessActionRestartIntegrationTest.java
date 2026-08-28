@@ -165,6 +165,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
 
     private void reset(ConfigurableApplicationContext context) {
         JdbcTemplate jdbc = context.getBean(JdbcTemplate.class);
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM leave_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");

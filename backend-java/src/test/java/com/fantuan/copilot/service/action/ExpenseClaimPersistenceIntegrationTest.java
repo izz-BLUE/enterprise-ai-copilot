@@ -71,6 +71,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
 
     @BeforeEach
     void resetDatabase() {
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM expense_item");
         jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM ai_task_memory");

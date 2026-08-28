@@ -39,6 +39,7 @@ class IdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
 
     @BeforeEach
     void reset() {
+        jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM expense_item");
         jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM leave_request");
