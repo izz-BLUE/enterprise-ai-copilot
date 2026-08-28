@@ -1,67 +1,45 @@
-# Memory P0 Security & Error Boundary
+# Scoped Conversation Memory Security Boundary
 
-本文记录 Scoped Conversation Memory 当前安全边界。
+这份清单记录 Memory 的安全边界。Memory 是任务连续性层，不是身份系统、权限系统或业务数据库。
 
-## 信任来源
+## Identity and scope
 
-| 字段 | 权威来源 | 非权威来源 |
-| --- | --- | --- |
-| `user_id` | Java `VerifiedIdentity` | 前端、Python、LLM、Memory 内容 |
-| `conversation_id` | Java 当前请求解析结果 | Python 响应、Memory 内容 |
-| `employee_id` / 权限 / 业务日期 | Java 认证与配置 | LLM arguments、Memory |
-| Memory lifecycle | Java PendingAction 状态机 | Python proposal/action/status |
-| task content | Python 提案，Java 校验后保存 | 不可作为业务事实或权限依据 |
+- [x] owner 只取 Java `VerifiedIdentity.userId()`。
+- [x] Memory key 固定为 `(user_id, conversation_id)`。
+- [x] `conversationId` 由 Java 校验，缺失时服务端生成；它不是身份凭证。
+- [x] Python、LLM、前端 body、Tool arguments 和 Memory 内容不能覆盖 owner。
+- [x] Java 生成 `employee_id`、`business_date`、`trace_id` 和 runtime thread；这些值不进入 LLM arguments。
 
-## 写入防线
+## Read isolation
 
-- Python `MemoryProposal`、`MemoryWriteCommand` 和 `AgentMemoryProposal` 都使用严格字段契约。
-- Python 递归剥离 trusted/runtime key，敏感字符串整串替换为 `[REDACTED]`。
-- Python 对外只允许 `UPSERT + ACTIVE`；`UPSERT + COMPLETED/ABANDONED` 同样被拦截。
-- Python 响应不携带 owner、conversationId、action 或 status。
-- Java `AiTaskMemoryService` 独立重复检查 trusted key、生命周期控制字段、敏感内容和大小。
-- Java summary 与 task-state 字符串都执行大小写不敏感 marker 扫描。
-- 数据库以 `(user_id, conversation_id)` 复合 key 隔离，并用条件 SQL 阻止终态重新激活。
+- [x] Read path 只读取 `status=ACTIVE`。
+- [x] 终态 Memory 不 hydrate 到新请求。
+- [x] `memoryContext` 在 Python 侧作为不可信历史，不覆盖 Runtime Context/capability。
+- [x] `execution_history` 只有在 ACTIVE Memory + matching task type 时 hydrate。
+- [x] 历史摘要标记为 `CONTEXT_ONLY`，不能成为当前业务事实、权限、PendingAction 查询源或金额依据。
 
-## 动作链路时序
+## Trigger and write isolation
 
-带 `action_proposal` 的响应必须先通过 Java 权限与 `createPending`。只有 PendingAction
-成功建立后，Java 才处理对应 `memory_proposal`。这阻止失败或重复动作覆盖既有活动
-Memory。动作创建失败不执行 Memory 写入，也不错误地终结既有 Memory。
+- [x] 现有 ACTIVE Memory 不会单独触发 Extractor。
+- [x] Pure RAG、eval、余额/记录查询、travel/invoice read 不触发 Memory。
+- [x] 只有 `action_proposal` 或白名单 Memory-eligible Tool success 才触发。
+- [x] Python WritePolicy 只允许 `UPSERT + ACTIVE` proposal。
+- [x] Python 不直接写 Java DB，不写 `COMPLETE`/`ABANDONED`/terminal Memory。
+- [x] Java 当前认证请求负责落库、terminal transition、owner 和 conversation scope。
+- [x] Memory proposal 不得绕过 PendingAction 直接产生 LeaveRequest/ExpenseClaim。
 
-## 已移除的攻击面
+## Action and external safety
 
-当前运行时不再包含：
+- [x] `confirmationNonce` 由 Java 生成，数据库只保存 digest。
+- [x] Confirm 使用 owner、nonce、TTL、状态和 UUID idempotency key。
+- [x] Stale confirm 收口为 Java Action FAILED、Memory ABANDONED、HITL REJECTED。
+- [x] OA 不可用时保持 Pending，不伪造 terminal result。
+- [x] WAITING_USER 与 WAITING_EXTERNAL 使用不同 marker、correlation 和 resume endpoint。
+- [x] webhook body 不作为 OA status authority；Java HMAC 验证后仍 GET authoritative status。
+- [x] Java ExpenseClaim terminal commit 先于 external resume；resume 失败不回滚业务终态。
 
-- Python→Java Memory 反向 HTTP 回调；
-- `X-Memory-Write-Scope` HMAC 签发/验签；
-- `/api/internal/memory/**/write`；
-- Python 可知服务密钥同时充当 owner scope 签名密钥的设计。
+## Operational boundary
 
-`JAVA_INTERNAL_TOKEN` 只用于企业只读 Tool 的内部端点，不参与 Memory owner 或写入。
+默认策略：`MEMORY_WRITE_MODE=DISABLED`、`business.actions.enabled=false`、Mock OA/reconciliation/external-resume retry disabled。打开功能必须同时理解 Java authority、数据库、内部 token、Checkpoint 和外部回调边界。
 
-## Error Boundary
-
-| 位置 | 失败 | 主响应 | 处理 |
-| --- | --- | --- | --- |
-| Extractor | JSON/schema 非法 | 继续 | 丢弃提案，记录元数据 |
-| Pipeline | 非预期异常 | 继续 | `MemoryPipelineError` 保留 cause |
-| Dispatcher/response writer | 非 ACTIVE 命令或调度异常 | 继续 | 拦截并审计 |
-| Java proposal validation | trusted key、大小、敏感内容问题 | 继续 | 拒绝写入，不记录内容 |
-| Java repository | 状态冲突/数据库异常 | 继续 | 不写入，安全日志只记录异常类型 |
-| PendingAction creation | 权限/业务/容量/并发冲突 | 返回安全业务错误 | 不处理本次 Memory 提案 |
-
-Memory 是旁路能力，因此 Memory 写入失败不会撤销已经成功创建的 PendingAction。
-反过来，Memory 也不能绕过 PendingAction、nonce、幂等确认或最终业务写入边界。
-
-## 回归要求
-
-至少覆盖以下反例：
-
-- `UPSERT + COMPLETED/ABANDONED` 在 Python 被拒绝；
-- Python 响应不能提供 owner/conversation/lifecycle；
-- 动作创建失败或同会话已有活动动作时不写 Memory；
-- 动作成功时 `createPending` 先于 Memory upsert；
-- Java 只使用当前 `VerifiedIdentity.userId()`；
-- summary/task-state 的 Bearer、JWT、token、password、nonce、idempotency marker 被脱敏；
-- 终态 Memory 不能被 Agent 提案重新激活；
-- 日志不包含问题、答案、task state、scope、nonce 或业务原因原文。
+当前实现是小规格单机方案：Java/Python runtime guard 只在进程内生效，没有 distributed lease、event inbox/outbox、完整审计/告警或生产 SLA。任何需要多实例、真实 OA、强一致外部事务或长期 retention 的场景都需要单独的生产设计。

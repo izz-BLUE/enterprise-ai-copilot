@@ -1,193 +1,80 @@
-# 本地演示指南（Local Demo Guide）
+# Local Demo Guide (Quick Start)
 
-## 项目演示定位
+这里保留最短的本地启动路径；完整的差旅报销、Mock OA、HITL/external resume 和故障排查见 [demo-guide.md](demo-guide.md)。
 
-Enterprise AI Copilot 当前为**本地可复现的 RAG 应用后端 Demo**，尚未部署到公网服务器。
+## Prerequisites
 
-本文档说明如何在本地完整启动 Java / Python / Frontend 三端服务，用于面试演示或本地体验。
+Java 17、Python 3.11、uv、Node 20、npm、Docker Compose、PostgreSQL 和可用的 DeepSeek API key。需要外部报销演示时，还需要 Enterprise OA MCP fixture/service 和 LangGraph checkpoint PostgreSQL。
 
-## 前置条件
-
-| 依赖 | 最低版本 | 说明 |
-|------|---------|------|
-| Python | 3.11+ | AI 服务运行环境 |
-| Java | 17+ | 后端服务运行环境 |
-| Node.js | 18+ | 前端构建环境 |
-| uv | 最新版 | Python 包管理器 |
-| Maven | 3.8+（或项目内 mvnw） | Java 构建工具 |
-
-**可选依赖：**
-
-| 依赖 | 说明 |
-|------|------|
-| Git | 版本管理 |
-| curl 或浏览器 | 健康检查 |
-
-## 环境变量配置
-
-在 `agent-python/` 目录下创建 `.env` 文件（可从 `.env.example` 复制）：
-
-```env
-# 必填
-DEEPSEEK_API_KEY=your_api_key_here
-
-# 可选配置
-DEEPSEEK_BASE_URL=https://api.deepseek.com    # DeepSeek API 地址
-DEEPSEEK_MODEL=deepseek-chat                   # 模型名称
-DEEPSEEK_TEMPERATURE=0                         # LLM 温度参数，默认 0
-LLM_TIMEOUT=30                                 # LLM 调用超时（秒），默认 30
-MAX_MESSAGE_LENGTH=2000                        # 输入消息最大长度，默认 2000
-REWRITE_MODE=none                              # 查询重写：none / rule（实验模式）
-HF_HUB_OFFLINE=1                               # HuggingFace 离线模式（国内网络环境必须）
-```
-
-**注意：**
-
-- 如果无法访问 HuggingFace（国内网络），必须设置 `HF_HUB_OFFLINE=1`
-- 模型需要提前下载到本地缓存（`~/.cache/huggingface/hub/`）
-
-- 不要将 `.env` 提交到 Git
-- 不要在前端代码或文档中暴露 API Key
-- `hybrid_rerank` 和 `rewrite_mode=rule` 是实验模式，不建议默认启用
-
-## 启动服务
-
-需要启动 3 个服务，建议按以下顺序操作。
-
-### 1. Python AI Service（端口 8000）
+## Start infrastructure
 
 ```bash
+docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
+```
+
+## Start services
+
+```bash
+# Terminal 1
 cd agent-python
-uv sync
+uv sync --group dev
 uv run uvicorn app.main:app --reload --port 8000
-```
 
-### 2. Java Backend（端口 8080）
-
-```bash
+# Terminal 2
 cd backend-java
 ./mvnw spring-boot:run
-```
 
-Windows PowerShell：
-
-```powershell
-cd backend-java
-.\mvnw.cmd spring-boot:run
-```
-
-### 3. Frontend（端口 5173）
-
-```bash
+# Terminal 3
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-## 服务地址
+Windows PowerShell 的 Java wrapper 可使用 `.\mvnw.cmd spring-boot:run`。
 
-| 服务 | 地址 | 说明 |
-|------|------|------|
-| Frontend | http://localhost:5173 | 浏览器访问 |
-| Java Backend | http://localhost:8080 | API 入口 |
-| Python AI Service | http://localhost:8000 | AI 服务引擎 |
+地址：React `http://localhost:5173`，Java `http://localhost:8080`，Python `http://localhost:8000`，Mock OA `http://localhost:8010`。
 
-## 健康检查
-
-### Python AI Service
+## Health and RAG smoke
 
 ```bash
-curl http://localhost:8000/agent/health
-```
+curl http://localhost:8080/api/ready
+curl http://localhost:8080/api/agent/ready
+curl http://localhost:8000/agent/ready
 
-预期响应：`{"service": "agent-python", "status": "UP"}`
-
-### Java Backend
-
-```bash
-curl http://localhost:8080/api/health
-```
-
-预期响应：`{"service": "backend-java", "status": "UP"}`
-
-### Python Agent 通过 Java 代理
-
-```bash
-curl http://localhost:8080/api/agent/health
-```
-
-预期响应：`{"service": "agent-python", "status": "UP"}`
-
-## RAG 问答测试
-
-```bash
 curl -X POST http://localhost:8080/api/chat \
-  -H "Content-Type: application/json" \
+  -H 'Content-Type: application/json' \
   -d '{"message":"病假需要提供哪些材料？"}'
 ```
 
-预期响应：包含回答文本和 sources 列表的 JSON
+普通用户和浏览器只访问 Java；生产 Compose 不把 Python 8000 映射到宿主机公网。
 
-## 常见问题排查
+## Durable workflow prerequisites
 
-### Python 启动失败
+Python 本地默认 `LANGGRAPH_CHECKPOINT_MODE=DISABLED`。若演示可恢复用户确认和外部审批，需要显式设置：
 
-| 症状 | 原因 | 解决方案 |
-|------|------|---------|
-| `ModuleNotFoundError` | 依赖未安装 | `uv sync` |
-| `DEEPSEEK_API_KEY 未配置` | .env 缺失或格式错误 | 检查 `.env` 文件 |
-| `faiss.index not found` | 索引未构建 | 运行 `build_faiss_index.py` |
-
-### Java 启动失败
-
-| 症状 | 原因 | 解决方案 |
-|------|------|---------|
-| `Connection refused` | Python 服务未启动 | 先启动 Python 服务 |
-| `port 8080 already in use` | 端口被占用 | 关闭占用进程或修改端口 |
-
-### Frontend 启动失败
-
-| 症状 | 原因 | 解决方案 |
-|------|------|---------|
-| `npm install` 报错 | Node.js 版本过低 | 升级到 Node.js 18+ |
-| 页面无法加载 | Java 服务未启动 | 先启动 Java 服务 |
-
-### LLM 调用失败
-
-| 症状 | 原因 | 解决方案 |
-|------|------|---------|
-| `401 Unauthorized` | API Key 无效 | 检查 `.env` 中的 Key |
-| `timeout` | 网络问题或 API 过载 | 检查网络连接 |
-| `模型不存在` | 模型名称错误 | 检查 `DEEPSEEK_MODEL` |
-
-### Retrieval 评估可独立运行
-
-即使没有 API Key，retrieval 评估仍然可以运行（不调用 LLM）：
-
-```bash
-cd agent-python
-uv run python scripts/eval/run_rag_eval.py
+```text
+AGENT_LOOP_ENABLED=true
+LANGGRAPH_CHECKPOINT_MODE=POSTGRES
+LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
+ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 ```
 
-Generation 评估需要 API Key（会调用 LLM）。
+Java 侧按 [demo-guide.md](demo-guide.md) 打开 `BUSINESS_ACTIONS_ENABLED`、`DEMO_IDENTITY_ENABLED`、`MOCK_OA_ENABLED` 和所需的 external retry/reconciliation。所有功能默认关闭是安全基线。
 
-## 面试前检查清单
+## Troubleshooting
 
-演示前 15 分钟，逐项确认：
-
-- [ ] Python 服务运行正常（`/agent/health` 返回 ok）
-- [ ] Java 服务运行正常（`/api/health` 返回 ok）
-- [ ] Frontend 页面可访问（http://localhost:5173）
-- [ ] RAG 问答可正常返回结果
-- [ ] API Key 有效且有余额
-- [ ] 网络连通（可访问 DeepSeek API）
-- [ ] 准备好截图 / 录屏作为兜底方案
-
-**如果现场服务失败，切换到截图 / 录屏演示（见 `demo-script.md`）。**
+| 现象 | 优先检查 |
+|---|---|
+| Python ready 失败 | API key、索引、checkpoint DSN 和 PostgreSQL health |
+| Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture ownership、trip/invoice 状态 |
+| Confirm 503 | Python revalidation adapter 或 OA MCP 是否可用；不要把 PendingAction 改成失败 |
+| OA webhook 失败 | 精确 path、raw-body HMAC、共享 secret、timestamp window |
+| 同一请求 busy | Java/Python process-local runtime guard 正在保护完整 lifecycle |
 
 ## 相关文档
 
-- [`docs/deployment.md`](deployment.md) — Docker Compose、网络边界、Nginx 与 HTTPS 部署说明
-- [`docs/quality-assurance.md`](quality-assurance.md) — CI、检索评估、安全检查与发布验证口径
-- [`README.md`](../README.md) — 项目全貌和 Quick Start
-- [`docs/api.md`](api.md) — 接口文档
+- [完整 Demo Guide](demo-guide.md)
+- [API](api.md)
+- [Deployment](deployment.md)
+- [Quality Assurance](quality-assurance.md)
+- [README](../README.md)

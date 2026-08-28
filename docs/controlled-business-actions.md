@@ -1,209 +1,182 @@
-# 受控业务动作（Controlled Business Actions）
+# Controlled Business Actions
 
-## 定位与边界
+本文说明当前两个受控动作：`ANNUAL_LEAVE_REQUEST` 和 `EXPENSE_CLAIM`。它们共享 Java authority，但业务事实不同。Python/LLM 只能提出 Proposal；任何写操作都必须经过 Java 的 PendingAction、nonce、权限、幂等和数据库事务。
 
-该能力是 PostgreSQL 持久化的受控 Sandbox，目前只支持 `ANNUAL_LEAVE_REQUEST`。PostgreSQL 是生产强依赖，数据库不可用时应用启动失败且不会降级到内存。它不接真实 OA、不使用 Redis 或消息队列。PendingAction、模拟余额、LeaveRequest 与 Planner-first 的 HITL Checkpoint 可跨 Java/Python/PostgreSQL 重启恢复。React 会展示脱敏后的 PendingAction 确认卡，并由用户显式确认或取消草稿。
+## 1. Common contract
 
-Feature Flag `business.actions.enabled` 与 `demo.identity.enabled` 均默认关闭。共享 Admin Token 只用于演示访问控制，`X-Demo-User-Id` 只用于受控 Demo 数据隔离，两者都不代表员工身份认证。数据库终态和唯一 `source_action_id` 支持多 Java 实例间的确认重放；当前仍不处理中国法定节假日与调休。
+```text
+Python Proposal / Clarification
+  → Java validation
+  → PENDING_CONFIRMATION
+  → explicit user confirm
+  → PROCESSING
+  → SUCCEEDED | FAILED
 
-main 同时保留两套 LangGraph 互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
+cancel → CANCELLED
+TTL     → EXPIRED
+```
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）：`safety → planner ⇄ tool_executor → prepare_hitl → approval(interrupt) → finalize`。Planner 决策调用 `leave_proposal_tool`，同样复用 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`；只有完整 Proposal 才进入一次 HITL wait。
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）：`safety → router → rag|eval|action|refuse`。`router_node` 检测到年假申请意图后进入 `action_node`，由 `tool_calling_service.plan_annual_leave_action` 生成 `action_proposal` 或 `missing_fields`。
+Proposal 和 Clarification 都没有业务副作用。缺字段只返回 `missing_fields`，不创建 PendingAction。完整 Proposal 由 Java 再校验，并以当前认证用户、conversation 和业务日期为范围。
 
-两套图在受控业务动作这条链路上汇流到 **同一个 Java 权威控制面**：Python 端只产 Proposal，不执行写操作；`confirmationNonce`、PendingAction 持久化、状态机、TTL、幂等、权限和最终数据库写入全部由 Java 完成。
+Java 负责：
 
-Planner-first 下受控业务动作相关的 Tool 可见性由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
+- `BusinessActionType` 白名单、字段、日期、权限、容量和业务规则；
+- `confirmationNonce` 生成（32-byte `SecureRandom`），数据库只存 SHA-256 digest；
+- PendingAction 状态、TTL、owner/correlation、`source_action_id` 唯一约束；
+- Confirm 的 owner、nonce、TTL、状态和 UUID `Idempotency-Key`；
+- 业务数据库事务和最终结果；
+- Confirm/cancel/expire/失败后的 Java Memory lifecycle transition。
 
-- 始终可见：`rag_answer_tool`
-- `employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加：`leave_balance_tool` / `leave_request_tool`
-- `allow_eval=true` 时追加：`eval_report_tool`
-- `allow_business_actions=true` 且 `employee_id` 非空时追加：`leave_proposal_tool`（仅在此条件下 Planner 才能决策调用并产出 Proposal）
+Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创建 LeaveRequest 或 ExpenseClaim。Confirm body 只允许 `confirmationNonce`，不接受浏览器传入的 employee、金额、权限或业务事实。
 
-## 真实调用链
+## 2. Planner and Router paths
+
+```text
+AGENT_LOOP_ENABLED=true
+  safety → planner ⇄ tool_executor → proposal → Java PendingAction
+
+AGENT_LOOP_ENABLED=false
+  safety → router → action → proposal → Java PendingAction
+```
+
+Planner-first 是仓库部署默认；Router-first 是显式兼容回退。两者最终都调用同一 Java control plane。
+
+Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。
+
+Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个配置只属于 Python → Java 的只读业务 Tool 链路。
+
+## 3. Annual leave
+
+年假 Proposal 由确定性日期/原因解析生成。Java 再校验：
+
+- 开始日期不早于当前 business date，跨度和日期顺序合法；
+- reason 长度和字符安全；half-day 只能用于单个工作日；
+- 工作日天数、余额和同一员工的日期冲突；
+- action owner、conversation scope 和业务功能开关。
+
+Confirm 在一个 PostgreSQL 事务内锁定账户和 Action，写入 LeaveRequest、扣减余额并保存成功结果；任何数据库异常整体回滚。当前 Demo 不处理法定节假日和调休，Manager 也没有审批或查看他人申请的权限。
+
+## 4. Expense primary workflow
 
 ```mermaid
 flowchart LR
-    U[React / API Client] --> D[Demo Identity Directory]
-    D --> J[Java Trace / Admin / Feature Flag]
-    J --> S[Python Safety Guard]
-    S --> G{AGENT_LOOP_ENABLED}
-    G -->|false 显式回退| RT[Deterministic Router]
-    G -->|true 仓库默认| P[Planner ⇄ Tool Executor]
-    RT -->|字段完整| APP[action_proposal]
-    RT -->|缺字段| CL[Clarification response]
-    P -->|PlannerDecision| T[leave_proposal_tool]
-    T -->|字段完整| APP
-    T -->|缺字段| CL
-    APP --> V[Java BusinessActionService / HITL Coordinator]
-    V -->|Java 产 confirmationNonce + wait correlation| DB[(PostgreSQL PendingAction)]
-    DB --> CARD[React PendingAction Card]
-    CARD -->|confirm/cancel + owner + stable idempotency key| V
-    V -->|事务提交后 best-effort resume| R[Python HITL resume]
-    R -->|Command(resume) → finalize| CP[(PostgreSQL LangGraph Checkpoint)]
-    V -->|confirm success| E[LeaveExecutionGateway]
-    E --> L[(PostgreSQL Leave Account + LeaveRequest)]
-    CARD -->|cancel| X[CANCELLED]
+    U[User question] --> P[Planner]
+    P --> T[travel_record_tool]
+    P --> I[invoice_verify_tool]
+    P --> R[rag_answer_tool]
+    T --> E[expense_proposal_tool]
+    I --> E
+    R --> E
+    E --> W[WAITING_USER]
+    W --> J[Java PendingAction]
+    J --> C[User confirm]
+    C --> V[confirm-time revalidation]
+    V --> X[ExpenseClaim + ExpenseItem]
+    X --> EW[WAITING_EXTERNAL]
+    EW --> O[Mock OA PENDING]
+    O --> S[APPROVED / REJECTED]
+    S --> G[Java authoritative GET]
+    G --> ER[external resume]
+    ER --> END[Graph END]
 ```
 
-Safety Guard 先于一切；Planner-first 路径下若 Safety 拦截则直接终止，不会进入 Planner LLM。年假申请草稿不会进入只读 Tool：
+实际顺序是：
 
-- 政策 / 结转 / 审批流程类查询 → `rag_answer_tool`
-- 余额查询 → `leave_balance_tool`
-- 最近已成功提交的请假记录 → `leave_request_tool`
-- 申请草稿（明确含"申请 / 提交 / 准备"年假业务动作）→ `leave_proposal_tool`
+1. `travel_record_tool` 和 `invoice_verify_tool` 通过 Enterprise OA MCP 读取当前事实；它们是 read-only，不触发 Memory。
+2. `expense_proposal_tool` 只消费已成功 Tool 的结构化 observations。它不重新调用 MCP、Java 或 RAG；住宿上限、天数、金额由程序确定性计算。
+3. Python 在 `prepare_hitl → interrupt` 前以同步 durability 保存 `WAITING_USER` marker。Java 按 `agent_execution_id + hitl_wait_id` 幂等注册 PendingAction。
+4. 用户 Confirm 后，Java 在本地写事务前执行 confirm-time revalidation；通过后在同一 Java 事务写 `ExpenseClaim` 和 `ExpenseItem`，并将 BusinessAction 置为 `SUCCEEDED`。
+5. Java 事务提交后，Python 用 `Command(resume)` 收口用户确认；Planner/Tool 不重跑。确认成功的 Expense execution 随后进入 `prepare_external_wait → external_wait(interrupt)`。
+6. Java 在事务外向 Mock OA 提交带 `Idempotency-Key: expense:<expenseId>` 的 PENDING approval，并把本地 claim 绑定到 `external_request_id`。
+7. Mock OA 被 approve/reject 后发送不含 status 的签名通知；Java 通过 webhook 或 reconciliation 调用 Mock OA GET，唯一以该状态更新本地 claim。
+8. Java 本地 ExpenseClaim 终态提交后，才调用 Python external resume。Python 严格校验 wait/execution/action/request correlation，用 `Command(resume)` 进入 Graph END。
 
-## `leave_proposal_tool` 的设计
+## 5. Confirm-time revalidation
 
-`leave_proposal_tool` 是 Planner-first 下的受控业务动作 Tool。LLM 不接收用户原始问题、日期、reason、half-day、trace_id、policy context、员工信息、余额或 Admin Token，也不负责生成 Proposal。Tool Executor 独立做权限 / Tool 预算（`MAX_TOOL_CALLS=3`） / 成功签名去重校验；原始问题来自当前 `AgentState`，`business_date` / `trace_id` 等可信系统字段由 Executor 从本次请求 Runtime Context 注入，模型在 `arguments` 中不得夹带这些字段。
+这是一个 Java → Python 的窄内部适配器，payload 来自持久化 Action，不来自浏览器或 Memory。它重新取得当前 OA facts，检查：
 
-执行流程：
+| 事实 | 校验 |
+|---|---|
+| Trip | ID 存在、employee ownership、状态 `APPROVED`、当前 start/end 日期有效，并重新计算 stay nights |
+| Invoices | ID 集合精确匹配、归属正确、`valid=true`、`duplicate=false`、金额和 category 未变 |
+| Amount | Java 根据当前 facts 确定性重算 claimed/reimbursable，与 Proposal 一致 |
 
-1. Planner 输出 `action=tool` 且 `tool_name=leave_proposal_tool`、`arguments={}`、`reason_code=need_proposal` 的严格结构化决策；
-2. Tool Executor 在结构 / employee_id / 权限 / Tool 预算 / 成功签名去重校验通过后发起调用；
-3. `leave_proposal_tool` 调用 `tool_calling_service.plan_annual_leave_action(question, business_date, trace_id)`；
-4. 缺失日期或原因时返回 `kind=clarification`、`action_proposal=null`、`missing_fields=[...]`；
-5. 字段完整时返回 `kind=proposal`、`action_proposal={...}`、`missing_fields=[]`；
-6. Tool Executor 把 `action_proposal` / `missing_fields` 同步写回 `AgentState`；图终止后由 `_finalize_action_proposal` 与 `_finalize_response_contract` 收敛公共响应。
+结果分三类：
 
-`leave_proposal_tool` **不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；它不调用 Java 内部只读端点，不执行任何写操作，最终写操作完全交给 Java。
+- **Fresh**：进入 Java 本地事务，写入 ExpenseClaim/Items；
+- **Stale**：Action=`FAILED`、Memory=`ABANDONED`、HITL=`REJECTED`，不创建 ExpenseClaim，正常路径通过 REJECTED resume 到 Graph `END`；若 stale 终态已在 Java 提交但 Python resume 失败，Java `FAILED` 保留，重复 Confirm 不重新校验 OA 或改变 Java 状态，只重试同一个确定性的 REJECTED continuation；没有 autonomous stale-HITL worker；
+- **Unavailable**：保留 `PENDING_CONFIRMATION`，返回 503，可重试；不伪造 FAILED。
 
-## Java 权威控制面
+远程读取完成到本地事务提交之间仍有小型 TOCTOU 窗口，这是当前小规格方案明确接受的限制。Local Transactional Outbox 不能消除该窗口；若未来需要关闭它，必须由 provider 提供 version token/ETag、CAS、lease、execute-if-version 或 transactional API。Transactional Outbox 只在本地事务提交后需要可靠异步发布 command/event 时评估。
 
-Java 使用入口 `TraceIdFilter` 生成的 traceId 作为 `PendingAction.originTraceId`，不信任 Python 响应中的 traceId。Admin Token 仅在 Java 内校验，不下传 Python。Java 使用配置时区的可注入 `Clock` 计算业务日期，并重新校验：
+## 6. WAITING_USER is not WAITING_EXTERNAL
 
-- Action 类型、日期完整性和日期顺序；
-- 开始日期不得早于业务日期，跨度不超过 31 个日历日；
-- reason 为 1 到 200 个非控制字符；
-- 半天仅允许单个工作日；
-- 工作日天数、余额和已有申请冲突。
+| 维度 | `WAITING_USER` | `WAITING_EXTERNAL` |
+|---|---|---|
+| 含义 | 用户是否确认 Proposal | 外部 OA 是否批准已提交 ExpenseClaim |
+| Java authority | PendingAction | ExpenseClaim + Mock OA authoritative GET |
+| Python marker | `BUSINESS_ACTION_CONFIRMATION` | `EXPENSE_APPROVAL` |
+| Python endpoint | `/agent/langgraph/hitl/resume` | `/agent/langgraph/external/resume` |
+| resume payload | Action decision/status | OA decision/status/request |
+| 普通 Chat | 不得跨过 | 不得跨过 |
 
-整日申请只统计周一至周五，半天为 `0.5` 天。服务端固定目录提供 `DEMO-001`、`DEMO-002` 和 `DEMO-MGR-001` 三个互相隔离的账户；Manager 当前没有审批或查看他人申请的权限。
+两种 wait 都需要严格 schema、correlation 和当前 runtime thread。HITL Confirm/Cancel 与 external resume 都不运行 Memory proposal pipeline。
 
-PendingAction 状态机：
+## 7. Mock OA, webhook and reconciliation
+
+Mock OA 独立运行在 `:8010`，使用 SQLite 保存 idempotency key、payload hash、request ID 和 status：
 
 ```text
-PENDING_CONFIRMATION
-  ├─ confirm → PROCESSING → SUCCEEDED
-  │                        └→ FAILED
-  ├─ cancel  → CANCELLED
-  └─ timeout → EXPIRED
+POST /api/expense-approvals             → PENDING
+GET  /api/expense-approvals/{requestId} → current status
+POST /api/admin/expense-approvals/{id}/approve
+POST /api/admin/expense-approvals/{id}/reject
 ```
 
-`confirmationNonce` 由 Java 在 `BusinessActionService.createPending` 内部用 32 字节 `SecureRandom` 生成，明文只在创建响应返回；数据库只保存 32 字节 SHA-256 摘要，Java 使用常量时间比较。浏览器刷新后 nonce 不会恢复，因为明文仅存在页面内存。confirm 要求 UUID `Idempotency-Key`。
+Submit 的相同 key + 相同 payload 返回同一 request；payload 冲突返回 409。审批只允许 `PENDING → APPROVED/REJECTED`，相同终态重放，反向决定冲突。终态事务提交后才 best-effort webhook；webhook 只发送 `eventId`、event type 和 request ID，不发送 status。
 
-`createPending` 先按员工锁定 `leave_account` 并完成余额/冲突复核，再短时锁定 `business_action_control` 执行过期转换、全局容量判定和落库，缩短不同员工之间的串行区；活动 `(owner_user_id, conversation_id)` 另有数据库部分唯一索引兜底。冲突查询始终包含 employeeId，所以不同用户可提交相同日期，同一用户仍拒绝重叠日期。confirm/cancel 使用 `SELECT ... FOR UPDATE` 锁定 Action 行并先校验 owner；归属不符与 Action 不存在统一返回 `ACTION_NOT_FOUND`。confirm 再锁定当前 Account 行，在一个事务内通过 `LeaveExecutionGateway` 复查冲突、写入唯一 `source_action_id` 的 LeaveRequest、扣减余额并写入成功结果。任何数据库异常会整体回滚，草稿保持可重试。
+Java webhook 的唯一路径是 `POST /api/webhooks/mock-oa/expense-approval`。它在 Spring Security 中只对这一个精确 POST path permitAll，然后验证：
 
-同一 `(owner_user_id, conversation_id)` 至多一个活动 PendingAction（`PENDING_CONFIRMATION` / `PROCESSING`）。这是 `ai_task_memory` 以 `(user_id, conversation_id)` 为唯一键、每条会话只有一条任务记忆的配套约束：若允许同会话多个活动动作，任一动作进入终态都会收口整条会话 Memory，误伤其他仍在等待确认的动作的续接。`createPending` 在控制锁内检查该约束，命中返回 `409 ACTION_CONVERSATION_IN_PROGRESS`；`conversationId` 为 null（无 Memory 关联的历史路径）不限制。动作确认 / 取消 / 过期 / 失败后，同会话可再次发起新申请。
+1. 原始 body 的 `timestamp + "." + rawBody` HMAC-SHA256；
+2. timestamp 与当前时间不超过 300 秒；
+3. 严格 DTO、event type 和 request ID；
+4. 通过 `external_request_id` 调 Mock OA authoritative GET。
 
-### Durable HITL User Confirmation Resume（P3-4）
+认证失败返回 401，body 不合法返回 400，status sync 失败返回 502。通知本身没有状态 authority，伪造或过期通知不能直接改变 ExpenseClaim。
 
-Planner-first 的完整业务 Proposal 在 `prepare_hitl_node` 生成严格的 `HitlWaitMarker`：`schema_version=1`、固定 `kind`、确定性 `wait_id`、当前 `execution_id` 与 `action_type`。`approval_node` 只调用 LangGraph `interrupt(wait_marker)`，在恢复时严格校验 Java 返回的 `wait_id`、`execution_id`、`action_type` 和决定状态；interrupt 前后均不执行业务写操作。Clarification（`action_proposal=null`）不会创建 wait，也不会触发 Java PendingAction。
+Reconciliation 默认关闭，默认 60 秒、批量 20（代码限制 1–100）。候选只包含 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先对 `external_last_checked_at` 做 due CAS 并提交，再在事务外 GET；Webhook 与 reconciliation 共用同一 status-sync service。Submission retry 与 external-resume retry 也默认关闭并独立限批。
 
-Python 先以 `durability=sync` 落盘 wait，再返回 Java 内部响应。Java `BusinessActionHitlCoordinator` 用 `agent_execution_id + hitl_wait_id` 注册唯一 PendingAction；相同 wait 的重试复用同一 action 行并只轮换尚未确认的 nonce，归属、会话、员工、动作类型或 execution 不一致时 fail-closed。若相同 wait 已对应 Java 的 `SUCCEEDED / CANCELLED / EXPIRED / FAILED` 终态，注册只读取终态并向 Python 续接，不创建新动作、不轮换 nonce；这条终态对账路径只要求当前可信 owner/correlation，允许业务能力已撤销。HITL 的 correlation 字段是内部持久化元数据，不进入公网 `AgentChatResponse`。
+## 8. External resume failure semantics
 
-Confirm / Cancel 与原 Agent Chat 共用 Java 的最终 runtime thread guard；guard 忙时返回 `ACTION_THREAD_BUSY`，不进入业务 Service，已获取的 guard 在所有路径释放。Java 业务事务先提交后，才 best-effort 调用 Python `POST /agent/langgraph/hitl/resume`；Python 只接受严格的 Java-authoritative decision，重新注入当前 Runtime Context，不运行 Memory proposal pipeline。成功、取消、过期或安全拒绝都可幂等重放；Python 服务暂时不可用不会回滚已提交的 Java 业务结果，后续可由同一终态调用重试续接。确定性注册拒绝白名单只有 `BUSINESS_RULE_VIOLATION`、`EXPENSE_ITEMS_REQUIRED`、`EXPENSE_AMOUNT_INVALID`、`EXPENSE_INVOICES_REQUIRED`；这些错误不创建 PendingAction，由 Java 先将已有 ACTIVE Memory 收口为 `ABANDONED`，再发送 `action_id/request_id=null`、当前 wait/execution/action type、`FAILED + REJECTED` 的安全终态。Memory 收口抛出 infrastructure exception 时禁止发送 Graph terminal，保留 `WAITING_USER` 供下次重试；Memory 不存在或已是终态的幂等 no-op 仍可继续 resume。容量、会话并发、能力/管理员权限、数据库或 Python 传输异常保持可重试，不伪造 rejected Action。普通 Chat 发现已有 wait 时只返回持久化 Proposal/wait 状态，不重新规划或覆盖它；wait、actor、correlation 或 checkpoint 状态不匹配统一拒绝。终态视图的 nonce 为 null 且 `confirmationRequired=false`，只有 `PENDING_CONFIRMATION` 返回确认凭据。
+Java 只有在 ExpenseClaim 的 `APPROVED/REJECTED` 终态事务提交后才构建 external resume payload。payload 从持久化 correlation 重建 owner/conversation/employee/execution/wait/request，能力固定为 false，避免恢复路径重新进入 Planner 或业务 Tool。
 
-当前唯一实现 `PostgresLeaveSandboxGateway` 与 Action、账户处于同一个 PostgreSQL 事务。真实 OA 远程请求无法加入本地事务，不能声称"替换 Gateway 即可安全上线"；未来需要 Transactional Outbox、异步投递、外部幂等、回调或轮询、重试、对账、补偿和状态映射。
+Python 可能处于三种安全状态：
 
-LeaveRequest 编号由 PostgreSQL Sequence 生成。事务回滚时 Sequence 已取出的编号不会回收，因此编号允许出现间隙，但不会因服务或数据库重启而重复。
+- `WAITING_EXTERNAL`：等待 Java authoritative decision；
+- `EXTERNAL_CONTINUATION`：decision 已消费，finalizer 仍待完成；
+- `EXTERNAL_COMPLETED`：已收口，再次投递为幂等 no-op。
 
-confirm/cancel 请求体只允许 `confirmationNonce`，额外业务字段会被拒绝。PendingAction、confirm、cancel 及 Action 错误响应均使用 `Cache-Control: no-store`。
+Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只负责投递和重试记录。Python 不可用、响应丢失或 finalizer crash 都不能回滚 Java 终态。
 
-## Python 与 Java 的契约
-
-Python 端通过 `/agent/langgraph/chat` 返回的内部响应字段（公网侧不直接消费）：
-
-- `action_proposal`：确定性 Proposal 字典；仅在 Planner-first 或 legacy Router-first 命中 `route=action` 且字段完整时出现；
-- `missing_fields`：缺字段时的固定顺序数组（`start_date` / `end_date` / `reason`）。
-
-Java 端在 `LangGraphAgentController` 内：
-
-1. 收到完整 `action_proposal` + Python 已落盘的 `hitl_wait` 后调用 `BusinessActionHitlCoordinator`；
-2. 重新校验日期、跨度、半天、原因长度、工作日、余额与冲突；
-3. 以 `agent_execution_id + hitl_wait_id` 唯一注册 PendingAction，生成 `confirmationNonce`，返回公网 `pendingAction` 视图（仅摘要 + nonce，不含内部 trace_id / 数据库主键 / 余额与申请历史）；
-4. Confirm / Cancel 在同一 runtime thread guard 内执行，Java 事务提交后 best-effort 调用 Python 内部 resume；Python 只继续原 Checkpoint，不重跑 Planner、业务 Tool 或 Memory。
-
-`action_proposal` 是 Java/Python 内部契约，**不能绕过 Java 权威校验直接执行**。
-
-## React 人工确认链路
-
-前端收到 PendingAction 后立即把 `confirmationNonce` 从可渲染响应中拆出，仅保存到当前页面生命周期内的 `useRef(Map)`；公开消息状态和 `PendingActionCard` props 中不包含 nonce。nonce、Admin Token 和幂等 Key 都不会写入 DOM、URL、日志、`localStorage` 或 `sessionStorage`。
-
-Confirm 首次点击使用 `crypto.randomUUID()` 生成幂等 Key，并按消息保存在页面内存。网络失败、HTTP 502/503 或可重试服务端错误后，重试确认复用原 Key，避免服务端已成功但客户端未收到结果时重复执行。Cancel 不发送 `Idempotency-Key`。同步 `Set` 锁在 React 状态更新前生效，防止确认或取消的快速双击产生多个请求。
-
-Confirm 首次成功后，Action 的持久化成功结果成为权威结果。后续使用相同或不同的格式合法 UUID `Idempotency-Key` 再次确认，均重放原 `requestId` 并返回 `replayed=true`，不会再次创建 LeaveRequest 或扣减余额。
-
-卡片状态为 `pending → confirming → succeeded` 或 `pending → cancelling → cancelled`；过期草稿进入 `expired`，可重试错误进入 `error` 并且只显示与上一次决定一致的重试按钮。客户端到期计时用于提前禁用交互，服务端 `ACTION_EXPIRED` 仍是权威结果。执行中的动作会禁用清空会话、模式切换和身份选择。切换身份前对未处理草稿二次确认，确认后清空消息、nonce、Action UI、幂等 Key 和同步锁。身份只保存在 React state，不写入 localStorage、sessionStorage、Cookie 或 URL。
-
-## P2-A Expense Workflow V1（差旅报销）
-
-P2-A 在受控业务动作之上扩展 `EXPENSE_CLAIM`（Java `BusinessActionType`），
-复用同一 `BusinessActionService` 通用生命周期（HITL / nonce / TTL / 幂等 /
-Memory 收口），业务专属逻辑由 `BusinessActionHandler` 承载：
-
-- `AnnualLeaveActionHandler`：年假业务（余额 / 冲突 / 执行 / summary）
-- `ExpenseClaimActionHandler`：报销业务（proposal 校验 / 确定性金额计算 /
-  写 ExpenseClaim + ExpenseItem / ExpenseClaimSummary）
-
-分发点唯一：`proposal.actionType() → BusinessActionHandlerRegistry → handler`
-（禁止 `instanceof` / `enum switch`）。
-
-Python 侧新增 4 个 Agent Tool（V2 §六 / §九）：
-
-| Tool | source | side_effect | identity_required | memory_eligible |
-|---|---|---|---|---|
-| `travel_record_tool` | MCP (`enterprise-oa-mcp`) | NONE | true | false |
-| `invoice_verify_tool` | MCP (`enterprise-oa-mcp`) | NONE | true | false |
-| `expense_proposal_tool` | LOCAL（受控 Proposal） | NONE | true | **true → EXPENSE_REQUEST** |
-| `expense_status_tool` | Java `/api/internal/expense/*` | NONE | true | false |
-
-`ExpenseActionProposal`（strict / extra='forbid' / action_type='EXPENSE_CLAIM'）
-由程序层从 `tool_history` 中的成功 facts 确定性构造：
-`tool_executor_node` 在调用 `expense_proposal_tool` 前从已成功的
-travel / invoice / rag observation 组装 `ExpenseProposalContext`（系统注入，
-不可由 LLM arguments 伪造）；Tool 内部**禁止**再次调用 MCP / Java / RAG。
-金额 / 限额（HOTEL 750×晚封顶、其它合法实报）由确定性业务代码计算，
-禁止 LLM 计算金额。
-
-`expense_status_tool` 查询 Java 权威状态（Java Expense Domain 是最终
-Source of Truth）；`GET /api/internal/expense/status?expenseId=` +
-`/recent`，`X-Internal-Token` + 可信 `X-Employee-Id` 鉴权，ownership
-check（跨员工 404）。
-
-Memory：`EXPENSE_REQUEST` 只通过 `MemoryCapabilityRegistry`
-（`EXPENSE_MEMORY_CAPABILITY`，eligible tool = `expense_proposal_tool`）
-注册；其余 Expense read tools（travel / invoice / expense_status / rag）
-单独成功不触发 Extractor；**未修改** Memory Trigger / Write / Extractor Core。
-
-## 配置
+## 9. Configuration
 
 | 配置 | 默认值 |
-|---|---:|
+|---|---|
 | `business.actions.enabled` | `false` |
 | `business.actions.require-admin` | `true` |
 | `business.actions.ttl-seconds` | `600` |
-| `business.actions.max-pending` | `100` |
-| `business.actions.max-completed` | `500` |
-| `business.actions.demo-annual-leave-balance` | `5.0` |
-| `business.actions.timezone` | `Asia/Shanghai` |
-| `demo.identity.enabled` | `false` |
-| `AGENT_LOOP_ENABLED`（Python 端环境变量） | `true`（仓库部署默认，Planner-first；`false` 显式回退 legacy） |
+| `AGENT_LOOP_ENABLED` | `true`，`false` 显式回退 Router-first |
+| `LANGGRAPH_CHECKPOINT_MODE` | Python 本地 `DISABLED`，生产 Compose `POSTGRES` |
+| `MEMORY_WRITE_MODE` | `DISABLED` |
+| `MOCK_OA_ENABLED` | `false` |
+| reconciliation / external resume retry | `false` |
 
-仓库使用事务内惰性过期和数据库有界容量，不创建后台线程。`maxCompleted` 只清理未被 LeaveRequest 引用的 `CANCELLED / EXPIRED / FAILED`；成功 Action 保留，以满足外键和重放要求。本地表审计记录 traceId、originTraceId、actionId、状态变化、结果码和 requestId，不记录 Admin Token、nonce、nonce 摘要或完整 reason；完整集中日志 / APM / 告警栈尚未实现。
+## 10. Accepted boundaries
 
-## 两套图对受控业务动作的影响
-
-| 维度 | legacy Router-first（默认） | Planner-first（显式开启） |
-|---|---|---|
-| 入口 | `safety → router → action` | `safety → planner` 决策 → `leave_proposal_tool` |
-| 是否暴露 `leave_proposal_tool` | 否（action_node 复用 `tool_calling_service`） | 由 `allow_business_actions` 控制可见性；Planner-first 最多 5 个 Tool，实际可见集合由程序层按权限动态收缩，模型不能自行扩大 Tool 权限 |
-| 公共响应 `route=action` | 是 | 是 |
-| 公共响应 `category=business_action` | 是 | 是 |
-| 写操作入口 | 仍由 Java 完成 | 仍由 Java 完成 |
-| 与 `BUSINESS_ACTIONS_ENABLED` 关系 | 同样依赖；不开启则 Java 不创建 PendingAction | 同样依赖；不开启则 `leave_proposal_tool` 在 Planner 看来不可见、Java 也拒绝 |
-| 与 `JAVA_INTERNAL_TOKEN` 关系 | 无 | `leave_proposal_tool` 不依赖；只读 Tool 依赖 |
-
-## 真实 OA 边界
-
-当前 `PostgresLeaveSandboxGateway` 与 Action、账户参加同一个本地 PostgreSQL 事务，本项目没有发送任何真实 OA 请求。真实 OA 网络调用不能加入本地数据库事务，不能只替换 Gateway 就宣称安全上线；后续至少需要 Transactional Outbox、异步投递、外部幂等、重试、回调或轮询、对账、补偿和状态映射。
+- 当前仅用于小规格单机和短时受控演示，不承诺生产 SLA；
+- Java/Python runtime guard 仅 process-local，多实例需要 distributed lease/lock；
+- 没有 Temporal、DBOS、Kafka、Redis 或其他分布式 workflow/lock；
+- 本地 Java PostgreSQL 与真实 Enterprise OA 没有分布式事务，当前使用 Mock OA 模拟外部闭环；
+- Enterprise OA MCP 为 fixture-backed read-only 集成，真实生产凭据和正式 OA 集成未验收；
+- confirm-time remote read 与本地 commit 之间存在小型 TOCTOU 窗口；
+- Checkpoint retention/pruning、完整 metrics/alerting 和生产容量基线不在当前范围；多实例 execution lease 与 event delivery/inbox/outbox 是不同的后续议题。

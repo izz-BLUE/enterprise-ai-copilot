@@ -1,324 +1,123 @@
-# 面试追问 Q&A
+# Interview FAQ and Deep Dive
 
-> 面试官常见追问及回答。每个回答保持诚实，不吹过头。
+回答都以当前实现为边界，不把小规格 Demo、Mock OA 或 fixture-backed MCP 说成生产系统。
 
----
+## Q1：项目解决什么问题？
 
-## Q1：这个项目和普通知识库问答有什么区别？
+企业员工需要检索制度，也会提出需要确认的请假/报销请求。项目把可追溯 RAG 与受控业务流程放在一个 Java authority + Python Agent 架构中。
 
-**回答：**
+## Q2：为什么 Java + Python 双服务？
 
-普通知识库问答通常是单链路 RAG — 用户提问 → 检索 → 生成回答。
+Java 保留认证、权限、事务和业务系统边界；Python 利用 FAISS、LLM、LangGraph 等 AI 生态。代价是 HTTP contract、超时、部署和跨服务状态需要额外设计。
 
-我的项目有几个不同：
+## Q3：Java 和 Python 谁是 authority？
 
-1. **双链路设计** — 稳定 RAG 主链路和 LangGraph Agent 实验链路并行，主链路不依赖 LangChain，Agent 链路支持 Safety Guard + 意图路由 + Tool Calling
-2. **Evaluation 闭环** — 不只是 RAG 能用，还能评估 RAG 效果。38 个 case，两层评估，支持 flaky 检测和 baseline 回归
-3. **生产化加固** — 按安全风险做了 12 项修复，包括 Safety Guard、权限边界、traceId、超时、异常收敛
-4. **工程化视角** — 不是调通 API 就完事，而是关注架构边界、契约对齐、部署准备
+Java 是身份、权限、PendingAction、LeaveRequest、ExpenseClaim、Memory lifecycle 和外部状态落库的 authority。Python 可以规划、检索和返回 Proposal，但不能授权或直接写业务库。
 
----
+## Q4：RAG 链路是什么？
 
-## Q2：为什么采用 Java + Python 双服务？
+文档切 chunk 和 metadata，使用 BGE embedding + FAISS 语义召回，再用字符 BM25 做关键词召回，最后 RRF 融合，必要时再做 Cross Encoder 实验，生成返回 sources。
 
-**回答：**
+## Q5：为什么使用 RRF？
 
-两个原因：
+FAISS 与 BM25 的分数尺度不一致，直接相加需要不稳定的人工归一化。RRF 只融合排名，结构简单、可解释，适合当前小型领域数据集。
 
-1. **技术生态** — Python 的 AI 生态（LangChain、LangGraph、FAISS、sentence-transformers）比 Java 成熟得多。RAG 检索、Embedding、Agent 编排用 Python 实现效率更高。
-2. **职责分离** — Java 擅长控制面（权限、超时、异常兜底、CORS），Python 擅长数据面（检索、生成、评估）。分离后 AI 逻辑迭代不影响业务网关，如果未来换 LLM Provider 只改 Python。
+## Q6：如何控制幻觉？
 
-代价是多了一层网络通信和契约维护，但对这个规模的项目是值得的。
+Prompt 要求基于检索证据回答，无证据时明确拒答；返回 source metadata；通过 38 个 case 分别评估 source hit、keyword hit、生成关键词和 no-answer。它不是完整事实保证。
 
----
+## Q7：Planner-first 与 Router-first 的关系？
 
-## Q3：RAG 是怎么做的？
+默认 `AGENT_LOOP_ENABLED=true` 是 `safety → planner ⇄ tool_executor → finalize`；`false` 才走 `safety → router → rag|eval|action|refuse`。两套图互斥但共享 Java authority；Router-first 是兼容回退，不是 primary。
 
-**回答：**
+## Q8：Planner 会不会直接执行报销？
 
-手写全链路，不依赖 LangChain。
+不会。Planner 只能输出严格 decision，Tool Executor 还会检查 capability、employee、budget 和 dedupe。`expense_proposal_tool` 只能生成 Proposal，Java PendingAction + Confirm 才能打开业务写事务。
 
-1. **检索** — Hybrid Retrieval，三种模式可切换：
-   - `vector`：Faiss 语义检索 + keyword 检索合并去重
-   - `hybrid`（默认）：Faiss + BM25 + RRF 融合排序
-   - `hybrid_rerank`（实验）：Hybrid 候选 + Cross Encoder 精排
-2. **BM25** — 自研字符级 n-gram 分词，不依赖 jieba，对中文友好
-3. **RRF** — Reciprocal Rank Fusion，不需要分数归一化，直接按排名融合
-4. **Prompt** — TopK=3 的 chunk 拄给 LLM，Prompt 包含拒答规则（"当前知识库暂无相关信息，不要编造"）
-5. **Query Rewrite** — 实验模式，规则匹配重写口语化问题
+## Q9：Tool 权限如何限制？
 
----
+程序根据可信 Runtime Context 和配置计算 visible tools，模型不能自行增加 Tool。Executor 在执行前再次校验 schema、身份、权限、最多 5 次 Tool execution 和成功签名；系统字段不允许出现在 LLM arguments。
 
-## Q4：LangGraph Agent 在项目里解决什么问题？
+## Q10：为什么需要 PendingAction？
 
-**回答：**
+它把“模型建议”与“业务授权”分开，持久化 owner、action type、nonce digest、TTL、status 和 correlation。Confirm 时服务端重新校验，避免只相信浏览器或旧 Proposal。
 
-LangGraph Agent 是实验链路，解决 RAG 主链路无法处理的场景：
+## Q11：nonce 如何防止伪造？
 
-1. **意图路由** — 用户问"评估通过率"这类问题，RAG 主链路会去知识库检索，但知识库里没有评估数据。Agent 链路通过关键词匹配把这类问题路由到 eval_node，读取本地评估报告。
-2. **安全拒答** — Safety Guard 检测到高风险问题，直接路由到 refuse_node，不进入检索。
-3. **Tool Calling** — rag_node 和 eval_node 都是 LangChain Tool，方便后续扩展更多工具。
+Java 用 SecureRandom 生成 nonce，明文只返回一次，数据库只保存 SHA-256 digest；Confirm 需要当前 owner、nonce、TTL 和状态。前端只把明文放在当前页面内存，不放 URL、localStorage 或日志。
 
-Agent 链路和 RAG 主链路并行运行，不替换稳定接口。
+## Q12：幂等怎么做？
 
----
+Confirm 要求 UUID `Idempotency-Key`，Java 对 Action 行加锁并持久化结果；相同或新的合法 key 对终态 Action 都重放同一 requestId。Expense 对 Mock OA 使用 `expense:<expenseId>` key，防止重复创建外部 approval。
 
-## Q5：Evaluation 为什么要做？
+## Q13：confirm-time revalidation 解决什么？
 
-**回答：**
+Proposal 生成和用户点击 Confirm 之间，trip/invoice 可能变化。Java 在本地写事务外调用 Python narrow adapter，重新检查 trip ownership/status/current dates、invoice ownership/valid/duplicate/amount/category，并由 Java 重算金额。
 
-RAG 效果不能只靠"看起来对"。我需要量化回答：
+## Q14：重校验发现 stale 怎么办？
 
-1. **检索是否命中** — Retrieval Evaluation 检查 TopK 结果是否包含预期来源和关键词，零 token 消耗
-2. **生成是否正确** — Generation Evaluation 调用 LLM 检查回答是否包含预期关键词，支持同义词组（keyword_groups）
-3. **是否稳定** — flaky 检测：第一次 FAIL 后 retry 一次，区分随机波动和稳定失败
-4. **是否退化** — baseline 回归：对比 baseline 和 current 报告，判断修改后是否退化
+Action 变为 FAILED，Memory 变为 ABANDONED，HITL 以 REJECTED 收口并 resume 到 Graph END，不创建 ExpenseClaim。若 Java stale 终态已提交但 Python resume 暂时不可用，Java FAILED 不回滚；重复 Confirm 不重新查询 OA 或改变 Java 状态，只重试同一个确定性的 REJECTED continuation，且没有 autonomous stale-HITL worker。远程 OA 不可用则保留 PENDING_CONFIRMATION 并返回 503，允许重试；两次远程读取与本地 commit 之间的小型 TOCTOU 窗口是明确接受的限制。
 
-38 个 case 覆盖了有答案和无答案场景。
+## Q15：WAITING_USER 和 WAITING_EXTERNAL 有什么区别？
 
----
+WAITING_USER 是等用户是否确认 PendingAction；WAITING_EXTERNAL 是 ExpenseClaim 已提交后等 OA 决定。二者使用不同 marker、correlation、resume endpoint 和失败语义，普通 Chat 不能跨过 active wait。
 
-## Q6：你怎么证明 RAG 效果稳定？
+## Q16：Mock OA 为什么不直接信 webhook status？
 
-**回答：**
+Mock OA webhook 故意不带 status，只带 event/request correlation。Java 先验证 raw-body HMAC 和 300 秒 timestamp，再 GET OA authoritative status；因此重放、篡改或乱序通知不能直接伪造业务状态。
 
-1. **baseline 回归** — 每次修改后运行 `run_rag_eval.py --with-baseline`，如果有退化会报 REGRESSION DETECTED
-2. **flaky 检测** — Generation Evaluation 第一次 FAIL 后自动 retry，区分 llm_flaky（随机波动）和 stable_fail（稳定失败）
-3. **无答案负样本** — 10 个无答案 case，检查模型是否正确拒答而不是编造
-4. **TopK 对比** — `compare_topk_eval.py` 对比不同 TopK 值的效果
+## Q17：webhook 丢失怎么办？
 
-局限：38 个 case 规模有限，不能覆盖所有场景。
+默认关闭的 reconciliation 只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，对 `external_last_checked_at` 做 due CAS 后在事务外 GET，并与 webhook 共用 status-sync service。它是低频、限批补偿，不是消息队列。
 
----
+## Q18：外部 resume 失败会不会回滚报销？
 
-## Q7：Safety Guard 覆盖了什么？没覆盖什么？
+不会。Java 先提交 ExpenseClaim APPROVED/REJECTED 终态，再调用 Python external resume。失败只记录 `external_resume_last_attempt_at`，未完成时由 bounded retry 重新投递；Python 支持 `WAITING_EXTERNAL`、continuation 和 completed no-op。
 
-**回答：**
+## Q19：Checkpoint 和 Memory 的区别？
 
-**覆盖了：**
-- 5 类风险关键词匹配（50 个关键词）
-- 违法违规 / 伪造材料（9 个关键词）
-- 绕过企业制度 / 规避审批（13 个关键词）
-- 网络安全攻击 / 黑客行为（12 个关键词）
-- 删除审计 / 隐藏痕迹（7 个关键词）
-- 越权访问 / 数据窃取（9 个关键词）
-- 空查询拦截
-- 覆盖 RAG + Agent 两条链路
+Checkpoint 是 runtime execution scene，用于 crash/HITL/external resume；Memory 是 `(user_id, conversation_id)` 下的 ACTIVE task continuity，由 Java 管 lifecycle。Checkpoint 不是权限或业务事实，Memory 也不能替代 Java DB。
 
-**没覆盖：**
-- 变体绕过（同音字、拼音、英文）
-- Prompt Injection（"忽略系统提示词"类攻击）
-- 间接注入（通过知识库文档注入的恶意内容）
+## Q20：execution_history 和 tool_history 的区别？
 
-当前是规则版基础防护，不是完整安全系统。
+`tool_history` 是本次 execution 的真实调用和去重依据，新请求清空；`execution_history` 是有界成功摘要，只在 ACTIVE Memory + task type 匹配时 hydrate，且是 `CONTEXT_ONLY`，不能用于金额、当前事实、Tool dedupe 或 Memory trigger。
 
----
+## Q21：ACTIVE Memory 会触发新的 Memory 写入吗？
 
-## Q8：为什么 Evaluation 要做权限限制？
+不会。现有 ACTIVE Memory 只是 read context。Trigger 只来自 `action_proposal` 或白名单 Memory-eligible Tool success；纯 RAG、eval、余额、记录查询、MCP read、失败和拒答都不触发。
 
-**回答：**
+## Q22：Python 能不能结束 Memory？
 
-Evaluation 报告包含内部质量数据 — 通过率、失败案例、flaky 数量、baseline 状态。这些是开发/运维信息，不应该暴露给普通用户。
+不能。Python write policy 只返回 `UPSERT + ACTIVE` proposal；Java 在当前认证上下文中落库，并在 Confirm/Cancel/Expire/Stale/Failure 时控制 terminal lifecycle。这样避免 untrusted Agent output 结束业务任务。
 
-暴露风险：
-1. 泄露内部质量数据
-2. 暴露评估体系细节（case 数量、baseline 状态）
-3. 可被竞争对手分析产品质量
+## Q23：为什么没有直接用 Temporal/DBOS？
 
-所以把 Evaluation 定位为管理员诊断能力，通过 Admin Token 保护。
+当前目标是小规格单机和已有 PostgreSQL 上验证 graph state、HITL 和外部恢复语义。引入工作流引擎会扩大运维和状态迁移范围；生产多实例需要重新评估，而不是宣称 Checkpoint 已等价替代。
 
----
+## Q24：为什么不用 Kafka 或 distributed lock？
 
-## Q9：Admin Token 是不是完整认证系统？
+当前没有多实例部署，也没有消息总线需求；process-local guard 足够保护单实例同一 runtime thread 的 lifecycle。多实例、跨进程投递和故障转移是下一阶段，届时先需要 distributed execution lease/ownership；只有选择 durable event delivery 时才需要评估 Outbox/Inbox 和重复消费策略。
 
-**回答：**
+## Q25：当前是不是生产级？
 
-不是。Admin Token 是最小权限方案，解决"普通用户不应访问 Evaluation"这个问题。
+不是。当前是小规格单机、短时受控验证，有 Mock OA、fixture-backed MCP、有限 eval/容量数据，没有真实生产 credentials、正式 OA 分布式事务、完整 metrics/alerting 或 SLA。
 
-**优点：**
-- 实现简单，不引入用户体系
-- 配置即生效
-- 权限判断集中在 Java 后端
+## Q26：怎么证明项目质量？
 
-**缺点：**
-- 共享 Token，无 per-user 身份
-- Token 泄露则全员管理员
-- 无法审计"谁"访问了 eval
+接受基线为 Java 334、Python 1402 + 34 expected skips、PostgreSQL durable flows 34 passed/0 skipped、Enterprise OA MCP 24、Mock OA 17、Frontend 44，另有 lint/build pass；CI 分别覆盖 backend、Mock OA、Python eval、frontend、browser、Gitleaks、CodeQL。
 
-如果要上线，需要替换为 JWT + 用户体系。
+## Q27：Safety Guard 能解决 Prompt Injection 吗？
 
----
+不能完全解决。当前是规则型纵深防御，能拦截已知风险词和安全类别，不等价于完整的 Prompt Injection、内容安全或模型对齐系统；这是接受限制。
 
-## Q10：为什么不接 Spring Security / JWT？
+## Q28：如果真实上线，优先补什么？
 
-**回答：**
+先补正式身份/RBAC、真实 OA 的 provider-side version/CAS/幂等/补偿/状态映射和分布式 execution lease；若需要可靠 after-commit event delivery，再评估 Outbox；再补集中 metrics、审计、SLO、长时容量和故障演练。最后扩大安全模型、租户隔离和检索评估集。
 
-当前项目是公开演示和工程验证，不是面向多用户的生产系统。接入 Spring Security 或 JWT 需要同时设计用户、角色、Token 生命周期和审计，超出了当前知识库问答主线。
+## Q29：最难的技术点是什么？
 
-Admin Token 是最小方案：
-- 一个配置项 + 一个请求头 + 一个 Java 判断
-- 不引入用户表、Session 管理、Token 刷新
-- 本地开发可留空；生产演示配置非空 Token
+不是单个 LLM API，而是跨服务、跨时间的状态语义：用户确认与外部审批必须区分，Java 终态必须先提交，webhook 不能当 status authority，resume 丢失要可重试且不能重复写业务。
 
-如果要上线，第一步是替换为 JWT + 用户体系，第二步是接入 Spring Security。
+## Q30：这个项目最大的取舍是什么？
 
----
-
-## Q11：traceId 怎么设计？
-
-**回答：**
-
-1. **Java 入口统一生成** — `TraceIdFilter` 继承 `OncePerRequestFilter`，每个请求生成 UUID 格式 traceId
-2. **不信任客户端** — 客户端传入的 `X-Trace-Id` 会验证格式，非法格式（含控制字符、超长、非 UUID）丢弃重新生成
-3. **MDC 关联日志** — traceId 存入 SLF4J MDC，日志自动带上 `[traceId]`
-4. **透传给 Python** — Java → Python 通过 `X-Trace-Id` header 透传
-5. **响应返回** — 响应头和响应体都包含 traceId，前端展示
-
-用户反馈问题时只需要提供 traceId，服务端通过日志就能定位全链路。
-
----
-
-## Q12：timeout 和 fallback 怎么设计？
-
-**回答：**
-
-超时分三层：
-
-| 层 | 超时 | 配置 |
-|---|------|------|
-| Java → Python 连接 | 3s | `python.agent.connect-timeout` |
-| Java → Python 读取 | 40s | `python.agent.read-timeout` |
-| Python → LLM | 30s | `LLM_TIMEOUT` |
-
-任何一层超时都会返回兜底响应：
-- Java 层：`success=false`，answer 为"当前 AI 服务暂时不可用"
-- Python 层：`success=false`，answer 为"当前 AI 服务暂时不可用"
-
-异常信息不暴露给用户，只记日志。用户通过 traceId 反馈问题，服务端通过日志排查。
-
-并发过载不等待上述完整超时：Java/Python 各有 3 个并发槽，最多排队 500ms，未获得槽位就返回 HTTP 429 和 `Retry-After: 1`。
-
----
-
-## Q13：CORS 为什么要收敛？
-
-**回答：**
-
-之前 `WebConfig.java` 用 `allowedOriginPatterns("*")` 允许任意来源访问，配合 `allowCredentials(true)` 可能被 CSRF 攻击。
-
-修改为可配置白名单 `cors.allowed-origins`，默认只允许 `http://localhost:5173` 和 `http://127.0.0.1:5173`。生产环境需要配置为实际域名。
-
----
-
-## Q14：为什么 Python 服务不能暴露公网？
-
-**回答：**
-
-如果 Python FastAPI 的 8000 端口直接暴露公网，请求就可能绕过 Java。
-
-风险：
-1. 绕过 Java 层的安全检查（Safety Guard、输入校验、Admin Token）
-2. 绕过 Java 层的超时控制
-3. 攻击者可伪造 `X-Allow-Eval: true` 直接访问 Evaluation
-4. 直接调用 LLM，绕过所有保护
-
-当前部署已经按该边界处理：Python 只在 Docker 内网 `expose 8000`，无宿主机端口映射；Java 只绑定 `127.0.0.1:8080`，公网流量必须经过 Nginx。
-
----
-
-## Q15：已经有公网 Demo，为什么仍不是生产系统？
-
-**回答：**
-
-1. 只有共享 Admin Token，没有 JWT / RBAC 和 per-user 身份
-2. 单机 Compose，无高可用和自动扩缩容
-3. 没有生产级 APM、集中日志和告警
-4. Safety Guard 仍是规则版，评估集只有 38 个 case
-5. 已完成目标服务器短时受控压测，但没有长时间、多客户端或分布式容量数据，不能承诺生产 QPS/P95 或 SLA
-
-公网地址是功能演示和小规格部署验证，不承诺生产 SLA。
-
----
-
-## Q16：如果真的上线，下一步怎么做？
-
-**回答：**
-
-**P0（上线前必须）：**
-1. 替换 Admin Token 为 JWT + 用户体系
-2. 接入 Spring Security 与细粒度授权
-3. 补齐集中日志、指标、告警和审计
-
-**P1（进入开发前）：**
-1. sources 字段脱敏（文件名映射为文档标题）
-2. 日志脱敏（用户问题截断）
-3. 将现有短时受控压测扩展为长时间、多客户端容量基线和故障演练
-
-**P2（后续优化）：**
-1. 多实例与外部向量数据库方案
-2. Safety Guard 增强（变体关键词）
-3. Prompt Injection 防护
-4. 扩展 Playwright 到跨浏览器、窄屏和完整视觉回归
-
----
-
-## Q17：这个项目你最大的技术难点是什么？
-
-**回答：**
-
-**Hybrid Retrieval 设计。**
-
-Faiss 语义检索和 BM25 关键词检索的分数尺度不同，不能直接加权求和。我用 RRF（Reciprocal Rank Fusion）解决 — 只看排名不看分数，公式是 `1/(k+rank)`，不需要归一化。
-
-难点在于：
-1. BM25 自研字符级 n-gram 分词，不依赖 jieba，需要对中文友好
-2. 三种检索模式（vector / hybrid / hybrid_rerank）需要统一接口
-3. Query Rewrite 只改写检索用 query，不改变最终 prompt 中的用户问题
-4. 评估体系需要验证每种模式的效果
-
----
-
-## Q18：这个项目有哪些不足？
-
-**回答：**
-
-1. **评估集规模小** — 38 个 case，不能覆盖所有场景
-2. **无正式认证** — Admin Token 是共享密钥，无 per-user 身份
-3. **单机部署** — 无高可用、水平扩容和故障转移
-4. **Safety Guard 仅关键词匹配** — 无法防变体绕过
-5. **浏览器覆盖仍有限** — 已有 5 条 Chromium 回归，但窄屏、跨浏览器和视觉差异仍需人工 UAT
-6. **DTO 契约无强类型** — Java ↔ Python 手动对齐
-7. **容量验证仍有限** — 已完成小规格服务器 L1-L4 短时受控验收，但缺少长时间、多客户端和分布式容量测试
-
-这些限制已经记录在质量保障和路线图文档中，并按风险划分了后续优先级。
-
----
-
-## Q19：面试官问"这是不是生产级项目"怎么回答？
-
-**回答：**
-
-> 不是。当前有 HTTPS 公网 Demo，但定位是个人项目的功能演示和小规格部署验证，不承诺生产 SLA。
->
-> 但我按生产化风险补齐了 CORS、超时、输入校验、Safety Guard、traceId、异常收敛、Admin Token 和 Evaluation 访问限制，并为关键行为建立了 CI 与回归检查。
->
-> 部署边界已经收敛：Python 无宿主机端口，Java 只绑定 localhost，公网经过 Nginx；同时有入口限流和 Java/Python 双层有界并发，L1-L4 短时受控验收也已通过。但认证、高可用、监控告警和大规模容量验证仍未完成。
->
-> 所以我会把它描述为“已公网部署验证”，不会描述为“生产级系统”。
-
----
-
-## Q20：你怎么控制开发和发布质量？
-
-**回答：**
-
-我把质量控制拆成可重复的工程检查：
-
-1. **小范围分支和 PR**：每次变更保持单一目标，便于审查和回滚。
-2. **分层自动化检查**：Java 编译与单测、Python 并发测试与检索评估、前端 lint/build 与 Playwright 分别运行。
-3. **契约同步**：接口或服务边界变化必须同步 API、架构和部署文档。
-4. **发布前验证**：Gitleaks/CodeQL 检查安全问题，同时检查构建产物、`git diff --check`、Compose/Nginx 配置和回滚点。
-5. **发布后 Smoke**：验证健康接口、代表性问答、权限拒绝、429 JSON 契约和容器重启次数。
-6. **结论有边界**：压测报告同时记录环境、持续时间和入口层级，不用短时测试推导生产 SLA。
-
-这套流程的重点不是检查数量，而是让关键结论能够从代码、测试命令和发布记录中复现。
+用更清楚的 Java/Python authority 边界、PostgresSaver 和 Mock OA 低成本验证复杂流程，换取当前没有分布式工作流、真实 OA 事务和生产级运营能力。文档把这些边界列为 accepted limitations，而不是隐藏起来。
