@@ -7,7 +7,12 @@ from unittest.mock import Mock, patch
 
 from langgraph.runtime import Runtime
 
-from app.agents.langgraph_agent import AgentState, action_node, router_node
+from app.agents.langgraph_agent import (
+    AgentState,
+    _approval_route,
+    action_node,
+    router_node,
+)
 from app.agents.planner_node import planner_node
 from app.agents.runtime_context import AgentRuntimeContext
 from app.agents.tool_executor_node import (
@@ -79,6 +84,33 @@ def test_agent_state_does_not_declare_request_trusted_fields():
         'employee_id', 'allow_eval', 'allow_business_actions',
         'business_date', 'trace_id', 'deadline_monotonic',
     }.intersection(fields)
+
+
+def test_task_runtime_approval_route_ends_without_inspecting_external_state():
+    runtime = _runtime(execution_mode='TASK_RUNTIME')
+
+    # The state is deliberately not a valid confirmed Expense payload.  The
+    # TASK_RUNTIME branch must still route directly to finalize; only the
+    # trusted Java-injected Runtime Context selects the lifecycle.
+    assert _approval_route({'hitl_result': {}}, runtime) == 'finalize_node'
+
+
+def test_legacy_approval_route_keeps_external_expense_compatibility():
+    runtime = _runtime(execution_mode='LEGACY_SINGLE')
+    state = {
+        'hitl_result': {
+            'schema_version': 1,
+            'wait_id': 'wait_' + 'a' * 64,
+            'execution_id': 'ex_' + 'b' * 32,
+            'decision': 'CONFIRMED',
+            'action_id': 'act_1',
+            'action_type': 'EXPENSE_CLAIM',
+            'action_status': 'SUCCEEDED',
+            'request_id': 'EXP-1',
+            'message': '已提交。',
+        },
+    }
+    assert _approval_route(state, runtime) == 'prepare_external_wait_node'
 
 
 def test_planner_ignores_stale_state_permission():
