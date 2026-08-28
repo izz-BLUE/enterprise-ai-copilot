@@ -73,6 +73,25 @@ def test_two_write_intents_without_safe_boundary_are_fail_closed():
     assert result.tasks == []
 
 
+def test_long_leading_newline_input_preserves_spans_without_regex_backtracking():
+    question = (
+        "\n" * 20_000
+        + "帮我请个假，然后把最近一次已批准的出差报销掉。"
+    )
+
+    result = decompose_write_tasks(question)
+
+    assert result.kind == "multi"
+    assert [task.task_type for task in result.tasks] == [
+        "LEAVE_REQUEST",
+        "EXPENSE_CLAIM",
+    ]
+    assert [task.task_text for task in result.tasks] == [
+        "帮我请个假",
+        "把最近一次已批准的出差报销掉。",
+    ]
+
+
 def test_task_spec_is_pure_and_rejects_lifecycle_fields():
     with pytest.raises(ValidationError):
         TaskSpec(

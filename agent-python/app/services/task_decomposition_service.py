@@ -36,14 +36,49 @@ _UNSUPPORTED_WRITE_MARKERS = (
     "转账",
 )
 
-# Split only at a program-recognized coordination boundary.  The matched
-# connector belongs to neither task, so each returned task_text remains an
-# exact contiguous span of the original user message.
-_TASK_BOUNDARY = re.compile(
-    r"(?:[，,。；;\n]\s*(?:然后|另外|再|接着|并且|并|同时|之后|以后|最后|再帮我|再把)"
-    r"|(?:然后|另外|接着|同时|并且|并|以及|再|之后|以后)"
-    r"(?=\s*(?:帮我|请|申请|把|将|给我|我要|我想|报销|报账|休))"
-    r")"
+# Split only at a program-recognized coordination boundary.  These fixed
+# literal candidates keep scanning linear in the user input length.  The
+# matched connector belongs to neither task, so each returned task_text
+# remains an exact contiguous span of the original user message.
+_TASK_BOUNDARY_PUNCTUATION = frozenset("，,。；;\n")
+_PUNCTUATION_CONNECTORS = (
+    "然后",
+    "另外",
+    "再",
+    "接着",
+    "并且",
+    "并",
+    "同时",
+    "之后",
+    "以后",
+    "最后",
+    "再帮我",
+    "再把",
+)
+_CONNECTORS = (
+    "然后",
+    "另外",
+    "接着",
+    "同时",
+    "并且",
+    "并",
+    "以及",
+    "再",
+    "之后",
+    "以后",
+)
+_ACTION_PREFIXES = (
+    "帮我",
+    "请",
+    "申请",
+    "把",
+    "将",
+    "给我",
+    "我要",
+    "我想",
+    "报销",
+    "报账",
+    "休",
 )
 
 
@@ -68,15 +103,59 @@ def _task_type(text: str) -> str | None:
     return types[0] if len(types) == 1 else None
 
 
+def _first_literal_at(text: str, index: int, candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        if text.startswith(candidate, index):
+            return candidate
+    return None
+
+
+def _skip_whitespace(text: str, index: int) -> int:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _iter_task_boundaries(question: str):
+    """Yield recognized boundary spans with a linear scan over ``question``."""
+    index = 0
+    while index < len(question):
+        if question[index] in _TASK_BOUNDARY_PUNCTUATION:
+            connector_start = _skip_whitespace(question, index + 1)
+            connector = _first_literal_at(
+                question, connector_start, _PUNCTUATION_CONNECTORS)
+            if connector is not None:
+                boundary_end = connector_start + len(connector)
+                yield index, boundary_end
+                index = boundary_end
+                continue
+            # Do not rescan a long whitespace run from every newline.  No
+            # later whitespace character can start a different match when
+            # the suffix after the run has no punctuation connector.
+            if connector_start > index + 1:
+                index = connector_start
+                continue
+
+        connector = _first_literal_at(question, index, _CONNECTORS)
+        if connector is not None:
+            action_start = _skip_whitespace(question, index + len(connector))
+            if _first_literal_at(question, action_start, _ACTION_PREFIXES) is not None:
+                boundary_end = index + len(connector)
+                yield index, boundary_end
+                index = boundary_end
+                continue
+        index += 1
+
+
 def _split_segments(question: str) -> list[str]:
     """Split all recognized coordination boundaries for global validation."""
     segments: list[str] = []
     start = 0
-    for boundary in _TASK_BOUNDARY.finditer(question):
-        segment = question[start:boundary.start()].strip()
+    for boundary_start, boundary_end in _iter_task_boundaries(question):
+        segment = question[start:boundary_start].strip()
         if segment:
             segments.append(segment)
-        start = boundary.end()
+        start = boundary_end
     tail = question[start:].strip()
     if tail:
         segments.append(tail)
