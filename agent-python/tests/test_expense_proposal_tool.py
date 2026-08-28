@@ -2,6 +2,7 @@
 
 覆盖（V2 §十三 / §十五 / 追加约束 §1/§2/§4）：
 - happy：context（travel + invoice 验真）+ 用户问题 → ExpenseActionProposal
+- 主 Demo："最近一次已批准出差 + 对应发票"确定性选最新 APPROVED trip
 - missing_fields：无 trip_id / 无发票 → Clarification
 - deterministic 计算：HOTEL 750×晚封顶、TAXI 实报；金额由程序层算（非法
   claimed/reimbursable 不入 Proposal 结构）
@@ -12,8 +13,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.tools.enterprise_tools import expense_proposal_tool
 from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
@@ -82,6 +82,62 @@ class TestExpenseProposalHappy:
         assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
         assert proposal["cost_center"] == "COST-DEFAULT"
 
+    def test_demo_prompt_selects_latest_approved_trip_and_corresponding_invoices(self):
+        context = {
+            "travel_record": [
+                *_HAPPY_CONTEXT["travel_record"],
+                {
+                    "trip_id": "TRIP-20260701-002",
+                    "employee_id": "E10001",
+                    "destination": "北京",
+                    "start_date": "2026-07-01",
+                    "end_date": "2026-07-02",
+                    "purpose": "总部汇报",
+                    "status": "APPROVED",
+                    "expense_documents": [],
+                },
+                {
+                    "trip_id": "TRIP-20260825-003",
+                    "employee_id": "E10001",
+                    "destination": "深圳",
+                    "start_date": "2026-08-25",
+                    "end_date": "2026-08-27",
+                    "purpose": "供应商洽谈",
+                    "status": "PENDING",
+                    "expense_documents": [
+                        {"invoice_id": "INV-999", "category": "MEAL"},
+                    ],
+                },
+            ],
+            "invoices": _HAPPY_CONTEXT["invoices"],
+            "policy_context": _HAPPY_CONTEXT["policy_context"],
+        }
+        out = _invoke(
+            "请根据我最近一次已批准的出差和对应发票，帮我准备一份差旅报销申请。",
+            context=context,
+        )
+        assert out["success"] is True
+        assert out["kind"] == "proposal"
+        assert out["missing_fields"] == []
+        proposal = out["action_proposal"]
+        assert proposal["trip_id"] == "TRIP-20260818-001"
+        assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
+
+    def test_relative_invoice_selection_still_requires_verified_invoice_facts(self):
+        context = {
+            "travel_record": _HAPPY_CONTEXT["travel_record"],
+            "invoices": [_HAPPY_CONTEXT["invoices"][0]],
+            "policy_context": "",
+        }
+        out = _invoke(
+            "请根据我最近一次已批准的出差和对应发票，帮我准备一份差旅报销申请。",
+            context=context,
+        )
+        assert out["success"] is True
+        assert out["kind"] == "clarification"
+        assert "invoice_ids" in out["missing_fields"]
+        assert out["action_proposal"] is None
+
     def test_deterministic_calculation_hotel_cap_and_taxi(self):
         """HOTEL 1600 → 封顶 750×2=1500；TAXI 230 → 实报 230；claimed 1830。"""
         out = _invoke("帮我报销上周上海出差的酒店和打车费用")
@@ -143,7 +199,6 @@ class TestExpenseProposalNoMcpCalls:
         """Executor 调用 expense_proposal_tool 前从 tool_history 构造 context。"""
         from app.agents.tool_executor_node import tool_executor_node
 
-        # 构造已成功的 travel/invoice tool_history（模拟上两步）
         travel_history = {
             "tool_name": "travel_record_tool",
             "arguments": {},
@@ -209,5 +264,4 @@ class TestExpenseProposalNoMcpCalls:
         observation = json.loads(result["observation"])
         assert observation["kind"] == "proposal"
         assert observation["action_proposal"]["trip_id"] == "TRIP-20260818-001"
-        # 验真成功的发票注入（两张都验真成功才生成 Proposal）
         assert observation["action_proposal"]["invoice_ids"] == ["INV-001", "INV-002"]
