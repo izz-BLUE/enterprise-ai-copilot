@@ -3,7 +3,8 @@
 覆盖（V2 §十三 / §十五 / 追加约束 §1/§2/§4）：
 - happy：context（travel + invoice 验真）+ 用户问题 → ExpenseActionProposal
 - 主 Demo："最近一次已批准出差 + 对应发票"确定性选最新 APPROVED trip
-- missing_fields：无 trip_id / 无发票 → Clarification
+- 报销原因：用户显式说明优先，否则使用 OA trip.purpose，不允许整段 question 兜底
+- missing_fields：无 trip_id / 无发票 / 无可用 reason → Clarification
 - deterministic 计算：HOTEL 750×晚封顶、TAXI 实报；金额由程序层算（非法
   claimed/reimbursable 不入 Proposal 结构）
 - 禁止重新调 MCP：Tool 内部不调用 get_enterprise_oa_client
@@ -15,6 +16,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from app.services.expense_input_service import extract_expense_reason
 from app.tools.enterprise_tools import expense_proposal_tool
 from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
@@ -81,6 +83,7 @@ class TestExpenseProposalHappy:
         assert proposal["trip_id"] == "TRIP-20260818-001"
         assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
         assert proposal["cost_center"] == "COST-DEFAULT"
+        assert proposal["reason"] == "客户拜访"
 
     def test_demo_prompt_selects_latest_approved_trip_and_corresponding_invoices(self):
         context = {
@@ -122,6 +125,7 @@ class TestExpenseProposalHappy:
         proposal = out["action_proposal"]
         assert proposal["trip_id"] == "TRIP-20260818-001"
         assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
+        assert proposal["reason"] == "客户拜访"
 
     def test_relative_invoice_selection_still_requires_verified_invoice_facts(self):
         context = {
@@ -154,6 +158,33 @@ class TestExpenseProposalHappy:
             assert forbidden not in proposal, forbidden
 
 
+class TestExpenseReasonExtraction:
+    def test_plain_trip_description_is_not_explicit_reason(self):
+        assert extract_expense_reason("帮我报销最近一次客户拜访的出差") is None
+
+    def test_explicit_quoted_reason_is_extracted_verbatim(self):
+        assert extract_expense_reason(
+            "帮我报销上海那次出差，报销原因写“项目A售前客户拜访”。"
+        ) == "项目A售前客户拜访"
+
+    def test_explicit_reason_stops_before_next_business_field(self):
+        assert extract_expense_reason(
+            "帮我报销上海出差，报销说明：项目A售前支持；发票使用 INV-001、INV-002"
+        ) == "项目A售前支持"
+
+    def test_explicit_reason_overrides_trip_purpose(self):
+        out = _invoke(
+            "帮我报销上海出差的酒店和打车费用，报销备注：项目A售前支持。"
+        )
+        assert out["kind"] == "proposal"
+        assert out["action_proposal"]["reason"] == "项目A售前支持"
+
+    def test_missing_explicit_reason_falls_back_to_trip_purpose(self):
+        out = _invoke("帮我报销上海客户拜访那次出差的酒店和打车费用")
+        assert out["kind"] == "proposal"
+        assert out["action_proposal"]["reason"] == "客户拜访"
+
+
 class TestExpenseProposalClarification:
     def test_missing_trip_id(self):
         out = _invoke("帮我报销上周出差的酒店费用", context={
@@ -184,6 +215,21 @@ class TestExpenseProposalClarification:
                       })
         assert out["kind"] == "clarification"
         assert "invoice_ids" in out["missing_fields"]
+
+    def test_missing_trip_purpose_and_no_explicit_reason_returns_clarification(self):
+        trip = {**_HAPPY_CONTEXT["travel_record"][0], "purpose": ""}
+        out = _invoke(
+            "帮我报销上海出差的酒店和打车费用",
+            context={
+                "travel_record": [trip],
+                "invoices": _HAPPY_CONTEXT["invoices"],
+                "policy_context": "",
+            },
+        )
+        assert out["kind"] == "clarification"
+        assert out["action_proposal"] is None
+        assert out["missing_fields"] == ["reason"]
+        assert "报销原因" in out["message"]
 
 
 class TestExpenseProposalNoMcpCalls:
@@ -265,3 +311,4 @@ class TestExpenseProposalNoMcpCalls:
         assert observation["kind"] == "proposal"
         assert observation["action_proposal"]["trip_id"] == "TRIP-20260818-001"
         assert observation["action_proposal"]["invoice_ids"] == ["INV-001", "INV-002"]
+        assert observation["action_proposal"]["reason"] == "客户拜访"
