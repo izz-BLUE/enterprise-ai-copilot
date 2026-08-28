@@ -85,6 +85,36 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
     }
 
     @Override
+    public Optional<PendingAction> findPendingConfirmationByOwnerAndConversationForUpdate(
+            String ownerUserId, String conversationId) {
+        if (ownerUserId == null || conversationId == null) {
+            return Optional.empty();
+        }
+        return jdbc.query("SELECT " + COLUMNS
+                        + " FROM business_action WHERE owner_user_id = :owner "
+                        + "AND conversation_id = :conversation "
+                        + "AND status = 'PENDING_CONFIRMATION' FOR UPDATE",
+                Map.of("owner", ownerUserId, "conversation", conversationId), rowMapper)
+                .stream().findFirst();
+    }
+
+    @Override
+    public Optional<PendingAction> findLatestExpiredHitlByOwnerAndConversation(
+            String ownerUserId, String conversationId) {
+        if (ownerUserId == null || conversationId == null) {
+            return Optional.empty();
+        }
+        return jdbc.query("SELECT " + COLUMNS
+                        + " FROM business_action WHERE owner_user_id = :owner "
+                        + "AND conversation_id = :conversation "
+                        + "AND status = 'EXPIRED' "
+                        + "AND agent_execution_id IS NOT NULL AND hitl_wait_id IS NOT NULL "
+                        + "ORDER BY completed_at DESC NULLS LAST, action_id DESC LIMIT 1",
+                Map.of("owner", ownerUserId, "conversation", conversationId), rowMapper)
+                .stream().findFirst();
+    }
+
+    @Override
     public void updateConfirmationNonceDigest(String actionId, byte[] nonceDigest) {
         jdbc.update("UPDATE business_action SET confirmation_nonce_digest = :nonceDigest "
                         + "WHERE action_id = :id", Map.of(

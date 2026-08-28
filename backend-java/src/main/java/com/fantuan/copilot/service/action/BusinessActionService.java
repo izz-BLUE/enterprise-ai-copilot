@@ -134,6 +134,47 @@ public class BusinessActionService {
         memoryService.abandon(identity.userId(), conversationId);
     }
 
+    /**
+     * Reconcile the Java-owned expiration boundary before a new Chat is sent
+     * to Python. The database row is locked only for this short transaction;
+     * Python continuation is deliberately performed by the coordinator after
+     * this method has committed.
+     *
+     * An unexpired pending action returns empty so the existing WAITING_USER
+     * behavior remains unchanged. An already terminal HITL action is returned
+     * only to support a deterministic resume retry after a previous delivery
+     * failure.
+     */
+    @Transactional
+    public Optional<PendingAction> reconcileExpiredForChat(String ownerUserId,
+                                                            String conversationId,
+                                                            String traceId) {
+        if (ownerUserId == null || ownerUserId.isBlank()
+                || conversationId == null || conversationId.isBlank()) {
+            return Optional.empty();
+        }
+        Instant now = clock.instant();
+        Optional<PendingAction> pending = actions
+                .findPendingConfirmationByOwnerAndConversationForUpdate(
+                        ownerUserId, conversationId);
+        if (pending.isPresent()) {
+            PendingAction action = pending.get();
+            if (action.expiresAt() == null || now.isBefore(action.expiresAt())) {
+                return Optional.empty();
+            }
+            actions.markExpired(action.actionId(), now);
+            audit(traceId == null ? action.originTraceId() : traceId, action,
+                    ActionStatus.PENDING_CONFIRMATION, ActionStatus.EXPIRED,
+                    "ACTION_EXPIRED", null, now);
+            closeMemory(action, TaskStatus.ABANDONED);
+            return actions.find(action.actionId());
+        }
+        // If the previous request committed EXPIRED but Python was
+        // unavailable, retry the same authoritative continuation before
+        // allowing a new request to inspect the checkpoint.
+        return actions.findLatestExpiredHitlByOwnerAndConversation(ownerUserId, conversationId);
+    }
+
     private PendingActionView createPendingInternal(BusinessActionProposal proposal,
                                                      String originTraceId,
                                                      String presentedToken,

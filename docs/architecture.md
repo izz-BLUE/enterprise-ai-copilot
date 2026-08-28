@@ -145,7 +145,7 @@ The two waits have deliberately different meanings:
 | `WAITING_USER` | complete Proposal needs explicit user decision | Java PendingAction | `POST /agent/langgraph/hitl/resume`, `Command(resume)` |
 | `WAITING_EXTERNAL` | Java ExpenseClaim is already written and awaits OA | Java ExpenseClaim + OA authoritative GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
 
-普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。
+普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，事务提交后复用 `EXPIRED` `Command(resume)` 收口旧 Graph，再继续当前 Chat；未过期 wait 仍保持阻断。Python resume 失败时不启动当前 Chat，后续请求只重试同一确定性 continuation。
 
 ## 7. Confirm-time revalidation and TOCTOU
 
@@ -198,6 +198,7 @@ POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapsho
 | External resume response is lost | Python may already be at Graph `END` | Replay the exact same payload; `EXTERNAL_COMPLETED` acknowledgement |
 | Python finalizer crashes after external result Checkpoint | Checkpoint contains the external result | `EXTERNAL_CONTINUATION` → deterministic finalize |
 | Same runtime thread receives concurrent work | Process-local Java/Python guard | Busy/retry; no multi-instance ownership claim |
+| Expired `WAITING_USER` blocks a new Chat | Java `PendingAction` TTL + Memory terminal transition | Commit `EXPIRED`/`ABANDONED`, then replay the exact `EXPIRED` HITL resume before starting the new Chat |
 
 ## 10. Memory and history boundaries
 

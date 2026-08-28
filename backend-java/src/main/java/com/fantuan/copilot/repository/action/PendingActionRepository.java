@@ -14,6 +14,10 @@ public interface PendingActionRepository {
     Optional<PendingAction> findForUpdate(String actionId);
     Optional<PendingAction> findByHitlWaitId(String hitlWaitId);
     Optional<PendingAction> findByHitlWaitIdForUpdate(String hitlWaitId);
+    Optional<PendingAction> findPendingConfirmationByOwnerAndConversationForUpdate(
+            String ownerUserId, String conversationId);
+    Optional<PendingAction> findLatestExpiredHitlByOwnerAndConversation(
+            String ownerUserId, String conversationId);
     void updateConfirmationNonceDigest(String actionId, byte[] nonceDigest);
     int countActive();
     /** 同一 (ownerUserId, conversationId) 是否已有活动动作（PENDING_CONFIRMATION / PROCESSING）。 */

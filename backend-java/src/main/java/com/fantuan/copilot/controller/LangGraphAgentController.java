@@ -200,6 +200,27 @@ public class LangGraphAgentController {
             String presentedToken, VerifiedIdentity identity, boolean allowEval,
             boolean allowBusinessActions, String conversationId, String runtimeThreadId) {
 
+        // Java owns PendingAction TTL.  Reconcile an expired approval while
+        // this request still holds the same runtime-thread guard that covers
+        // the following ordinary Chat call; the coordinator performs Python
+        // resume only after the Java transaction has committed.
+        if (hitlCoordinator != null) {
+            try {
+                if (!hitlCoordinator.reconcileExpiredBeforeChat(
+                        traceId, presentedToken, identity, conversationId)) {
+                    eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                            AdminLogEvent.LEVEL_WARN, started);
+                    return AgentResponseFactory.recoveryConflict(traceId);
+                }
+            } catch (RuntimeException exception) {
+                log.error("[{}] 过期 HITL 收口失败", traceId, exception);
+                eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                        AdminLogEvent.LEVEL_ERROR, started);
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body(AgentResponseFactory.fallback(traceId));
+            }
+        }
+
         // Memory Read Path：服务端按 (userId, conversationId) 复合 key 读取 ai_task_memory，
         // 仅在 status=ACTIVE 时填充内部请求体的 memoryContext 字段。
         // memoryContext 不会出现在公共 ChatRequest 中（前端不可见 / 不可提交）。

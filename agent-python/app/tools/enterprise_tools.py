@@ -401,6 +401,22 @@ def expense_proposal_tool(
             None,
         )
 
+    # 报销原因：用户显式填写优先；否则使用已选中 OA 出差记录的 purpose。
+    # 两者都没有时要求用户补充，绝不把整段 question 当 reason，也不由 LLM 生成。
+    reason = analysis.expense_reason or str(trip.get('purpose') or '').strip()
+    if not reason:
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': ['reason'],
+                'message': '当前出差记录缺少出差原因，请提供报销原因或报销说明。',
+            },
+            None,
+            None,
+        )
+
     # 按 invoice_id 匹配验真成功的发票，组装明细（确定性）
     invoice_ids = analysis.invoice_ids
     verified = {
@@ -445,7 +461,7 @@ def expense_proposal_tool(
         'claimed_amount': str(claimed),
         'reimbursable_amount': str(reimbursable),
         'cost_center': cost_center,
-        'reason': question,
+        'reason': reason,
         'invoice_ids': invoice_ids,
         'stay_nights': stay_nights,
     }

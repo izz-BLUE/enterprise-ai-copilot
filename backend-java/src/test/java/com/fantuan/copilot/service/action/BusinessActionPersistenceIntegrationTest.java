@@ -28,6 +28,7 @@ import javax.sql.DataSource;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,6 +51,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBase {
     private static final VerifiedIdentity USER_A = new VerifiedIdentity(
             "U10001", "zhangsan", "E10001", "张三",
+            AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+    private static final VerifiedIdentity USER_B = new VerifiedIdentity(
+            "U10002", "lisi", "E10001", "李四",
             AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
 
     @Autowired BusinessActionService actionService;
@@ -392,6 +396,64 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertNotNull(second.confirmationNonce());
         assertEquals(TaskStatus.ABANDONED,
                 memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+    }
+
+    @Test
+    void chatExpiryReconciliationCommitsTerminalStateAndAllowsNewHitlAction() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "HITL approval in progress");
+        PendingActionView expiredView = actionService.createHitlPending(
+                proposal(nextWeekday(2)), "chat-expired", null, USER_A, CONV_LIFECYCLE,
+                "ex_" + "a".repeat(32), "wait_" + "b".repeat(64));
+        jdbc.update("UPDATE business_action SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' "
+                + "WHERE action_id = ?", expiredView.actionId());
+
+        PendingAction expired = actionService.reconcileExpiredForChat(
+                USER_A.userId(), CONV_LIFECYCLE, "chat-reconcile").orElseThrow();
+        assertEquals(ActionStatus.EXPIRED, expired.status());
+        assertEquals(ActionStatus.EXPIRED, actions.find(expiredView.actionId()).orElseThrow().status());
+        assertEquals(TaskStatus.ABANDONED,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+
+        Instant completedAt = actions.find(expiredView.actionId()).orElseThrow().completedAt();
+        PendingAction replay = actionService.reconcileExpiredForChat(
+                USER_A.userId(), CONV_LIFECYCLE, "chat-reconcile-retry").orElseThrow();
+        assertEquals(expiredView.actionId(), replay.actionId());
+        assertEquals(ActionStatus.EXPIRED, replay.status());
+        assertEquals(completedAt, actions.find(expiredView.actionId()).orElseThrow().completedAt());
+
+        PendingActionView replacement = actionService.createHitlPending(
+                proposal(nextWeekday(3)), "chat-new", null, USER_A, CONV_LIFECYCLE,
+                "ex_" + "c".repeat(32), "wait_" + "d".repeat(64));
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(replacement.actionId()).orElseThrow().status());
+    }
+
+    @Test
+    void chatExpiryReconciliationLeavesUnexpiredActionAndOtherScopesUntouched() {
+        memoryService.upsert(USER_A.userId(), CONV_LIFECYCLE, "GENERIC", TaskStatus.ACTIVE,
+                "{}", "HITL approval in progress");
+        PendingActionView userA = actionService.createHitlPending(
+                proposal(nextWeekday(2)), "chat-unexpired", null, USER_A, CONV_LIFECYCLE,
+                "ex_" + "e".repeat(32), "wait_" + "f".repeat(64));
+        assertTrue(actionService.reconcileExpiredForChat(
+                USER_A.userId(), CONV_LIFECYCLE, "chat-unexpired-check").isEmpty());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(userA.actionId()).orElseThrow().status());
+        assertEquals(TaskStatus.ACTIVE,
+                memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
+
+        PendingActionView userB = actionService.createHitlPending(
+                proposal(nextWeekday(3)), "chat-other-user", null, USER_B, CONV_LIFECYCLE,
+                "ex_" + "g".repeat(32), "wait_" + "h".repeat(64));
+        assertTrue(actionService.reconcileExpiredForChat(
+                USER_B.userId(), CONV_LIFECYCLE, "chat-other-user-check").isEmpty());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(userA.actionId()).orElseThrow().status());
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(userB.actionId()).orElseThrow().status());
+        assertTrue(actionService.reconcileExpiredForChat(
+                USER_A.userId(), "conversation-without-action", "chat-no-action").isEmpty());
     }
 
     @Test
