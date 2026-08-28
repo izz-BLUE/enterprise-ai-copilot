@@ -38,6 +38,8 @@ flowchart TB
 - `trace_id`：Java 入口生成并透传；
 - `conversation_id`：Java 校验客户端 hint，作为同一可信用户的 namespace；
 - `X-Agent-Thread-Id`：Java 根据可信 user/conversation 生成 `rt_<sha256>`，Python 再区分 graph variant；
+- `X-Agent-Execution-Mode`：仅由 Java 注入的 `LEGACY_SINGLE` 或 `TASK_RUNTIME`；Python 放入 Runtime Context，LLM 与 AgentState 不得选择；
+- `X-Agent-Task-Id`：TASK_RUNTIME 下由 Java 生成并绑定当前 TaskExecution，用于定位 task checkpoint；
 - `allow_eval` / `allow_business_actions`：Java capability gate 结果，Python 只消费，不接受模型扩大。
 
 这些字段不进入保存的 AgentState，也不进入 LLM 的 `arguments`。PlannerDecision 使用严格 Pydantic schema；Tool Executor 在实际执行前再次校验结构、员工身份、能力、Tool 预算、成功签名和 retry policy。
@@ -106,7 +108,17 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 - `ExpenseClaim` / `ExpenseItem`：报销金额、trip/invoice 摘要、外部 provider/request、wait 和 resume markers；
 - `source_action_id` 唯一约束防止一个动作生成多个业务写入。
 
+### Multi Task Runtime（Phase 2）
+
+第一版只接受程序层确定性识别出的两个有序写任务。Python `/agent/tasks/decompose` 无状态返回原文连续片段；Java 校验片段顺序、任务类型和数量后创建 `TaskExecution`。`TaskExecution` 只拥有编排顺序和生命周期，不取代 LeaveRequest、ExpenseClaim 或 PendingAction 的业务权威。
+
+入口顺序固定为 `WAITING_USER → WAITING_CLARIFICATION → 新消息 decomposition`。存在 `WAITING_CLARIFICATION` 时消息只追加到已有 `task_id` 的 clarification context，不创建新 task group；存在 `WAITING_USER` 时复用既有 task checkpoint/PendingAction，不重新分解。
+
+Task Runtime 的关联链为 `ExpenseClaim.source_action_id → business_action.action_id ← task_execution.action_id`。`task_execution.action_id` 是可选的一对一关联字段，只用于精确定位 TaskExecution，不承载 ExpenseClaim、PendingAction 或 TaskExecution 的业务状态权威。
+
 ## 6. Expense durable workflow
+
+下面的时序图是 `LEGACY_SINGLE` 兼容路径。它保留 Python `prepare_external_wait → interrupt` 和 Java `/agent/langgraph/external/resume`。
 
 ```mermaid
 sequenceDiagram
@@ -143,9 +155,12 @@ The two waits have deliberately different meanings:
 | Wait | Trigger | Authority | Resume |
 |---|---|---|---|
 | `WAITING_USER` | complete Proposal needs explicit user decision | Java PendingAction | `POST /agent/langgraph/hitl/resume`, `Command(resume)` |
-| `WAITING_EXTERNAL` | Java ExpenseClaim is already written and awaits OA | Java ExpenseClaim + OA authoritative GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
+| `WAITING_EXTERNAL`（LEGACY_SINGLE） | Java ExpenseClaim is already written and awaits OA | Java ExpenseClaim + OA authoritative GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
+| `WAITING_EXTERNAL`（TASK_RUNTIME） | Java ExpenseClaim is already written and awaits OA；当前 Python task 已经 END | Java ExpenseClaim + OA authoritative GET；TaskExecution 只记录生命周期 | 不调用 Python external resume；callback 只更新 ExpenseClaim/对应 TaskExecution |
 
-普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，事务提交后复用 `EXPIRED` `Command(resume)` 收口旧 Graph，再继续当前 Chat；未过期 wait 仍保持阻断。Python resume 失败时不启动当前 Chat，后续请求只重试同一确定性 continuation。
+TASK_RUNTIME 的 Expense confirm 顺序是：Java PendingAction 成功 → Python 当前 task 使用 trusted `TASK_RUNTIME` context resume 并 END → Java 绑定 external correlation、将 TaskExecution 置为 `WAITING_EXTERNAL` 并提交 OA → 同组下一 Task 可由 Java 启动。OA callback/reconciliation 只通过 `ExpenseClaim.source_action_id` 定位并更新业务结果及对应 TaskExecution，禁止回写 parent queue/checkpoint、下一 task checkpoint、PendingAction 或 Memory。
+
+普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，事务提交后复用 `EXPIRED` `Command(resume)` 收口旧 Graph，再继续当前 Chat；未过期 wait 仍保持阻断。TASK_RUNTIME 的 external callback 不关闭整个 `(user_id, conversation_id)` Memory，因为此时 ACTIVE Memory 可能属于下一 Task；普通 Java terminal authority 的 task memory 收口和下一 Task 的新 ACTIVE Memory 仍按各自 Java 生命周期执行。
 
 ## 7. Confirm-time revalidation and TOCTOU
 
@@ -194,9 +209,10 @@ POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapsho
 | Stale Java commit succeeds but first Python `REJECTED` resume fails | Java `FAILED` remains authoritative | Repeated Confirm does not revalidate OA or mutate Java; retry the same deterministic `REJECTED` payload |
 | Webhook is lost | ExpenseClaim remains `WAITING_APPROVAL` | Bounded reconciliation GET |
 | Duplicate or out-of-order webhook arrives | Java terminal transition rules | Idempotent handling; no regression |
-| OA is terminal but Python is unavailable | Java ExpenseClaim terminal state is retained | Durable external-resume retry |
-| External resume response is lost | Python may already be at Graph `END` | Replay the exact same payload; `EXTERNAL_COMPLETED` acknowledgement |
-| Python finalizer crashes after external result Checkpoint | Checkpoint contains the external result | `EXTERNAL_CONTINUATION` → deterministic finalize |
+| OA is terminal but Python is unavailable（LEGACY_SINGLE） | Java ExpenseClaim terminal state is retained | Durable external-resume retry |
+| External resume response is lost（LEGACY_SINGLE） | Python may already be at Graph `END` | Replay the exact same payload; `EXTERNAL_COMPLETED` acknowledgement |
+| Python finalizer crashes after external result Checkpoint（LEGACY_SINGLE） | Checkpoint contains the external result | `EXTERNAL_CONTINUATION` → deterministic finalize |
+| TASK_RUNTIME external callback arrives while next Task is active | ExpenseClaim is the business authority; TaskExecution is correlation/lifecycle only | Update only ExpenseClaim + correlated TaskExecution; no Python external resume or Memory/checkpoint write |
 | Same runtime thread receives concurrent work | Process-local Java/Python guard | Busy/retry; no multi-instance ownership claim |
 | Expired `WAITING_USER` blocks a new Chat | Java `PendingAction` TTL + Memory terminal transition | Commit `EXPIRED`/`ABANDONED`, then replay the exact `EXPIRED` HITL resume before starting the new Chat |
 

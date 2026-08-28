@@ -56,6 +56,8 @@ Python write policy 只允许 `UPSERT + ACTIVE` 的提案；Python 不提交 `CO
 
 如果有 action proposal，Java 先成功创建 PendingAction，再持久化 Memory；Java Confirm/Cancel/Expire/Stale/Failure 负责将 Memory 收口。Memory terminal status 与 `ExpenseStatus`、`BusinessAction` status 完全分离。
 
+Multi Task Runtime 的 task1 terminal 后，Java 先按既有 terminal authority 收口 task1 Memory；只有 Java Task Runtime 推进 task2 时，才可通过显式的“下一 task 激活”入口把同一 `(user_id, conversation_id)` 记录置为 `ACTIVE` 并写入 task2 proposal。该入口不放宽普通 Agent proposal 的终态保护，不新增 Memory 表结构，也不改变 TaskExecution 的状态权威。external callback / child execution 不得调用该入口。
+
 ## 4. State comparison
 
 | 状态 | 作用域/生命周期 | 权威来源 | 明确禁止 |
@@ -79,7 +81,7 @@ Memory proposal pipeline 不在 HITL resume、external resume 或普通 `WAITING
 ## 6. Security invariants
 
 - owner 从 `VerifiedIdentity` 派生，不能从请求体、Memory 或模型输出派生；
-- Java 是 Memory lifecycle authority，Python 只能提出 `UPSERT + ACTIVE`；
+- Java 是 Memory lifecycle authority，Python 只能提出 `UPSERT + ACTIVE`；Task Runtime 的下一 task 激活是 Java 控制的显式生命周期操作；
 - action proposal 必须先建立 Java PendingAction，不能因 Memory proposal 直接写业务表；
 - Memory 不进入 LLM arguments 的 trusted system fields；
 - terminal Memory transition 和业务 action result 在 Java 控制下保持可重试、幂等和可审计；
