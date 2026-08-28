@@ -2,6 +2,8 @@ package com.fantuan.copilot.adminlog;
 
 import com.fantuan.copilot.controller.LangGraphAgentController;
 import com.fantuan.copilot.controller.admin.AdminLogController;
+import com.fantuan.copilot.auth.AuthRole;
+import com.fantuan.copilot.auth.AuthenticatedUser;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
@@ -19,17 +21,18 @@ import com.fantuan.copilot.service.action.ActionNonceService;
 import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.action.BusinessActionProperties;
 import com.fantuan.copilot.service.action.BusinessActionService;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
-import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
@@ -95,6 +98,11 @@ class AdminLogSentinelLeakTest {
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
     /**
      * 输入路径：SENTINEL_USER_QUESTION 进入 Agent 请求 message；
      *           SENTINEL_AGENT_ANSWER 进入 Python 响应 answer。
@@ -112,9 +120,11 @@ class AdminLogSentinelLeakTest {
         when(restTemplate.postForEntity(anyString(), any(), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(pythonResponse));
 
-        DemoIdentityService demoIdentityService = mock(DemoIdentityService.class);
-        when(demoIdentityService.requireIdentity("DEMO-001"))
-                .thenReturn(new DemoIdentity("U10001", "E10001", "Demo User", DemoRole.EMPLOYEE));
+        AuthenticatedUser user = new AuthenticatedUser(
+                "U10001", "zhangsan", "E10001", "张三", AuthRole.EMPLOYEE, true);
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(
+                        user, null, List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))));
 
         AdminAccessService adminAccessService = mock(AdminAccessService.class);
         when(adminAccessService.isAdmin(any())).thenReturn(false);
@@ -133,13 +143,12 @@ class AdminLogSentinelLeakTest {
                         "http://python-agent"),
                 adminAccessService,
                 businessActionService,
-                new com.fantuan.copilot.identity.IdentityContext(demoIdentityService),
+                new com.fantuan.copilot.identity.IdentityContext(),
                 memoryService,
                 buffer);
 
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/agent/langgraph/chat");
         request.setAttribute("traceId", "trace-agent-1");
-        request.addHeader("X-Demo-User-Id", "DEMO-001");
 
         agentController.langgraphChat(
                 new com.fantuan.copilot.dto.ChatRequest(SENTINEL_USER_QUESTION, null),

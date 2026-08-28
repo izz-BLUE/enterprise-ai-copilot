@@ -33,7 +33,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   - 边界：status 为 null 时拒绝
  */
 @SpringBootTest(properties = {
-        "demo.identity.enabled=true",
         "business.actions.enabled=true"
 })
 class AiTaskMemoryIsolationIntegrationTest extends PostgresIntegrationTestBase {

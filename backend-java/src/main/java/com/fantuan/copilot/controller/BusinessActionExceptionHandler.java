@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = {
         BusinessActionController.class,
-        DemoIdentityController.class,
         LeaveReadController.class,
         ExpenseReadController.class
 })

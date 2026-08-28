@@ -296,7 +296,7 @@ class BusinessActionHitlCoordinatorTest {
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();
         when(actionService.createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
                 .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                         errorCode, "业务规则不满足", null, null));
@@ -306,7 +306,7 @@ class BusinessActionHitlCoordinatorTest {
 
         assertEquals(errorCode, exception.errorCode());
         verify(actionService).abandonMemoryAfterHitlRejection(
-                IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+                IDENTITY, CONVERSATION_ID);
         ArgumentCaptor<HitlResumePayload> payload = ArgumentCaptor.forClass(HitlResumePayload.class);
         verify(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), payload.capture(),
                 any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
@@ -327,7 +327,7 @@ class BusinessActionHitlCoordinatorTest {
                 any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
         assertEquals(payload.getValue(), retryPayload.getAllValues().get(1));
         verify(actionService, times(2)).abandonMemoryAfterHitlRejection(
-                IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+                IDENTITY, CONVERSATION_ID);
         verifyNoInteractions(actions);
     }
 
@@ -338,7 +338,7 @@ class BusinessActionHitlCoordinatorTest {
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();
         when(actionService.createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
                 .thenThrow(new ActionException(status, errorCode, "暂时不可用", null, null));
 
@@ -355,19 +355,19 @@ class BusinessActionHitlCoordinatorTest {
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();
         when(actionService.createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
                 .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "EXPENSE_AMOUNT_INVALID", "费用明细金额必须为正数。", null, null));
         doThrow(new RuntimeException("db unavailable")).when(actionService)
-                .abandonMemoryAfterHitlRejection(IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+                .abandonMemoryAfterHitlRejection(IDENTITY, CONVERSATION_ID);
 
         RuntimeException exception = assertThrows(RuntimeException.class, () -> coordinator.registerWait(
                 proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
 
         assertEquals("db unavailable", exception.getMessage());
         verify(actionService).abandonMemoryAfterHitlRejection(
-                IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+                IDENTITY, CONVERSATION_ID);
         verify(pythonAgentGateway, never()).post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), anyString());
     }
@@ -390,7 +390,7 @@ class BusinessActionHitlCoordinatorTest {
                         new BigDecimal("5.0"), new BigDecimal("4.0")),
                 null, Instant.parse("2026-08-28T00:00:00Z"), false);
         when(actionService.createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId())).thenReturn(view);
         when(actions.findByHitlWaitId(wait.waitId())).thenReturn(Optional.of(expired));
 
@@ -423,7 +423,7 @@ class BusinessActionHitlCoordinatorTest {
                         new BigDecimal("5.0"), new BigDecimal("4.0")),
                 "nonce", Instant.parse("2026-08-28T00:00:00Z"), true);
         when(actionService.createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId())).thenReturn(view);
         when(actions.findByHitlWaitId(wait.waitId())).thenReturn(Optional.empty());
 
@@ -432,7 +432,7 @@ class BusinessActionHitlCoordinatorTest {
 
         assertSame(view, actual);
         verify(actionService).createHitlPending(
-                proposal, "trace", ADMIN_TOKEN, IDENTITY.asDemoIdentity(),
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId());
     }
 

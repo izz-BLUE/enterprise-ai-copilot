@@ -94,7 +94,7 @@ class BusinessActionHitlCoordinatorRevalidationTest {
 
         assertEquals("ACTION_STALE", exception.errorCode());
         verify(actionService).failStaleConfirmation(
-                ACTION_ID, "nonce", ADMIN_TOKEN, TRACE_ID, IDENTITY.asDemoIdentity(),
+                ACTION_ID, "nonce", ADMIN_TOKEN, TRACE_ID, IDENTITY,
                 "EXPENSE_INVOICE_STALE");
         verify(actionService, never()).confirm(any(), any(), any(), any(), any(), any());
         verify(threadGuard).release(THREAD_ID);

@@ -3,10 +3,8 @@ package com.fantuan.copilot.config;
 import com.fantuan.copilot.auth.AuthProperties;
 import com.fantuan.copilot.auth.AppUserDetailsService;
 import com.fantuan.copilot.controller.MockOaWebhookController;
-import com.fantuan.copilot.security.DemoIdentityFallbackAuthenticationFilter;
 import com.fantuan.copilot.security.JwtPrincipalConverter;
 import com.fantuan.copilot.security.SecurityErrorHandlers;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
@@ -27,7 +25,6 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtClaimValidator;
-import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
@@ -77,16 +74,9 @@ public class SecurityConfig {
     }
 
     @Bean
-    DemoIdentityFallbackAuthenticationFilter demoIdentityFallbackAuthenticationFilter(
-            DemoIdentityService identities) {
-        return new DemoIdentityFallbackAuthenticationFilter(identities);
-    }
-
-    @Bean
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
     SecurityFilterChain securityFilterChain(HttpSecurity http,
                                              JwtDecoder jwtDecoder,
-                                             DemoIdentityFallbackAuthenticationFilter demoFallback,
                                              SecurityErrorHandlers errors) throws Exception {
         http
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
@@ -99,7 +89,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/health", "/api/ready", "/api/version",
                                 "/api/agent/health", "/api/agent/ready").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/demo/identities").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.POST, MockOaWebhookController.PATH).permitAll()
                         .requestMatchers("/api/internal/leave/**").permitAll()
@@ -111,8 +100,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint(errors.authenticationEntryPoint())
                         .accessDeniedHandler(errors.accessDeniedHandler())
                         .bearerTokenResolver(bearerTokenResolver())
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(new JwtPrincipalConverter())))
-                .addFilterAfter(demoFallback, BearerTokenAuthenticationFilter.class);
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(new JwtPrincipalConverter())));
         return http.build();
     }
 

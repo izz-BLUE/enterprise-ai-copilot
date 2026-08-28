@@ -18,9 +18,6 @@ import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.ActionException;
-import com.fantuan.copilot.service.demo.DemoIdentity;
-import com.fantuan.copilot.service.demo.DemoIdentityService;
-import com.fantuan.copilot.service.demo.DemoRole;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
@@ -86,28 +83,26 @@ class LangGraphAgentActionMappingTest {
     void invalidIdentityIsRejectedBeforePythonWithoutLeakingPresentedValue() {
         RestTemplate restTemplate = mock(RestTemplate.class);
         PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
-        DemoIdentityService identities = mock(DemoIdentityService.class);
-        when(identities.isEnabled()).thenReturn(true);
-        when(identities.requireIdentity("unknown-sensitive-value")).thenThrow(new ActionException(
-                HttpStatus.FORBIDDEN, "DEMO_IDENTITY_INVALID", "演示身份无效。", null, null));
+        IdentityContext identityContext = mock(IdentityContext.class);
+        when(identityContext.require(any())).thenThrow(new ActionException(
+                HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED", "请先登录。", null, null));
         LangGraphAgentController controller = new LangGraphAgentController(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 mock(AdminAccessService.class), mock(BusinessActionService.class),
-                new IdentityContext(identities), mock(AiTaskMemoryService.class),
+                identityContext, mock(AiTaskMemoryService.class),
                 new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("identity-trace");
-        when(request.getHeader("X-Demo-User-Id")).thenReturn("unknown-sensitive-value");
 
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
                 new ChatRequest("request"), request);
 
-        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals("error", response.getBody().route());
-        assertEquals("demo_identity", response.getBody().category());
+        assertEquals("authentication", response.getBody().category());
         assertFalse(response.getBody().success());
-        assertFalse(response.getBody().answer().contains("unknown-sensitive-value"));
+        assertEquals("请先登录。", response.getBody().answer());
         verifyNoInteractions(restTemplate);
         assertEquals(0, bulkhead.snapshot().get("active"));
     }
@@ -118,11 +113,11 @@ class LangGraphAgentActionMappingTest {
         PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
         BusinessActionService actionService = mock(BusinessActionService.class);
         AdminAccessService admin = mock(AdminAccessService.class);
-        DemoIdentityService identities = mock(DemoIdentityService.class);
-        DemoIdentity identity = new DemoIdentity(
-                "DEMO-001", "DEMO-001", "Demo User", DemoRole.EMPLOYEE);
-        when(identities.isEnabled()).thenReturn(true);
-        when(identities.requireIdentity("DEMO-001")).thenReturn(identity);
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        when(identityContext.require(any())).thenReturn(identity);
         when(admin.isAdmin("admin")).thenReturn(true);
         when(actionService.isAllowed("admin")).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
@@ -146,13 +141,12 @@ class LangGraphAgentActionMappingTest {
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
         LangGraphAgentController controller = new LangGraphAgentController(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
-                admin, actionService, new IdentityContext(identities),
+                admin, actionService, identityContext,
                 memoryService,
                 new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("java-trace-123");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
-        when(request.getHeader("X-Demo-User-Id")).thenReturn("DEMO-001");
 
         ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
                 new ChatRequest("request"), request);
@@ -164,12 +158,11 @@ class LangGraphAgentActionMappingTest {
         assertEquals("true", entity.getValue().getHeaders().getFirst("X-Allow-Business-Actions"));
         assertEquals("2026-07-16", entity.getValue().getHeaders().getFirst("X-Business-Date"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Admin-Token"));
-        assertFalse(entity.getValue().getHeaders().containsKey("X-Demo-User-Id"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Memory-Write-Scope"));
         var inOrder = inOrder(actionService, memoryService);
         inOrder.verify(actionService).createPending(eq(proposal), eq("java-trace-123"),
                 eq("admin"), eq(identity), anyString());
-        inOrder.verify(memoryService).upsertActiveFromAgent(eq("DEMO-001"), anyString(),
+        inOrder.verify(memoryService).upsertActiveFromAgent(eq("U10001"), anyString(),
                 eq("LEAVE_REQUEST"), eq(Map.of("phase", "pending_confirmation")), eq("等待确认"));
         verify(actionService, never()).createPending(eq(proposal), eq("python-trace-999"),
                 eq("admin"), eq(identity), anyString());
@@ -182,8 +175,8 @@ class LangGraphAgentActionMappingTest {
         BusinessActionService actionService = mock(BusinessActionService.class);
         AdminAccessService admin = mock(AdminAccessService.class);
         VerifiedIdentity identity = new VerifiedIdentity(
-                "DEMO-001", "DEMO-001", "DEMO-001", "Demo User",
-                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.DEMO);
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenReturn(identity);
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
@@ -199,7 +192,7 @@ class LangGraphAgentActionMappingTest {
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
         when(actionService.createPending(eq(proposal), anyString(), eq("admin"),
-                eq(identity.asDemoIdentity()), anyString()))
+                eq(identity), anyString()))
                 .thenThrow(new ActionException(HttpStatus.CONFLICT,
                         "ACTION_CONVERSATION_IN_PROGRESS", "当前会话已有待确认的申请。", null, null));
 
@@ -230,8 +223,8 @@ class LangGraphAgentActionMappingTest {
         BusinessActionService actionService = mock(BusinessActionService.class);
         AdminAccessService admin = mock(AdminAccessService.class);
         VerifiedIdentity identity = new VerifiedIdentity(
-                "DEMO-001", "DEMO-001", "DEMO-001", "Demo User",
-                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.DEMO);
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenReturn(identity);
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
@@ -247,7 +240,7 @@ class LangGraphAgentActionMappingTest {
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
         when(actionService.createPending(eq(proposal), anyString(), eq("admin"),
-                eq(identity.asDemoIdentity()), anyString()))
+                eq(identity), anyString()))
                 .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "BUSINESS_RULE_VIOLATION", "年假申请参数不完整。", null, null));
 
@@ -270,11 +263,10 @@ class LangGraphAgentActionMappingTest {
     }
 
     @Test
-    void jwtIdentityWinsOverForgedEmployeeDemoAndQueryValues() {
+    void jwtIdentityWinsOverForgedEmployeeAndQueryValues() {
         RestTemplate restTemplate = mock(RestTemplate.class);
         PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
         BusinessActionService actionService = mock(BusinessActionService.class);
-        DemoIdentityService identities = mock(DemoIdentityService.class);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class),
                 eq(PythonAgentResponse.class))).thenReturn(ResponseEntity.ok(
@@ -291,12 +283,11 @@ class LangGraphAgentActionMappingTest {
             LangGraphAgentController controller = new LangGraphAgentController(
                     new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                     mock(AdminAccessService.class), actionService,
-                    new IdentityContext(identities), mock(AiTaskMemoryService.class),
+                    new IdentityContext(), mock(AiTaskMemoryService.class),
                     new AdminLogBuffer());
             HttpServletRequest request = mock(HttpServletRequest.class);
             when(request.getAttribute("traceId")).thenReturn("spoof-trace");
             when(request.getHeader("X-Employee-Id")).thenReturn("E10002");
-            when(request.getHeader("X-Demo-User-Id")).thenReturn("DEMO-002");
             when(request.getParameter("employee_id")).thenReturn("E10002");
 
             controller.langgraphChat(new ChatRequest("request"), request);
@@ -305,7 +296,6 @@ class LangGraphAgentActionMappingTest {
             verify(restTemplate).postForEntity(anyString(), entity.capture(),
                     eq(PythonAgentResponse.class));
             assertEquals("E10001", entity.getValue().getHeaders().getFirst("X-Employee-Id"));
-            verifyNoInteractions(identities);
         } finally {
             SecurityContextHolder.clearContext();
         }

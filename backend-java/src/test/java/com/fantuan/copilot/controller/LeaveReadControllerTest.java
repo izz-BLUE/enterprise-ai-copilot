@@ -44,7 +44,7 @@ class LeaveReadControllerTest {
     @Test
     void balanceMissingInternalTokenIsRejected() throws Exception {
         mockMvc.perform(get("/api/internal/leave/balance")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-no-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("LEAVE_READ_FORBIDDEN"));
@@ -55,7 +55,7 @@ class LeaveReadControllerTest {
     void balanceWrongInternalTokenIsRejected() throws Exception {
         mockMvc.perform(get("/api/internal/leave/balance")
                         .header("X-Internal-Token", "wrong-token")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-wrong-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("LEAVE_READ_FORBIDDEN"));
@@ -74,16 +74,16 @@ class LeaveReadControllerTest {
 
     @Test
     void balanceValidRequestReturnsAccountAndEmployeeId() throws Exception {
-        when(accounts.findBalance("DEMO-001")).thenReturn(Optional.of(new BigDecimal("3.5")));
+        when(accounts.findBalance("E10001")).thenReturn(Optional.of(new BigDecimal("3.5")));
         mockMvc.perform(get("/api/internal/leave/balance")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-ok"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.employeeId").value("DEMO-001"))
+                .andExpect(jsonPath("$.employeeId").value("E10001"))
                 .andExpect(jsonPath("$.annualBalance").value(3.5));
-        verify(accounts).findBalance("DEMO-001");
+        verify(accounts).findBalance("E10001");
     }
 
     @Test
@@ -91,7 +91,7 @@ class LeaveReadControllerTest {
         when(accounts.findBalance(anyString())).thenReturn(Optional.empty());
         mockMvc.perform(get("/api/internal/leave/balance")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-noacc"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("LEAVE_ACCOUNT_NOT_FOUND"));
@@ -100,7 +100,7 @@ class LeaveReadControllerTest {
     @Test
     void requestsMissingInternalTokenIsRejected() throws Exception {
         mockMvc.perform(get("/api/internal/leave/requests")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-list-no-token"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("LEAVE_READ_FORBIDDEN"));
@@ -119,16 +119,16 @@ class LeaveReadControllerTest {
 
     @Test
     void requestsValidRequestForwardsEmployeeIdAndLimit() throws Exception {
-        when(requests.findRecentByEmployee(eq("DEMO-001"), eq(5))).thenReturn(java.util.List.of());
+        when(requests.findRecentByEmployee(eq("E10001"), eq(5))).thenReturn(java.util.List.of());
         mockMvc.perform(get("/api/internal/leave/requests")
                         .param("limit", "5")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-list-ok"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.employeeId").value("DEMO-001"))
+                .andExpect(jsonPath("$.employeeId").value("E10001"))
                 .andExpect(jsonPath("$.total").value(0));
-        verify(requests).findRecentByEmployee("DEMO-001", 5);
+        verify(requests).findRecentByEmployee("E10001", 5);
     }
 
     @Test
@@ -144,7 +144,7 @@ class LeaveReadControllerTest {
                 .build();
         mvc.perform(get("/api/internal/leave/balance")
                         .header("X-Internal-Token", "internal-secret")
-                        .header("X-Employee-Id", "DEMO-001")
+                        .header("X-Employee-Id", "E10001")
                         .requestAttr("traceId", "trace-disabled"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.errorCode").value("LEAVE_READ_DISABLED"));

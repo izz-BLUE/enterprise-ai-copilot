@@ -33,7 +33,7 @@
         <mxCell id="j6" value="&lt;b&gt;PythonAgentBulkhead&lt;/b&gt;&lt;br&gt;&lt;font size='2' color='#666666'&gt;3 槽 · 500ms&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="j1">
           <mxGeometry x="30" y="115" width="150" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="j7" value="&lt;b&gt;DemoIdentityService&lt;/b&gt;&lt;br&gt;&lt;font size='2' color='#666666'&gt;身份不下传 Python&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="j1">
+        <mxCell id="j7" value="&lt;b&gt;VerifiedIdentity&lt;/b&gt;&lt;br&gt;&lt;font size='2' color='#666666'&gt;JWT 身份 → 服务端上下文&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="j1">
           <mxGeometry x="360" y="115" width="150" height="50" as="geometry" />
         </mxCell>
         <mxCell id="j9" value="&lt;b&gt;Jdbc Repositories&lt;/b&gt;&lt;br&gt;&lt;font size='2' color='#666666'&gt;行锁 · 幂等 · 余额扣减&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="j1">
@@ -270,7 +270,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="E22" value="解析 Demo 身份（不下传 Python）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#9a9a9a;opacity=60;fontSize=11;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="j4" target="j7">
+        <mxCell id="E22" value="解析 JWT 身份（不下传 Python）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#9a9a9a;opacity=60;fontSize=11;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="j4" target="j7">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="E17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=1.5;strokeColor=#b59f3b;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="k1" target="k2">

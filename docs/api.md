@@ -11,7 +11,7 @@
 | Python | `http://localhost:8000` | Java 内部；生产 Compose 不映射宿主机端口 |
 | Mock OA | `http://localhost:8010` | 独立模拟审批服务 |
 
-Java 入口为可信边界：它解析 JWT/受控 Demo identity、生成 `trace_id`、决定 Admin/capability、解析 conversation scope，并向 Python 注入可信 runtime headers。客户端不能通过 body 或 LLM arguments 覆盖 employee、权限、业务日期或 trace。
+Java 入口为可信边界：它解析 JWT、生成 `trace_id`、决定 Admin/capability、解析 conversation scope，并向 Python 注入可信 runtime headers。客户端不能通过 body 或 LLM arguments 覆盖 employee、权限、业务日期或 trace。
 
 ## 2. Java public API
 
@@ -23,7 +23,7 @@ Java 入口为可信边界：它解析 JWT/受控 Demo identity、生成 `trace_
 | `POST` | `/api/auth/logout` | authenticated | 注销当前认证上下文 |
 | `GET` | `/api/auth/me` | authenticated | 返回当前用户身份 |
 
-生产使用 JWT；`X-Demo-User-Id` 只适用于显式开启且受控的本地 Demo fallback，不是认证机制。
+生产和本地 Demo 均使用 JWT；Demo Auth 只负责初始化固定演示账号。
 
 ### Health and version
 
@@ -113,7 +113,6 @@ Confirm 响应：
 | Method | Path | Auth | 说明 |
 |---|---|---|---|
 | `GET` | `/api/admin/logs` | `ROLE_ADMIN` | 管理员诊断日志缓冲区 |
-| `GET` | `/api/demo/identities` | public | 仅在 Demo directory 开启时返回演示身份目录 |
 
 `X-Admin-Token` 只控制 eval/管理能力，生产必须配置非空 `ADMIN_TOKEN`；它不是普通用户认证替代品。
 

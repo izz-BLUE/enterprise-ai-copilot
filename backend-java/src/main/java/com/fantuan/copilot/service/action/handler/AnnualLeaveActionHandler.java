@@ -15,7 +15,7 @@ import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.AnnualLeaveProposalValidator;
 import com.fantuan.copilot.service.action.BusinessActionHandler;
-import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -58,7 +58,7 @@ public class AnnualLeaveActionHandler implements BusinessActionHandler {
 
     @Override
     public PendingPlan planPending(BusinessActionProposal proposal,
-                                   DemoIdentity identity,
+                                   VerifiedIdentity identity,
                                    LocalDate businessDate,
                                    Instant now) {
         if (!(proposal instanceof AnnualLeaveActionProposal annualLeave)) {
@@ -68,7 +68,7 @@ public class AnnualLeaveActionHandler implements BusinessActionHandler {
         AnnualLeaveProposalValidator.ValidatedLeave validated =
                 AnnualLeaveProposalValidator.validate(annualLeave, businessDate);
         BigDecimal balanceBefore = accounts.findBalanceForUpdate(identity.employeeId())
-                .orElseThrow(() -> new IllegalStateException("Demo leave account unavailable"));
+                .orElseThrow(() -> new IllegalStateException("Leave account unavailable"));
         if (leaveExecutionGateway.hasConflict(identity.employeeId(),
                 annualLeave.startDate(), annualLeave.endDate())) {
             throw rule("日期范围与已提交的模拟申请冲突。");

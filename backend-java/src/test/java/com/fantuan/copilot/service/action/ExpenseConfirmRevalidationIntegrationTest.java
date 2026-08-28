@@ -44,15 +44,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
+        "demo.auth.enabled=true",
+        "demo.auth.default-password=test-password",
         "business.actions.enabled=true",
-        "business.actions.require-admin=false",
-        "demo.identity.enabled=true"
+        "business.actions.require-admin=false"
 })
 class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestBase {
     private static final String CONVERSATION_ID = "p6-confirm-revalidation";
     private static final VerifiedIdentity IDENTITY = new VerifiedIdentity(
-            "DEMO-001", "DEMO-001", "DEMO-001", "Demo User", AuthRole.EMPLOYEE, true,
-            VerifiedIdentity.Source.DEMO);
+            "U10001", "zhangsan", "E10001", "张三", AuthRole.EMPLOYEE, true,
+            VerifiedIdentity.Source.JWT);
 
     @Autowired BusinessActionService actionService;
     @Autowired BusinessActionHitlCoordinator hitlCoordinator;
@@ -86,14 +87,14 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         });
 
         PendingActionView pending = actionService.createPending(
-                proposal(), "origin-p6-valid", null, IDENTITY.asDemoIdentity(), null);
+                proposal(), "origin-p6-valid", null, IDENTITY, null);
         ActionExecutionResponse response = hitlCoordinator.confirm(
                 pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
                 null, "trace-p6-valid", IDENTITY);
 
         assertEquals(ActionStatus.SUCCEEDED, response.status());
         assertFalse(transactionActive.get());
-        assertEquals("DEMO-001", request.get().employeeId());
+        assertEquals("E10001", request.get().employeeId());
         assertEquals("TRIP-20260818-001", request.get().tripId());
         assertEquals(List.of("INV-001", "INV-002"), request.get().invoiceIds());
         assertEquals(ExpenseStatus.SUBMITTED,
@@ -105,11 +106,11 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         when(revalidationGateway.revalidate(any(), anyString())).thenReturn(
                 new ExpenseRevalidationResponse(1, true,
                         new ExpenseRevalidationResponse.TripFact(
-                                "TRIP-20260818-001", "DEMO-001",
+                                "TRIP-20260818-001", "E10001",
                                 "2026-08-18", "2026-08-20", "PENDING"),
                         validFacts().invoices(), null, null));
         PendingActionView pending = actionService.createPending(
-                proposal(), "origin-p6-stale-trip", null, IDENTITY.asDemoIdentity(), null);
+                proposal(), "origin-p6-stale-trip", null, IDENTITY, null);
 
         assertThrows(ActionStaleException.class, () -> hitlCoordinator.confirm(
                 pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
@@ -122,13 +123,13 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
 
     @Test
     void providerOutageKeepsPendingActionAndActiveMemoryAndRetrySucceeds() {
-        memoryService.upsert("DEMO-001", CONVERSATION_ID, "EXPENSE_CLAIM",
+        memoryService.upsert("U10001", CONVERSATION_ID, "EXPENSE_CLAIM",
                 TaskStatus.ACTIVE, "{}", "active");
         when(revalidationGateway.revalidate(any(), anyString()))
                 .thenThrow(new RuntimeException("Enterprise OA unavailable"))
                 .thenReturn(validFacts());
         PendingActionView pending = actionService.createPending(
-                proposal(), "origin-p6-outage", null, IDENTITY.asDemoIdentity(), CONVERSATION_ID);
+                proposal(), "origin-p6-outage", null, IDENTITY, CONVERSATION_ID);
 
         ExpenseRevalidationUnavailableException unavailable = assertThrows(
                 ExpenseRevalidationUnavailableException.class, () -> hitlCoordinator.confirm(
@@ -138,7 +139,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());
         assertEquals(TaskStatus.ACTIVE,
-                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
+                memoryService.find("U10001", CONVERSATION_ID).orElseThrow().status());
         assertEquals(0, claims.countBySourceActionId(pending.actionId()));
 
         ActionExecutionResponse retry = hitlCoordinator.confirm(
@@ -150,7 +151,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
 
     @Test
     void staleHitlConfirmationAbandonsMemoryAndSendsRejectedContinuation() {
-        memoryService.upsert("DEMO-001", CONVERSATION_ID, "EXPENSE_CLAIM",
+        memoryService.upsert("U10001", CONVERSATION_ID, "EXPENSE_CLAIM",
                 TaskStatus.ACTIVE, "{}", "active");
         when(revalidationGateway.revalidate(any(), anyString()))
                 .thenReturn(new ExpenseRevalidationResponse(
@@ -168,7 +169,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
                 null, "trace-p6-hitl", IDENTITY));
 
         assertEquals(TaskStatus.ABANDONED,
-                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
+                memoryService.find("U10001", CONVERSATION_ID).orElseThrow().status());
         assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
         verify(pythonAgentGateway).post(anyString(), any(HitlResumePayload.class),
                 any(), any(), anyString());
@@ -177,7 +178,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
 
     @Test
     void failedStaleResumeIsRetriedByConfirmWithStableRejectedPayload() {
-        memoryService.upsert("DEMO-001", CONVERSATION_ID, "EXPENSE_CLAIM",
+        memoryService.upsert("U10001", CONVERSATION_ID, "EXPENSE_CLAIM",
                 TaskStatus.ACTIVE, "{}", "active");
         when(revalidationGateway.revalidate(any(), anyString()))
                 .thenReturn(new ExpenseRevalidationResponse(
@@ -203,7 +204,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
                 null, "trace-p6-retry-first", IDENTITY));
         assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
         assertEquals(TaskStatus.ABANDONED,
-                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
+                memoryService.find("U10001", CONVERSATION_ID).orElseThrow().status());
         assertEquals(0, claims.countBySourceActionId(pending.actionId()));
 
         assertThrows(ActionException.class, () -> hitlCoordinator.confirm(
@@ -217,7 +218,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         assertEquals(ActionStatus.FAILED, resumes.get(1).actionStatus());
         assertEquals(ActionStatus.FAILED, actions.find(pending.actionId()).orElseThrow().status());
         assertEquals(TaskStatus.ABANDONED,
-                memoryService.find("DEMO-001", CONVERSATION_ID).orElseThrow().status());
+                memoryService.find("U10001", CONVERSATION_ID).orElseThrow().status());
         assertEquals(0, claims.countBySourceActionId(pending.actionId()));
     }
 
@@ -237,7 +238,7 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
     private static ExpenseRevalidationResponse validFacts() {
         return new ExpenseRevalidationResponse(1, true,
                 new ExpenseRevalidationResponse.TripFact(
-                        "TRIP-20260818-001", "DEMO-001",
+                        "TRIP-20260818-001", "E10001",
                         "2026-08-18", "2026-08-20", "APPROVED"),
                 List.of(
                         new ExpenseRevalidationResponse.InvoiceFact(

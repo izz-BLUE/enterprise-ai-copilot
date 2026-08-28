@@ -35,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   - (COMPLETED, ABANDON) / (ABANDONED, COMPLETE)：终态互斥
  */
 @SpringBootTest(properties = {
-        "demo.identity.enabled=true",
         "business.actions.enabled=true"
 })
 class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBase {

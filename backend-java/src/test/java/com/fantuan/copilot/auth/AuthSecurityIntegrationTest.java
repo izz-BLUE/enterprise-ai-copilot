@@ -31,7 +31,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "demo.auth.enabled=true",
-        "demo.identity.enabled=true",
         "business.actions.enabled=true",
         "business.actions.require-admin=true",
         "admin.token=required-admin-token",
@@ -151,7 +150,7 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     @Test
-    void agentRequiresAuthenticationWhenNoBearerOrDemoFallbackIsPresent() throws Exception {
+    void agentRequiresAuthenticationWhenNoJwtIsPresent() throws Exception {
         mockMvc.perform(post("/api/agent/langgraph/chat")
                         .contentType(APPLICATION_JSON)
                         .content("{\"message\":\"几点上班？\"}"))
@@ -160,21 +159,9 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     @Test
-    void validDemoFallbackAuthenticationCanReachBusinessAction() throws Exception {
-        mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
-                        .header("X-Demo-User-Id", "DEMO-001")
-                        .header("X-Admin-Token", "required-admin-token")
-                        .contentType(APPLICATION_JSON)
-                        .content("{\"confirmationNonce\":\"nonce\"}"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.errorCode").value("ACTION_NOT_FOUND"));
-    }
-
-    @Test
-    void invalidBearerCannotFallBackToDemoIdentity() throws Exception {
+    void invalidBearerIsRejected() throws Exception {
         mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
                         .header("Authorization", "Bearer invalid-or-expired-token")
-                        .header("X-Demo-User-Id", "DEMO-001")
                         .contentType(APPLICATION_JSON)
                         .content("{\"confirmationNonce\":\"nonce\"}"))
                 .andExpect(status().isUnauthorized())
@@ -186,7 +173,6 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
         String employeeToken = login("zhangsan", TEST_PASSWORD).get("accessToken").asText();
         mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
                         .header("Authorization", "Bearer " + employeeToken)
-                        .header("X-Demo-User-Id", "DEMO-002")
                         .header("X-Admin-Token", "required-admin-token")
                         .contentType(APPLICATION_JSON)
                         .content("{\"confirmationNonce\":\"nonce\"}"))

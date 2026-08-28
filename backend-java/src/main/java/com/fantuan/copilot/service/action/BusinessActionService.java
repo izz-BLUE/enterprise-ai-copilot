@@ -10,7 +10,7 @@ import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
-import com.fantuan.copilot.service.demo.DemoIdentity;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -86,14 +86,14 @@ public class BusinessActionService {
      * 经 handlerRegistry → handler 调度业务校验与准备数据。
      *
      * conversationId 来自 Java 侧服务端解析的会话 ID（与 Memory 复合 key 对齐）；
-     * ownerUserId 取自 trusted DemoIdentity.userId()。二者用于动作终态时收口
+     * ownerUserId 取自 trusted VerifiedIdentity.userId()。二者用于动作终态时收口
      * ACTIVE Memory，允许为 null（历史数据 / 无 Memory 关联）。
      */
     @Transactional
     public PendingActionView createPending(BusinessActionProposal proposal,
                                            String originTraceId,
                                            String presentedToken,
-                                           DemoIdentity identity,
+                                           VerifiedIdentity identity,
                                            String conversationId) {
         return createPendingInternal(proposal, originTraceId, presentedToken, identity,
                 conversationId, null, null);
@@ -107,7 +107,7 @@ public class BusinessActionService {
     public PendingActionView createHitlPending(BusinessActionProposal proposal,
                                                 String originTraceId,
                                                 String presentedToken,
-                                                DemoIdentity identity,
+                                                VerifiedIdentity identity,
                                                 String conversationId,
                                                 String agentExecutionId,
                                                 String hitlWaitId) {
@@ -116,7 +116,7 @@ public class BusinessActionService {
     }
 
     /** Preserve the service's authorization ordering before coordinator routing. */
-    void authorizeForAction(String presentedToken, DemoIdentity identity) {
+    void authorizeForAction(String presentedToken, VerifiedIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
     }
@@ -127,7 +127,7 @@ public class BusinessActionService {
      * This is intentionally package-private: Python never controls this
      * lifecycle transition.
      */
-    void abandonMemoryAfterHitlRejection(DemoIdentity identity, String conversationId) {
+    void abandonMemoryAfterHitlRejection(VerifiedIdentity identity, String conversationId) {
         if (identity == null || identity.userId() == null || conversationId == null) {
             return;
         }
@@ -137,7 +137,7 @@ public class BusinessActionService {
     private PendingActionView createPendingInternal(BusinessActionProposal proposal,
                                                      String originTraceId,
                                                      String presentedToken,
-                                                     DemoIdentity identity,
+                                                     VerifiedIdentity identity,
                                                      String conversationId,
                                                      String agentExecutionId,
                                                      String hitlWaitId) {
@@ -250,7 +250,7 @@ public class BusinessActionService {
     })
     public ActionExecutionResponse confirm(String actionId, String confirmationNonce,
                                            String idempotencyKey, String presentedToken,
-                                           String traceId, DemoIdentity identity) {
+                                           String traceId, VerifiedIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
@@ -309,7 +309,7 @@ public class BusinessActionService {
     @Transactional(noRollbackFor = ActionStaleException.class)
     public void failStaleConfirmation(String actionId, String confirmationNonce,
                                       String presentedToken, String traceId,
-                                      DemoIdentity identity, String failureCode) {
+                                      VerifiedIdentity identity, String failureCode) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
         if (!isStaleFailureCode(failureCode)) {
@@ -334,7 +334,7 @@ public class BusinessActionService {
     @Transactional(noRollbackFor = ActionExpiredAfterUpdateException.class)
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
                                           String presentedToken, String traceId,
-                                          DemoIdentity identity) {
+                                          VerifiedIdentity identity) {
         requireEnabledAndAdmin(presentedToken);
         requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
@@ -440,7 +440,7 @@ public class BusinessActionService {
 
     private void verifyHitlCorrelation(PendingAction existing,
                                        BusinessActionType actionType,
-                                       DemoIdentity identity,
+                                       VerifiedIdentity identity,
                                        String conversationId,
                                        String agentExecutionId,
                                        String hitlWaitId) {
@@ -456,14 +456,14 @@ public class BusinessActionService {
         }
     }
 
-    private void requireIdentity(DemoIdentity identity) {
+    private void requireIdentity(VerifiedIdentity identity) {
         if (identity == null || identity.employeeId() == null || identity.employeeId().isBlank()) {
             throw new ActionException(HttpStatus.FORBIDDEN, "EMPLOYEE_ID_REQUIRED",
                     "当前身份不是员工身份。", null, null);
         }
     }
 
-    private void verifyOwner(PendingAction action, DemoIdentity identity) {
+    private void verifyOwner(PendingAction action, VerifiedIdentity identity) {
         if (!action.employeeId().equals(identity.employeeId())) {
             throw new ActionException(HttpStatus.NOT_FOUND, "ACTION_NOT_FOUND",
                     "未找到申请草稿。", null, null);

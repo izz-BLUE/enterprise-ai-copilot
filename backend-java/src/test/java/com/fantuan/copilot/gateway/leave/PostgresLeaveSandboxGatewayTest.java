@@ -21,7 +21,7 @@ class PostgresLeaveSandboxGatewayTest {
         when(repository.nextNumber()).thenReturn(7L);
         PostgresLeaveSandboxGateway gateway = new PostgresLeaveSandboxGateway(
                 repository, new BusinessActionProperties());
-        LeaveSubmission submission = new LeaveSubmission("act_source", "DEMO-002",
+        LeaveSubmission submission = new LeaveSubmission("act_source", "E10002",
                 LocalDate.of(2026, 7, 20), LocalDate.of(2026, 7, 20), HalfDay.NONE,
                 new BigDecimal("1.0"), Instant.parse("2026-07-19T00:00:00Z"));
 
@@ -30,7 +30,7 @@ class PostgresLeaveSandboxGatewayTest {
         assertEquals("LR-202607-000007", result.requestId());
         ArgumentCaptor<LeaveRequest> request = ArgumentCaptor.forClass(LeaveRequest.class);
         verify(repository).save(eq("act_source"), request.capture());
-        assertEquals("DEMO-002", request.getValue().employeeId());
+        assertEquals("E10002", request.getValue().employeeId());
         assertEquals(submission.submittedAt(), request.getValue().createdAt());
     }
 }

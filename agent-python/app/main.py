@@ -443,7 +443,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
             pass
 
     # 企业 Tool P0：Java 侧已通过身份校验后注入的 employeeId。
-    # 该值由 LangGraphAgentController 从 DemoIdentity 解析后写入 header，
+    # 该值由 LangGraphAgentController 从已验证 JWT 身份解析后写入 header，
     # Python 不接受任何来自请求体 / LLM arguments 的 employeeId。
     employee_id = (req.headers.get('x-employee-id') or '').strip()
 
