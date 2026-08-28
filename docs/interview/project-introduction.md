@@ -64,5 +64,5 @@ Memory key 是 `(user_id, conversation_id)`，只读 ACTIVE。当前 ACTIVE Memo
 ## 三个短板
 
 1. 单机 process-local guard，不支持多实例分布式协调。
-2. Mock OA 和 fixture-backed MCP 不能替代真实生产 OA、凭据、outbox 和 SLA 验证。
+2. Mock OA 和 fixture-backed MCP 不能替代真实生产 OA、凭据、provider-side version/CAS、可靠 after-commit delivery（如需要可评估 Outbox）和 SLA 验证。
 3. 规则 Safety Guard、38-case eval 和小规格容量基线仍不足以证明通用生产安全性。

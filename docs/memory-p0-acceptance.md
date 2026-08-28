@@ -39,13 +39,13 @@
 
 | Concern | Canonical implementation |
 |---|---|
-| Java read/write authority | `LangGraphAgentController`, `AiTaskMemoryService` |
-| Python trigger | `app/memory/memory_trigger_policy.py` |
-| Python pipeline | `app/memory/memory_pipeline.py` |
-| Python write policy | `app/memory/memory_write_policy.py` |
-| capability allowlist | `app/memory/memory_capability_registry.py` and expense capability |
-| Agent context | `app/agents/runtime_context.py` |
-| checkpoint runtime | `app/runtime/checkpoint_runtime.py` |
+| Java read/write authority | `backend-java/src/main/java/com/fantuan/copilot/controller/LangGraphAgentController.java`, `backend-java/src/main/java/com/fantuan/copilot/service/memory/AiTaskMemoryService.java` |
+| Python trigger | `agent-python/app/memory/memory_trigger_policy.py` |
+| Python pipeline | `agent-python/app/memory/memory_pipeline.py` |
+| Python write policy | `agent-python/app/memory/memory_write_policy.py` |
+| capability allowlist | `agent-python/app/capabilities/memory_capability_registry.py` and `agent-python/app/capabilities/expense_capability.py` |
+| Agent context | `agent-python/app/agents/runtime_context.py` |
+| checkpoint runtime | `agent-python/app/runtime/checkpoint_runtime.py` |
 
 ## Verification baseline
 

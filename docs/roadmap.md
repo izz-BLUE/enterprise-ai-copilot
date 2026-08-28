@@ -25,8 +25,8 @@
 以下项目尚未完成，不能在当前系统上宣称已具备：
 
 1. **生产身份与授权**：将演示/最小 Admin Token 口径替换为正式用户目录、细粒度 RBAC/ABAC、审计和密钥轮换。
-2. **真实 OA 集成**：接入具备版本/幂等契约的真实 OA，设计 Transactional Outbox、重试、补偿、状态映射和对账；Mock OA 不作为生产替代。
-3. **分布式运行**：为多 Java/Python 实例增加 distributed lease/lock、任务投递和故障转移；当前 process-local guard 不足以支撑水平扩展。
+2. **真实 OA 集成**：接入具备版本/ETag/CAS/幂等契约的真实 OA，设计 provider-side precondition/version handling、重试、补偿、状态映射和对账；若需要本地事务后的可靠 command/event delivery，再评估 Transactional Outbox。Mock OA 不作为生产替代。
+3. **分布式运行**：为多 Java/Python 实例增加 distributed execution ownership/lease、故障转移和必要的任务投递；只有选择 durable event delivery 时再评估 Outbox/Inbox，当前 process-local guard 不足以支撑水平扩展。
 4. **可观测性运营化**：集中 metrics、日志、告警、SLO/SLA、审计保留和敏感字段治理；Phoenix 当前只是可选旁路 trace。
 5. **容量与恢复工程**：长时间、多客户端、跨实例压测，Checkpoint retention/pruning，故障演练和容量模型。
 6. **安全增强**：Prompt Injection、内容安全模型、规则变体绕过、MCP 服务身份和更完整的输入/输出数据分级。

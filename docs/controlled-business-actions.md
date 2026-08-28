@@ -104,10 +104,10 @@ flowchart LR
 结果分三类：
 
 - **Fresh**：进入 Java 本地事务，写入 ExpenseClaim/Items；
-- **Stale**：Action=`FAILED`、Memory=`ABANDONED`、HITL=`REJECTED`，不创建 ExpenseClaim，Graph 安全结束；
+- **Stale**：Action=`FAILED`、Memory=`ABANDONED`、HITL=`REJECTED`，不创建 ExpenseClaim，正常路径通过 REJECTED resume 到 Graph `END`；若 stale 终态已在 Java 提交但 Python resume 失败，Java `FAILED` 保留，重复 Confirm 不重新校验 OA 或改变 Java 状态，只重试同一个确定性的 REJECTED continuation；没有 autonomous stale-HITL worker；
 - **Unavailable**：保留 `PENDING_CONFIRMATION`，返回 503，可重试；不伪造 FAILED。
 
-远程读取完成到本地事务提交之间仍有小型 TOCTOU 窗口，这是当前小规格方案明确接受的限制；生产方案需要外部版本号、outbox 或更强一致性协议。
+远程读取完成到本地事务提交之间仍有小型 TOCTOU 窗口，这是当前小规格方案明确接受的限制。Local Transactional Outbox 不能消除该窗口；若未来需要关闭它，必须由 provider 提供 version token/ETag、CAS、lease、execute-if-version 或 transactional API。Transactional Outbox 只在本地事务提交后需要可靠异步发布 command/event 时评估。
 
 ## 6. WAITING_USER is not WAITING_EXTERNAL
 
@@ -179,4 +179,4 @@ Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只�
 - 本地 Java PostgreSQL 与真实 Enterprise OA 没有分布式事务，当前使用 Mock OA 模拟外部闭环；
 - Enterprise OA MCP 为 fixture-backed read-only 集成，真实生产凭据和正式 OA 集成未验收；
 - confirm-time remote read 与本地 commit 之间存在小型 TOCTOU 窗口；
-- Checkpoint retention/pruning、event inbox/outbox、完整 metrics/alerting 和生产容量基线不在当前范围。
+- Checkpoint retention/pruning、完整 metrics/alerting 和生产容量基线不在当前范围；多实例 execution lease 与 event delivery/inbox/outbox 是不同的后续议题。

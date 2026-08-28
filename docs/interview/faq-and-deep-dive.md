@@ -56,7 +56,7 @@ Proposal 生成和用户点击 Confirm 之间，trip/invoice 可能变化。Java
 
 ## Q14：重校验发现 stale 怎么办？
 
-Action 变为 FAILED，Memory 变为 ABANDONED，HITL 以 REJECTED 收口，不创建 ExpenseClaim。远程 OA 不可用则保留 PENDING_CONFIRMATION 并返回 503，允许重试；两次远程读取与本地 commit 之间的小型 TOCTOU 窗口是明确接受的限制。
+Action 变为 FAILED，Memory 变为 ABANDONED，HITL 以 REJECTED 收口并 resume 到 Graph END，不创建 ExpenseClaim。若 Java stale 终态已提交但 Python resume 暂时不可用，Java FAILED 不回滚；重复 Confirm 不重新查询 OA 或改变 Java 状态，只重试同一个确定性的 REJECTED continuation，且没有 autonomous stale-HITL worker。远程 OA 不可用则保留 PENDING_CONFIRMATION 并返回 503，允许重试；两次远程读取与本地 commit 之间的小型 TOCTOU 窗口是明确接受的限制。
 
 ## Q15：WAITING_USER 和 WAITING_EXTERNAL 有什么区别？
 
@@ -96,7 +96,7 @@ Checkpoint 是 runtime execution scene，用于 crash/HITL/external resume；Mem
 
 ## Q24：为什么不用 Kafka 或 distributed lock？
 
-当前没有多实例部署，也没有消息总线需求；process-local guard 足够保护单实例同一 runtime thread 的 lifecycle。多实例、跨进程投递和故障转移是下一阶段，届时需要 distributed lease、outbox/inbox 和重复消费策略。
+当前没有多实例部署，也没有消息总线需求；process-local guard 足够保护单实例同一 runtime thread 的 lifecycle。多实例、跨进程投递和故障转移是下一阶段，届时先需要 distributed execution lease/ownership；只有选择 durable event delivery 时才需要评估 Outbox/Inbox 和重复消费策略。
 
 ## Q25：当前是不是生产级？
 
@@ -112,7 +112,7 @@ Checkpoint 是 runtime execution scene，用于 crash/HITL/external resume；Mem
 
 ## Q28：如果真实上线，优先补什么？
 
-先补正式身份/RBAC、真实 OA 的 outbox/幂等/补偿/状态映射和分布式 lease；再补集中 metrics、审计、SLO、长时容量和故障演练。最后扩大安全模型、租户隔离和检索评估集。
+先补正式身份/RBAC、真实 OA 的 provider-side version/CAS/幂等/补偿/状态映射和分布式 execution lease；若需要可靠 after-commit event delivery，再评估 Outbox；再补集中 metrics、审计、SLO、长时容量和故障演练。最后扩大安全模型、租户隔离和检索评估集。
 
 ## Q29：最难的技术点是什么？
 

@@ -9,7 +9,7 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。年假申请是较短的第二条受控动作链路。
 
 - 在线演示：<https://copilot.jintianchi.cn>
-- 最新已标记版本：[v0.4.0](docs/releases/v0.4.0.md)；当前 mainline 的架构与流程说明以本仓库文档为准，本次文档收口不创建新的 tag/release。
+- Latest tagged release: [v0.4.1](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v0.4.1)；current mainline includes newer Agent workflow capabilities documented here；本次 accuracy fix 不创建新的 tag/release。
 - 项目定位：小规格单机部署与受控演示验证；不承诺生产 SLA。
 
 ## 项目定位
@@ -43,12 +43,15 @@ flowchart LR
     J -->|confirm-time authority| PA[PendingAction / ExpenseClaim]
     PA --> DB
     PA -->|expense submission| OA[Mock OA :8010 / SQLite]
-    OA -->|signed notification, no status| J
-    J -->|authoritative GET + external resume| P
+    OA -->|signed notification only; no status| J
+    J -->|authoritative GET status| OA
+    J -->|Java-authoritative external resume| P
     P --> CP[(LangGraph PostgresSaver checkpoint)]
     LLM --> P
     J --> UI
 ```
+
+Webhook 仅是通知；Java 直接 GET Mock OA 取得审批权威状态，再把 Java 已接受的终态作为 external resume 结果发送给 Python。
 
 请求先进入 Java。Python 不对公网映射宿主机端口；在生产 Compose 中，Nginx 是公网入口，Java 绑定宿主机 `127.0.0.1:8080`，Python 只在 Docker 网络内 `expose 8000`。Java 生成并透传可信 `trace_id`、`employee_id`、`business_date`、conversation scope 和 runtime thread；这些字段不由 LLM arguments 提供。
 
@@ -125,7 +128,7 @@ Proposal 阶段没有副作用。Java 创建 PendingAction 时重新校验 actio
 
 `WAITING_USER` 是用户确认业务动作；`WAITING_EXTERNAL` 是 ExpenseClaim 已写入后等待外部审批。二者是两个不同的 interrupt、marker、resume endpoint 和 correlation，普通 Chat 不能跨过任一 active wait。
 
-Confirm-time revalidation 在 Java 本地事务外调用 Python narrow adapter，读取当前 OA 事实并校验 trip 存在、归属、`APPROVED` 状态、当前日期可计算，发票归属/有效/非重复/金额/类别和精确清单；金额由 Java 再确定性计算。事实已变化时，Action=FAILED、Memory=ABANDONED、HITL=REJECTED，且不创建 ExpenseClaim；OA 不可用时保留 `PENDING_CONFIRMATION` 并返回 503，允许重试。远程读取和本地事务之间的小型 TOCTOU 窗口是已接受限制。
+Confirm-time revalidation 在 Java 本地事务外调用 Python narrow adapter，读取当前 OA 事实并校验 trip 存在、归属、`APPROVED` 状态、当前日期可计算，发票归属/有效/非重复/金额/类别和精确清单；金额由 Java 再确定性计算。事实已变化时，Action=FAILED、Memory=ABANDONED、HITL=REJECTED，且不创建 ExpenseClaim，正常路径通过 REJECTED resume 到 Graph END；若 Java stale 终态已提交但 Python resume 暂时不可用，Java FAILED 不回滚，重复 Confirm 不重新查询 OA，只重试同一个确定性 REJECTED continuation。OA 不可用时保留 `PENDING_CONFIRMATION` 并返回 503，允许重试。远程读取和本地事务之间的小型 TOCTOU 窗口是已接受限制。
 
 ### Mock OA 与外部审批
 
@@ -228,7 +231,7 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 | Frontend | 44 passed |
 | Lint/build | pass |
 
-CI 已配置 Java Backend、Mock OA Webhook、Python RAG Evaluation、Frontend Build、Frontend Browser Tests、Gitleaks、CodeQL 和 Dependabot。质量边界与命令见 [Quality Assurance](docs/quality-assurance.md)。
+Repository automation 包含 CI（Java Backend、Mock OA Webhook、Python RAG Evaluation、Frontend Build、Frontend Browser Tests）、Gitleaks、CodeQL 和 Dependabot；Dependabot 是独立的依赖自动化，不是 CI job。质量边界与命令见 [Quality Assurance](docs/quality-assurance.md)。
 
 ## Design trade-offs and accepted limitations
 

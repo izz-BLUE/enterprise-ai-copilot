@@ -18,18 +18,24 @@
 | Frontend | 44 passed |
 | Lint/build | pass |
 
-## 2. CI checks
+## 2. Repository automation
 
-`.github/workflows/ci.yml` 当前包含：
+### CI (`.github/workflows/ci.yml`)
 
 - **Java Backend**：JDK 17，Maven compile 和 `./mvnw test`；
 - **Mock OA Webhook**：Mock OA pytest、Ruff、local Compose config validation；
 - **Python RAG Evaluation**：Python full suite、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成、baseline retrieval gate、rule rewrite retrieval evaluation；
 - **Frontend Build**：`npm ci`、production build、lint；
 - **Frontend Browser Tests**：Chromium 安装和 Playwright E2E；
-- **Secret Scan**：Gitleaks；
-- **CodeQL**：Java/Kotlin、Python、JavaScript/TypeScript；
-- **Dependabot**：GitHub Actions、Maven、uv 和 npm 的月度依赖检查。
+
+### Separate security workflows
+
+- `.github/workflows/secret-scan.yml`：Gitleaks；
+- `.github/workflows/codeql.yml`：Analyze `java-kotlin`、`python`、`javascript-typescript`。
+
+### Dependency automation
+
+- `.github/dependabot.yml`：GitHub Actions、Maven、uv 和 npm 的月度依赖检查；这是依赖自动化，不是 CI job。
 
 ## 3. RAG evaluation
 

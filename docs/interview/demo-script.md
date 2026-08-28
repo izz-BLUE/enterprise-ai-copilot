@@ -55,7 +55,7 @@ Proposal
   → ExpenseClaim + ExpenseItem transaction
 ```
 
-讲清：nonce 由 Java 生成且数据库只存 digest；Java 验证 owner、TTL、状态和幂等。confirm-time adapter 重新检查 trip/invoice ownership、状态、当前日期、valid/duplicate/amount/category；stale 会 FAILED + ABANDONED + REJECTED，不创建 claim；OA 不可用保留 Pending 并返回 503。
+讲清：nonce 由 Java 生成且数据库只存 digest；Java 验证 owner、TTL、状态和幂等。confirm-time adapter 重新检查 trip/invoice ownership、状态、当前日期、valid/duplicate/amount/category；stale 会 FAILED + ABANDONED + REJECTED，并通过 rejected resume 到 Graph END，不创建 claim；如果 Java stale 终态提交后 Python resume 暂时不可用，Java FAILED 保留，重复 Confirm 不重新查询 OA，只重试确定性的 REJECTED continuation；OA 不可用保留 Pending 并返回 503。
 
 ## 5. WAITING_EXTERNAL（60 秒）
 
@@ -105,4 +105,4 @@ leave_proposal_tool
 
 ## 9. Closing（30 秒）
 
-> 项目当前是小规格单机和短时受控验证，不承诺生产 SLA。它的工程亮点是明确的 authority boundary、可恢复的双 wait、外部状态的 authoritative GET，以及 Memory、execution history、Checkpoint 和业务 DB 的分层；真正生产化还需要正式身份、真实 OA outbox、分布式协调、完整观测和容量基线。
+> 项目当前是小规格单机和短时受控验证，不承诺生产 SLA。它的工程亮点是明确的 authority boundary、可恢复的双 wait、外部状态的 authoritative GET，以及 Memory、execution history、Checkpoint 和业务 DB 的分层；真正生产化还需要正式身份、真实 OA 的 provider-side version/CAS/幂等契约；如需可靠的 after-commit command/event delivery，再评估 Transactional Outbox；此外还需要分布式协调、完整观测和容量基线。

@@ -155,7 +155,7 @@ The revalidation adapter is a narrow Java → Python internal endpoint. It reads
 2. the current invoice set exactly matches the persisted invoice IDs, with ownership accepted, `valid=true`, `duplicate=false`, amount and category unchanged;
 3. Java recalculates deterministic reimbursable amount and compares it with the Proposal before opening the local write transaction.
 
-If the facts are stale, Java marks Action `FAILED`, Memory `ABANDONED`, and the HITL decision `REJECTED`; no ExpenseClaim is created and the graph is closed safely. If the adapter is unavailable, Java keeps `PENDING_CONFIRMATION` and returns 503 so the user can retry. A small residual window remains between remote read and local commit; this is explicitly accepted for this small-scale design and would require a stronger external transaction/version contract in production.
+If the facts are stale, Java marks Action `FAILED`, Memory `ABANDONED`, and the HITL decision `REJECTED`; no ExpenseClaim is created and the graph is closed safely. The normal path continues with the Java-authoritative rejected HITL resume to Graph `END`. If that resume is unavailable after the Java stale terminal commit, Java `FAILED` is not rolled back; a later Confirm against the same failed Action does not re-query OA or mutate Java state, and only retries the same deterministic `REJECTED` continuation. There is no autonomous stale-HITL worker. If the adapter is unavailable, Java keeps `PENDING_CONFIRMATION` and returns 503 so the user can retry. A small residual window remains between remote read and local commit; this is explicitly accepted for this small-scale design. Closing it requires a provider-side version/ETag, CAS, lease, execute-if-version, or transactional provider API, not a local Outbox.
 
 ## 8. External approval authority
 
@@ -181,6 +181,23 @@ POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapsho
 - resume 保留原 execution 的 `tool_history`、计数、execution_id 和 marker，不重新 hydrate `execution_history`，也不重新跑 Planner。
 
 最终 response contract 和有界 `execution_history` 在 `finalize_node` 内写入最后一次 Checkpoint 前完成。`execution_history` 只保存成功的 travel/invoice 等白名单摘要，在 ACTIVE Memory + task type 匹配时 hydrate，且永远标记为 `CONTEXT_ONLY`。
+
+## Failure and recovery matrix
+
+| Failure | Durable authority/state | Recovery |
+|---|---|---|
+| Python crashes mid non-interrupt graph | PostgreSQL latest Checkpoint snapshot | Exact safe `graph.invoke(None)` resume |
+| Browser closes at `WAITING_USER` | Checkpoint + Java PendingAction | Later Java confirm/cancel + HITL `Command(resume)` |
+| Java confirm response is lost after commit | Java BusinessAction is authoritative | Idempotent replay + HITL reconciliation |
+| Confirm-time OA is unavailable | PendingAction stays `PENDING_CONFIRMATION`; Memory stays `ACTIVE`; Graph stays `WAITING_USER` | Retry the confirmation path; no business mutation |
+| Confirm-time facts are stale | Java `FAILED` + Memory `ABANDONED`; no ExpenseClaim | Deterministic `REJECTED` HITL resume → Graph `END` |
+| Stale Java commit succeeds but first Python `REJECTED` resume fails | Java `FAILED` remains authoritative | Repeated Confirm does not revalidate OA or mutate Java; retry the same deterministic `REJECTED` payload |
+| Webhook is lost | ExpenseClaim remains `WAITING_APPROVAL` | Bounded reconciliation GET |
+| Duplicate or out-of-order webhook arrives | Java terminal transition rules | Idempotent handling; no regression |
+| OA is terminal but Python is unavailable | Java ExpenseClaim terminal state is retained | Durable external-resume retry |
+| External resume response is lost | Python may already be at Graph `END` | Replay the exact same payload; `EXTERNAL_COMPLETED` acknowledgement |
+| Python finalizer crashes after external result Checkpoint | Checkpoint contains the external result | `EXTERNAL_CONTINUATION` → deterministic finalize |
+| Same runtime thread receives concurrent work | Process-local Java/Python guard | Busy/retry; no multi-instance ownership claim |
 
 ## 10. Memory and history boundaries
 
@@ -209,7 +226,7 @@ Trigger 规则：`action_proposal` 或 Memory-eligible Tool 成功才触发；�
 
 ## 11. Concurrency and observability
 
-Java `AgentRuntimeThreadExecutionGuard` 在 Memory Read 前获取，覆盖 Java Agent 生命周期到响应结束；HITL/外部 resume 在 transaction commit 或 handoff 前后遵守 exact-one owner release。Python guard 覆盖 recovery inspection 到 final Checkpoint。两者都是单进程内存保护，不是多实例分布式锁；当前没有分布式 lease、event inbox/outbox 或 workflow engine。
+Java `AgentRuntimeThreadExecutionGuard` 在 Memory Read 前获取，覆盖 Java Agent 生命周期到响应结束；HITL/外部 resume 在 transaction commit 或 handoff 前后遵守 exact-one owner release。Python guard 覆盖 recovery inspection 到 final Checkpoint。两者都是单进程内存保护，不是多实例分布式锁；当前没有分布式 lease，也没有 event inbox/outbox 或 workflow engine。多实例首先需要 distributed execution ownership/lease；只有选择 durable event delivery 时才评估 Outbox/Inbox。
 
 Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返回。Phoenix/OpenTelemetry 默认关闭；启用时是旁路批量 trace，默认不采集 Prompt、用户输入、检索正文和模型输出，初始化或导出失败不阻断业务。
 
@@ -236,9 +253,9 @@ Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返�
 - 面向小规格单机和短时受控验证，不承诺生产 SLA；
 - Java/Python guard 仅 process-local，不提供多实例分布式锁或 lease；
 - 不使用 Temporal、DBOS、Kafka 或消息总线；没有分布式 workflow engine；
-- Java 本地数据库事务与 Enterprise OA 之间没有分布式事务，真实生产需要 outbox、外部幂等、重试、补偿和状态映射；
+- Java 本地数据库事务与 Enterprise OA 之间没有分布式事务；若未来需要本地事务提交后的可靠异步 command/event delivery，可评估 Transactional Outbox、外部幂等、重试、补偿和状态映射；Outbox 本身不能消除 confirm-time external-read → external-change → local-commit TOCTOU；
 - Mock OA 是 SQLite 模拟服务，Enterprise OA MCP 是 fixture-backed read-only integration；生产 credentials 和正式 OA 集成未验收；
-- confirm-time remote read 与本地 commit 之间有小型 TOCTOU 窗口；
+- confirm-time remote read 与本地 commit 之间有小型 TOCTOU 窗口；解决它需要 provider-side version/ETag、CAS、lease、execute-if-version 或 transactional provider API，不是 local Outbox；
 - Safety Guard 是规则版深度防御，不是完整 Prompt Injection 或内容安全系统；
 - 评估集和浏览器覆盖有限，容量数据不能外推为生产 QPS/P95；
 - Checkpoint retention/pruning、分布式恢复租约和完整集中式 metrics/alerting 不在当前范围。
