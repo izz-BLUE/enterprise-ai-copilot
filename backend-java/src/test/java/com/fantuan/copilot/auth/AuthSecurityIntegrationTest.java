@@ -5,12 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fantuan.copilot.PostgresIntegrationTestBase;
 import com.fantuan.copilot.controller.AuthController;
 import jakarta.servlet.http.Cookie;
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -45,16 +46,29 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
     @Autowired ObjectMapper objectMapper;
     @Autowired JwtDecoder jwtDecoder;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @DynamicPropertySource
     static void authTestProperties(DynamicPropertyRegistry registry) {
         registry.add("demo.auth.default-password", () -> TEST_PASSWORD);
     }
 
-    @AfterEach
-    void restoreSeededUsers() {
-        jdbc.update("UPDATE app_user SET enabled = TRUE WHERE username IN (?, ?, ?, ?)",
+    @BeforeEach
+    void resetSeededAccounts() {
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE "
+                        + "WHERE username IN (?, ?, ?, ?)",
+                passwordEncoder.encode(TEST_PASSWORD),
                 "zhangsan", "lisi", "wangwu", "admin");
+        jdbc.update("""
+                UPDATE leave_account
+                SET annual_balance = CASE employee_id
+                    WHEN 'E10001' THEN 10.0
+                    WHEN 'E10002' THEN 5.0
+                    WHEN 'E10003' THEN 15.0
+                    ELSE annual_balance
+                END
+                WHERE employee_id IN ('E10001', 'E10002', 'E10003')
+                """);
     }
 
     @Test
