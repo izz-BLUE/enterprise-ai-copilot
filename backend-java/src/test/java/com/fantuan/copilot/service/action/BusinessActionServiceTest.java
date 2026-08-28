@@ -99,6 +99,18 @@ class BusinessActionServiceTest {
     }
 
     @Test
+    void admissionUsesTrustedOwnerAndConversationScope() {
+        Fixture f = fixture();
+        when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1"))
+                .thenReturn(true);
+
+        assertTrue(f.service.hasBlockingAction(USER_A.userId(), "conv-1"));
+        verify(f.actions).hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1");
+        assertFalse(f.service.hasBlockingAction("", "conv-1"));
+        assertFalse(f.service.hasBlockingAction(USER_A.userId(), null));
+    }
+
+    @Test
     void taskRuntimeDoesNotBypassSameConversationActiveActionGuard() {
         Fixture f = fixture();
         when(f.actions.hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1"))

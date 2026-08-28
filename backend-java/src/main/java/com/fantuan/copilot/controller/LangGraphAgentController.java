@@ -243,6 +243,17 @@ public class LangGraphAgentController {
             }
         }
 
+        // PendingAction is the authoritative WAITING_USER boundary for both
+        // legacy single actions and Task Runtime.  Check it after TTL
+        // reconciliation and before any task recovery or decomposition.
+        if (businessActionService != null && businessActionService.hasBlockingAction(
+                identity.userId(), conversationId)) {
+            eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_WARN, started);
+            return AgentResponseFactory.actionFailure(traceId,
+                    "当前会话已有待确认的申请，请先确认或取消后再发起新申请。");
+        }
+
         // Task Runtime admission order is Java-owned: an active user wait or
         // clarification is bound to its task before a new message can reach
         // decomposition.  Legacy controllers constructed without the runtime

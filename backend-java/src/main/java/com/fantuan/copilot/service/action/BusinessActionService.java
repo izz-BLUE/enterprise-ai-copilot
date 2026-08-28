@@ -100,6 +100,19 @@ public class BusinessActionService {
     }
 
     /**
+     * Admission guard shared by legacy single actions and Task Runtime.
+     * The caller supplies only the trusted Java owner and resolved conversation.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasBlockingAction(String ownerUserId, String conversationId) {
+        if (ownerUserId == null || ownerUserId.isBlank()
+                || conversationId == null || conversationId.isBlank()) {
+            return false;
+        }
+        return actions.hasActiveByOwnerAndConversation(ownerUserId, conversationId);
+    }
+
+    /**
      * 创建待确认动作。
      *
      * V2 §十六：Controller 不做 subtype 分发；本方法按 proposal.actionType()
