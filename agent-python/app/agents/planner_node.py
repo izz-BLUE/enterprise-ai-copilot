@@ -31,6 +31,8 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
+from app.services.annual_leave_input_service import is_annual_leave_action_intent
+from app.services.expense_input_service import is_expense_claim_intent
 from app.services.llm_service import LLMProviderError, call_llm
 
 
@@ -78,6 +80,9 @@ _PLANNER_REASON_VALUES = frozenset({
     'not_allowed',
     'cannot_complete',
 })
+
+_LEAVE_PROPOSAL_COMPLETION_ERROR = 'finish 前未完成 leave_proposal_tool Proposal 阶段'
+_EXPENSE_PROPOSAL_COMPLETION_ERROR = 'finish 前未完成 expense_proposal_tool Proposal 阶段'
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
     RAG_TOOL_NAME: '回答企业制度、流程、IT/HR 文档等知识库问题。参数: question(用户问题)。',
@@ -644,12 +649,60 @@ def _planner_validation_metadata(
             'finish 的 reason_code 必须是 task_complete；只读查询成功不等于包含业务申请的任务已完成，'
             '请继续检查尚未完成的用户目标。',
         )
+    if str(exc) == _LEAVE_PROPOSAL_COMPLETION_ERROR:
+        return (
+            'planner_completion_validation',
+            'leave_proposal_missing',
+            '当前用户目标包含年假申请，但尚未完成 leave_proposal_tool；请继续规划剩余目标。',
+        )
+    if str(exc) == _EXPENSE_PROPOSAL_COMPLETION_ERROR:
+        return (
+            'planner_completion_validation',
+            'expense_proposal_missing',
+            '当前用户目标包含报销申请，但尚未完成 expense_proposal_tool；请继续规划剩余目标。',
+        )
     return (
         'planner_validation',
         'decision_contract_invalid',
         '上一决策的 action、tool_name、arguments、answer、reason_code 不一致；'
         '请按当前能力清单重新输出单个 JSON 对象。',
     )
+
+
+def _validate_business_completion(
+    decision: PlannerDecision,
+    *,
+    question: str,
+    current_visible_tools: list[str],
+    tool_history: object,
+) -> None:
+    """确保业务申请不会因只读事实成功而被 Planner 提前标记完成。
+
+    这里只读取当前请求的 tool_history。execution_history / memory_context
+    是历史上下文，不是本次请求的业务完成事实。Proposal Tool 成功即完成
+    Proposal 阶段；后续 missing_fields 仍可由 finish 正常收敛为 Clarification。
+    """
+    if decision.action != 'finish':
+        return
+
+    successful_tools = {
+        item.get('tool_name')
+        for item in tool_history if isinstance(item, dict) and item.get('status') == 'success'
+    } if isinstance(tool_history, list) else set()
+
+    if (
+        is_annual_leave_action_intent(question)
+        and LEAVE_PROPOSAL_TOOL_NAME in current_visible_tools
+        and LEAVE_PROPOSAL_TOOL_NAME not in successful_tools
+    ):
+        raise PlannerDecisionError(_LEAVE_PROPOSAL_COMPLETION_ERROR)
+
+    if (
+        is_expense_claim_intent(question)
+        and EXPENSE_PROPOSAL_TOOL_NAME in current_visible_tools
+        and EXPENSE_PROPOSAL_TOOL_NAME not in successful_tools
+    ):
+        raise PlannerDecisionError(_EXPENSE_PROPOSAL_COMPLETION_ERROR)
 
 
 def _log_planner_validation_failure(
@@ -818,6 +871,12 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             payload = json.loads(raw)
             decision = PlannerDecision.model_validate(payload)
             decision.validate_decision()
+            _validate_business_completion(
+                decision,
+                question=question,
+                current_visible_tools=current_visible_tools,
+                tool_history=state.get('tool_history', []),
+            )
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
             _log_planner_validation_failure(
                 trace_id,

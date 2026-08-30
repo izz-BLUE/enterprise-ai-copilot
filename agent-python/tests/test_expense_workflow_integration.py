@@ -189,15 +189,15 @@ class TestPlannerSelection:
         assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
 
     def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self):
-        """只读事实成功后错误 finish，语义修复必须继续报销 Proposal。"""
-        invalid_finish = json.dumps({
+        """只读事实成功后合法但过早 finish，语义修复必须继续报销 Proposal。"""
+        premature_finish = json.dumps({
             "action": "finish",
             "answer": "INVALID_FINISH_SHOULD_NOT_EXECUTE",
-            "reason_code": "need_knowledge",
+            "reason_code": "task_complete",
         }, ensure_ascii=False)
         decisions = [
             _tool("rag_answer_tool", {"question": "出差报销政策"}, "need_knowledge"),
-            invalid_finish,
+            premature_finish,
             _tool("expense_proposal_tool", {}, "need_expense_proposal"),
             _finish("已生成报销申请草稿，请确认后提交。"),
         ]

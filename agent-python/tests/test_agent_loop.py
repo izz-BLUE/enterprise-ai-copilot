@@ -142,10 +142,10 @@ class TestPlannerSemanticRepair:
     """Planner 结构/语义非法时最多自修复一次，且不扩大执行权限。"""
 
     def test_balance_then_invalid_finish_repairs_to_leave_proposal(self):
-        invalid_finish = json.dumps({
+        premature_finish = json.dumps({
             'action': 'finish',
             'answer': 'DO_NOT_ECHO',
-            'reason_code': 'need_balance',
+            'reason_code': 'task_complete',
         }, ensure_ascii=False)
         proposal = ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
             action_type='ANNUAL_LEAVE_REQUEST',
@@ -162,7 +162,7 @@ class TestPlannerSemanticRepair:
         }, ensure_ascii=False)
         responses = iter([
             _tool('leave_balance_tool', {}, 'need_balance'),
-            invalid_finish,
+            premature_finish,
             _tool('leave_proposal_tool', {}, 'need_proposal'),
             _finish('已生成年假申请草稿，请确认后提交。'),
         ])
@@ -198,7 +198,7 @@ class TestPlannerSemanticRepair:
         assert result['route'] == 'action'
         assert result['action_proposal']['action_type'] == 'ANNUAL_LEAVE_REQUEST'
         assert result['step_count'] == 3  # repair stays within the same Planner node
-        assert 'finish 的 reason_code 必须是 task_complete' in prompts[2]
+        assert '尚未完成 leave_proposal_tool' in prompts[2]
         assert 'DO_NOT_ECHO' not in prompts[2]
 
     def test_second_invalid_decision_fails_closed_after_one_repair(self):
@@ -220,6 +220,84 @@ class TestPlannerSemanticRepair:
         balance.invoke.assert_not_called()
         assert result['stop_reason'] == 'invalid_decision'
         assert result['route'] == 'error'
+
+    def test_read_only_leave_balance_then_legal_finish_is_accepted(self):
+        """只读年假余额查询完成后，合法 finish 不应被误判为申请未完成。"""
+        decisions = [
+            _tool('leave_balance_tool', {}, 'need_balance'),
+            _finish('当前年假余额为 5 天。'),
+        ]
+        balance_tool = Mock()
+        balance_tool.invoke.return_value = json.dumps({
+            'success': True, 'data': {'remaining_days': 5},
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool):
+            result = run_langgraph_agent(
+                '查一下我的年假余额',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 2
+        assert balance_tool.invoke.call_count == 1
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'agent'
+
+    def test_second_legal_premature_finish_fails_closed_after_one_repair(self):
+        """第二次仍为合法格式但未完成 Proposal 的 finish 必须 fail-closed。"""
+        premature_finish = _finish('已完成。')
+        proposal_tool = Mock()
+        with patch('app.agents.planner_node.call_llm',
+                   side_effect=[premature_finish, premature_finish]) as llm, \
+                patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '我明天请一天年假，原因为私事',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 2  # exactly one semantic repair attempt
+        proposal_tool.invoke.assert_not_called()
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+
+    def test_successful_proposal_with_missing_fields_allows_finish(self):
+        """Proposal Tool 成功但返回 missing_fields 时，finish 仍应进入 Clarification。"""
+        clarification_payload = json.dumps({
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请补充申请原因。',
+        }, ensure_ascii=False)
+        decisions = [
+            _tool('leave_proposal_tool', {}, 'need_proposal'),
+            _finish('请补充申请原因。'),
+        ]
+        proposal_tool = Mock()
+        proposal_tool.invoke.return_value = clarification_payload
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '申请明天一天年假',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 2
+        assert proposal_tool.invoke.call_count == 1
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'action'
+        assert result['action_proposal'] is None
+        assert result['missing_fields'] == ['reason']
 
     def test_legal_decision_uses_one_llm_call(self):
         with patch('app.agents.planner_node.call_llm',
