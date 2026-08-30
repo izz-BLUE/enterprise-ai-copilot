@@ -10,6 +10,7 @@ import {
   RETRYABLE_ACTION_ERRORS,
   phaseForTerminalStatus,
 } from '../domain/actionState'
+import { MAX_MESSAGES } from '../services/chatHistoryStorage'
 
 export function isSupportedPendingAction(action) {
   // V2 §二十五：受控业务动作白名单（年假 + 报销）
@@ -37,6 +38,7 @@ export default function useBusinessActionFlow({
   const actionSecretsRef = useRef(new Map())
   const idempotencyKeysRef = useRef(new Map())
   const actionLocksRef = useRef(new Set())
+  const materializedNextActionIdsRef = useRef(new Set())
 
   const actionBusy = messages.some(message =>
     message.actionUi?.phase === 'confirming' || message.actionUi?.phase === 'cancelling')
@@ -47,6 +49,7 @@ export default function useBusinessActionFlow({
     actionSecretsRef.current.clear()
     idempotencyKeysRef.current.clear()
     actionLocksRef.current.clear()
+    materializedNextActionIdsRef.current.clear()
   }
 
   const registerActionSecret = (messageId, confirmationNonce) => {
@@ -80,6 +83,49 @@ export default function useBusinessActionFlow({
         },
       }
     }))
+  }
+
+  const materializeNextPendingAction = (sourceMessage, nextPendingAction) => {
+    if (!nextPendingAction || typeof nextPendingAction !== 'object') return false
+
+    const actionId = nextPendingAction.actionId
+    if (typeof actionId !== 'string' || actionId.length === 0) return false
+
+    const alreadyVisible = messages.some(message =>
+      message.result?.pendingAction?.actionId === actionId)
+    if (alreadyVisible || materializedNextActionIdsRef.current.has(actionId)) return true
+
+    const { confirmationNonce, ...publicNextPendingAction } = nextPendingAction
+    const nextMessageId = crypto.randomUUID()
+    const registered = isSupportedPendingAction(publicNextPendingAction)
+      && registerActionSecret(nextMessageId, confirmationNonce)
+    const sourceResult = sourceMessage?.result && typeof sourceMessage.result === 'object'
+      ? { ...sourceMessage.result }
+      : {}
+
+    materializedNextActionIdsRef.current.add(actionId)
+    setMessages(previous => [...previous, {
+      id: nextMessageId,
+      type: 'assistant',
+      question: sourceMessage?.question || '',
+      result: {
+        ...sourceResult,
+        pendingAction: publicNextPendingAction,
+      },
+      resultMode: sourceMessage?.resultMode || 'agent',
+      actionUi: registered
+        ? initialActionUi('pending')
+        : initialActionUi('error', '草稿确认信息不可用，请重新生成草稿。'),
+    }].slice(-MAX_MESSAGES))
+
+    return registered
+  }
+
+  const executionForUi = execution => {
+    if (!execution || typeof execution !== 'object') return execution
+    const safeExecution = { ...execution }
+    delete safeExecution.nextPendingAction
+    return safeExecution
   }
 
   const applyActionTerminal = (messageId, terminalStatus, opts = {}) => {
@@ -154,9 +200,14 @@ export default function useBusinessActionFlow({
             accessToken,
           })
 
+      const nextPendingActionMaterialized = materializeNextPendingAction(
+        message,
+        execution?.nextPendingAction,
+      )
+
       updateActionUi(messageId, {
         phase: decision === 'confirm' ? 'succeeded' : 'cancelled',
-        execution,
+        execution: executionForUi(execution),
         error: null,
         retryDecision: null,
       })
@@ -168,7 +219,7 @@ export default function useBusinessActionFlow({
       }
       actionSecretsRef.current.delete(messageId)
       idempotencyKeysRef.current.delete(messageId)
-      clearConversationId()
+      if (!nextPendingActionMaterialized) clearConversationId()
     } catch (requestError) {
       if (requestError instanceof AuthExpiredError || requestError?.httpStatus === 401) {
         resetActionRuntime()
