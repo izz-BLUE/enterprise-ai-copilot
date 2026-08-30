@@ -44,12 +44,6 @@ public class TaskRuntimeService {
         this.clock = clock;
     }
 
-    @Transactional
-    public Optional<TaskExecution> findInteractive(String ownerUserId, String conversationId) {
-        return executions.findInteractiveByOwnerAndConversationForUpdate(
-                ownerUserId, conversationId);
-    }
-
     /**
      * Java-owned admission and recovery point for a conversation.
      *
@@ -252,12 +246,6 @@ public class TaskRuntimeService {
         return executions.markWaitingUser(taskId, actionId, clock.instant());
     }
 
-    public boolean markWaitingExternalByAction(String actionId) {
-        Instant now = clock.instant();
-        return executions.updateStatusByActionId(actionId,
-                TaskExecutionStatus.WAITING_EXTERNAL, now, null);
-    }
-
     public boolean markTerminalByAction(String actionId, TaskExecutionStatus status) {
         if (!status.isTerminal()) {
             throw new IllegalArgumentException("TaskExecution target must be terminal");
@@ -324,9 +312,6 @@ public class TaskRuntimeService {
             try {
                 taskType = TaskType.valueOf(spec.taskType());
             } catch (RuntimeException exception) {
-                throw new TaskRuntimeException("任务类型不受支持。");
-            }
-            if (taskType == null) {
                 throw new TaskRuntimeException("任务类型不受支持。");
             }
             int start = message.indexOf(spec.taskText(), previousEnd + 1);

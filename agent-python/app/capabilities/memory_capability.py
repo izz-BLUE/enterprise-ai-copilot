@@ -1,8 +1,7 @@
 """memory_capability.py —— Memory Capability 数据契约（P1-B）
 
-P1-A 把 taskType 集合从 Schema 闭集移到 ``MemoryTaskTypePolicy`` 显式注册，
-调用方通过 ``MemoryTaskTypePolicy.create_for(extra_task_types=..., ...)``
-拼装业务扩展。
+P1-A 把 taskType 集合从 Schema 闭集移到 ``MemoryTaskTypePolicy`` 显式注册；
+P1-B 由业务模块通过 ``MemoryCapability`` 和 Registry 声明业务扩展。
 
 P1-B 目标：让"业务声明自己的 Memory 能力"而不是"调用方为业务拼 Memory 配置"。
 

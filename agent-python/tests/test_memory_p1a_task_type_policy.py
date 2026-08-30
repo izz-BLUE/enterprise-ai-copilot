@@ -34,6 +34,8 @@ import json
 
 import pytest
 
+from app.capabilities.expense_capability import EXPENSE_MEMORY_CAPABILITY
+from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.memory.memory_extractor import MemoryExtractor
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_task_type_policy import (
@@ -46,6 +48,12 @@ from app.schemas.memory_schema import (
     MemoryExtractionInput,
     MemoryProposal,
 )
+
+
+def _expense_policy() -> MemoryTaskTypePolicy:
+    return MemoryTaskTypePolicy.create_from_registry(
+        MemoryCapabilityRegistry.of([EXPENSE_MEMORY_CAPABILITY]))
+
 
 # ===========================================================================
 # 1. Task Type Validation
@@ -78,9 +86,7 @@ class TestTaskTypeValidation:
         assert policy.is_allowed(bad) is False  # type: ignore[arg-type]
 
     def test_expand_policy_allows_expense_request(self):
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-        )
+        policy = _expense_policy()
         # P0 默认仍然合法
         assert policy.is_allowed('GENERIC')
         assert policy.is_allowed('LEAVE_REQUEST')
@@ -93,43 +99,17 @@ class TestTaskTypeValidation:
 
     def test_expand_policy_admin_permission_change_still_rejected(self):
         """验收标准明确禁止的 ADMIN_PERMISSION_CHANGE 必须被拒绝。"""
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-        )
+        policy = _expense_policy()
         assert not policy.is_allowed('ADMIN_PERMISSION_CHANGE')
 
     def test_assert_allowed_raises_for_unknown(self):
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-        )
+        policy = _expense_policy()
         with pytest.raises(ValueError, match='不允许的'):
             policy.assert_allowed('ADMIN_PERMISSION_CHANGE')
 
     def test_default_task_type_in_default_policy_is_generic(self):
         policy = MemoryTaskTypePolicy.default()
         assert policy.fallback_task_type() == 'GENERIC'
-
-    def test_create_for_rejects_tool_value_not_in_task_types(self):
-        """tool_to_task_type 映射 value 必须命中 available_task_types。"""
-        with pytest.raises(ValueError, match='不在 available_task_types'):
-            MemoryTaskTypePolicy.create_for(
-                extra_task_types=('EXPENSE_REQUEST',),
-                extra_tool_to_task_type={
-                    'expense_proposal_tool': 'TRAVEL_REQUEST',  # 未注册类别
-                },
-            )
-
-    def test_create_for_rejects_invalid_default_task_type(self):
-        with pytest.raises(ValueError, match='default_task_type'):
-            MemoryTaskTypePolicy.create_for(
-                default_task_type='TRAVEL_REQUEST',
-            )
-
-    def test_create_for_rejects_empty_task_type_string(self):
-        with pytest.raises(ValueError, match='非空字符串'):
-            MemoryTaskTypePolicy.create_for(
-                extra_task_types=('',),
-            )
 
     def test_default_task_types_match_p0(self):
         """P0 既有的 3 个 taskType 必须出现在默认白名单中。"""
@@ -146,12 +126,7 @@ class TestExtractorContract:
     """Extractor Contract —— prompt 动态注入、policy 控制白名单。"""
 
     def _expense_extractor(self) -> MemoryExtractor:
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-            extra_tool_to_task_type={
-                'expense_proposal_tool': 'EXPENSE_REQUEST',
-            },
-        )
+        policy = _expense_policy()
         return MemoryExtractor(task_type_policy=policy)
 
     def test_system_prompt_includes_expense_request_after_expansion(self):
@@ -245,9 +220,7 @@ class TestExtractorContract:
             write_policy.evaluate(proposal)
 
     def test_write_policy_accepts_expense_request_under_extended_policy(self):
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-        )
+        policy = _expense_policy()
         write_policy = MemoryWritePolicy(task_type_policy=policy)
         proposal = MemoryProposal(
             action='UPSERT',
@@ -286,12 +259,7 @@ class TestTriggerPolicyExtensibility:
     """Trigger Policy —— Memory Capability Signal 由 policy 驱动。"""
 
     def _expense_trigger(self) -> MemoryTriggerPolicy:
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-            extra_tool_to_task_type={
-                'expense_proposal_tool': 'EXPENSE_REQUEST',
-            },
-        )
+        policy = _expense_policy()
         return MemoryTriggerPolicy(task_type_policy=policy)
 
     def test_expense_proposal_signal_triggers_memory(self):
@@ -400,9 +368,7 @@ class TestIsolationRegression:
         """
         from app.memory.memory_write_policy import MemoryWritePolicy
 
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-        )
+        policy = _expense_policy()
         write_policy = MemoryWritePolicy(task_type_policy=policy)
 
         # 用户 A 写入：携带 user_id 必须被剥离
@@ -448,10 +414,7 @@ class TestIsolationRegression:
         本测试验证两个不同 user_id 上下文进入 Pipeline 后产出的 command 仍然
         在 task_state 内只携带各自的事实数据，无跨用户键串味。
         """
-        policy = MemoryTaskTypePolicy.create_for(
-            extra_task_types=('EXPENSE_REQUEST',),
-            extra_tool_to_task_type={'expense_proposal_tool': 'EXPENSE_REQUEST'},
-        )
+        policy = _expense_policy()
         # 注入假 llm_callable（保证 Pipeline 走通）。
         # user prompt 中包含原始问题（含中文字符），用中文区分用户。
         def fake_llm(system, user):

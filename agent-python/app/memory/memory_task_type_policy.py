@@ -18,8 +18,8 @@ P1-A 目标：
        Schema 只承载契约形状。
 
 P1-B 演进（Workflow Capability Registration Boundary）：
-  之前：调用方（main.py / bootstrap 层）手动 ``MemoryTaskTypePolicy.create_for(...)``
-        拼装扩展参数，导致 application bootstrap 中累积大量业务注册代码。
+  之前：调用方（main.py / bootstrap 层）手动拼装扩展参数，导致 application
+        bootstrap 中累积大量业务注册代码。
   现在：业务模块声明 ``MemoryCapability``（纯元数据），由 ``MemoryCapabilityRegistry``
         汇总，再交给 ``MemoryTaskTypePolicy.create_from_registry(registry)`` 消费。
 
@@ -62,12 +62,10 @@ P1-B 演进（Workflow Capability Registration Boundary）：
 
 from __future__ import annotations
 
-from typing import Iterable
-
 from pydantic import BaseModel, ConfigDict, Field
 
 # 默认 task_type 白名单（与 P0 MemoryTaskType Literal 保持一致）。
-# 任何新增项必须显式注册（见 create_for / create_from_registry），
+# 任何新增项必须显式注册（见 create_from_registry），
 # schema / Java / DB 不需要改。
 DEFAULT_TASK_TYPES: tuple[str, ...] = (
     'GENERIC',
@@ -125,71 +123,6 @@ class MemoryTaskTypePolicy(BaseModel):
             available_task_types=DEFAULT_TASK_TYPES,
             tool_to_task_type=dict(DEFAULT_TOOL_TO_TASK_TYPE),
             default_task_type=DEFAULT_TASK_TYPE,
-        )
-
-    @classmethod
-    def create_for(
-        cls,
-        extra_task_types: Iterable[str] = (),
-        extra_tool_to_task_type: dict[str, str] | None = None,
-        default_task_type: str | None = None,
-    ) -> 'MemoryTaskTypePolicy':
-        """基于默认 policy 扩展；用于新增业务（例如 EXPENSE_REQUEST）注册。
-
-        参数：
-          extra_task_types          —— 在默认集合上追加的新 task_type；
-                                        已存在的会被去重（保持原顺序）。
-          extra_tool_to_task_type   —— 在默认 tool → taskType 映射上叠加；
-                                        value 必须命中（扩展后的）
-                                        available_task_types，否则抛 ValueError。
-          default_task_type         —— 可选替换默认兜底 task_type；必须
-                                        ∈ 扩展后的 available_task_types。
-
-        抛出：
-          ValueError —— 任何注册项与已有集合冲突或 value 不在白名单内。
-
-        P1-B 替代路径：
-          业务方不再通过 ``create_for`` 拼装参数；改用 ``create_from_registry``
-          + ``MemoryCapabilityRegistry``。本方法保留仅用于"一次性脚本 /
-          调试 / 不引入 Registry 的迁移路径"，业务 bootstrap 不应使用。
-        """
-        # 1. 合并 task_types（保留 P0 顺序，去重）
-        merged_types: list[str] = list(DEFAULT_TASK_TYPES)
-        for t in extra_task_types:
-            if not isinstance(t, str) or not t:
-                raise ValueError(
-                    f'extra_task_types 项必须为非空字符串，得到 {t!r}'
-                )
-            if t not in merged_types:
-                merged_types.append(t)
-
-        # 2. 合并 tool → task_type 映射
-        merged_tool_map: dict[str, str] = dict(DEFAULT_TOOL_TO_TASK_TYPE)
-        if extra_tool_to_task_type:
-            for tool_name, task_type in extra_tool_to_task_type.items():
-                if not isinstance(tool_name, str) or not tool_name:
-                    raise ValueError(
-                        f'extra_tool_to_task_type 的 key 必须为非空字符串，得到 {tool_name!r}'
-                    )
-                if task_type not in merged_types:
-                    raise ValueError(
-                        f'extra_tool_to_task_type[{tool_name!r}] = {task_type!r} '
-                        f'不在 available_task_types {merged_types!r} 中'
-                    )
-                merged_tool_map[tool_name] = task_type
-
-        # 3. default_task_type 校验
-        final_default = default_task_type or DEFAULT_TASK_TYPE
-        if final_default not in merged_types:
-            raise ValueError(
-                f'default_task_type={final_default!r} 不在 '
-                f'available_task_types {merged_types!r} 中'
-            )
-
-        return cls(
-            available_task_types=tuple(merged_types),
-            tool_to_task_type=merged_tool_map,
-            default_task_type=final_default,
         )
 
     @classmethod

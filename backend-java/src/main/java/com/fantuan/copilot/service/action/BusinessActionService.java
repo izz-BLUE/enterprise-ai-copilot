@@ -129,7 +129,7 @@ public class BusinessActionService {
                                            VerifiedIdentity identity,
                                            String conversationId) {
         return createPendingInternal(proposal, originTraceId, presentedToken, identity,
-                conversationId, null, null, null);
+                conversationId, null, null);
     }
 
     /**
@@ -144,27 +144,8 @@ public class BusinessActionService {
                                                 String conversationId,
                                                 String agentExecutionId,
                                                 String hitlWaitId) {
-        return createHitlPending(proposal, originTraceId, presentedToken, identity,
-                conversationId, agentExecutionId, hitlWaitId, null);
-    }
-
-    /**
-     * Task Runtime registration may coexist with the already-active action of
-     * the preceding task in the same conversation.  The task id is the
-     * trusted discriminator; legacy single-action callers keep the original
-     * one-active-action conversation rule.
-     */
-    @Transactional
-    public PendingActionView createHitlPending(BusinessActionProposal proposal,
-                                                String originTraceId,
-                                                String presentedToken,
-                                                VerifiedIdentity identity,
-                                                String conversationId,
-                                                String agentExecutionId,
-                                                String hitlWaitId,
-                                                String taskId) {
         return createPendingInternal(proposal, originTraceId, presentedToken, identity,
-                conversationId, agentExecutionId, hitlWaitId, taskId);
+                conversationId, agentExecutionId, hitlWaitId);
     }
 
     /** Preserve the service's authorization ordering before coordinator routing. */
@@ -237,8 +218,7 @@ public class BusinessActionService {
                                                      VerifiedIdentity identity,
                                                      String conversationId,
                                                      String agentExecutionId,
-                                                     String hitlWaitId,
-                                                     String taskId) {
+                                                     String hitlWaitId) {
         if (proposal == null) {
             throw new ActionException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST",
                     "缺少 action_proposal。", null, null);

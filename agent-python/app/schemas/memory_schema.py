@@ -17,8 +17,8 @@ P1-A 演进：
     'BUSINESS_ACTION']，用于"已知任务类别"的类型提示与文档；
   - MemoryProposal.task_type 改为 ``MemoryTaskTypeStr``（即 ``str`` 类型），
     由 ``MemoryTaskTypePolicy``（policy 模块）独占控制白名单；
-    新增业务（例如 EXPENSE_REQUEST）通过 ``MemoryTaskTypePolicy.create_for(
-    extra_task_types=('EXPENSE_REQUEST',))`` 注册，**不修改**本 schema 文件。
+    新增业务（例如 EXPENSE_REQUEST）通过 MemoryCapabilityRegistry 注册，
+    **不修改**本 schema 文件。
   - Schema 不再做白名单 fail-loud；policy 在写入链路（MemoryWritePolicy）二次
     校验；任何非法 task_type 在 policy.assert_allowed 处抛 ValueError，Pipeline
     降级为 noop（与现有 MemoryExtractionParseError 一致）。

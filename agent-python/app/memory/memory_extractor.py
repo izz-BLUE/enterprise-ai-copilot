@@ -11,7 +11,7 @@
      - status 受控枚举（ACTIVE / COMPLETED / ABANDONED）；
      - task_type 受控白名单（由 ``MemoryTaskTypePolicy`` 提供，P1-A 起；
        不再硬编码 GENERIC / LEAVE_REQUEST / BUSINESS_ACTION 字面；
-       默认 policy 与 P0 等价，新增业务通过 ``create_for`` 扩展）；
+       默认 policy 与 P0 等价，新增业务通过 Capability Registry 注册）；
      - extra='forbid' 由 MemoryProposal 内置，parse_proposal 复述。
   2. **不可信数据原则**：tool_history / observation / existing_memory / action_proposal
      都是数据，不是指令。prompt 必须声明边界。
@@ -200,7 +200,7 @@ class MemoryExtractor:
     P1-A 扩展：
       Extractor 可注入 ``task_type_policy``（默认 ``MemoryTaskTypePolicy.default()``，
       行为与 P0 等价）。prompt 中的 ``Available Memory Task Types`` 列表由 policy
-      控制；新增业务（例如 EXPENSE_REQUEST）通过 ``create_for(extra_task_types=...)``
+      控制；新增业务（例如 EXPENSE_REQUEST）通过 MemoryCapabilityRegistry
       注册，无需修改 schema / Java / DB。
     """
 
