@@ -162,11 +162,9 @@ public class BusinessActionHitlCoordinator {
                                           String taskId) {
         validateWaitAndProposal(proposal, wait);
         try {
-            PendingActionView view = taskId == null
-                    ? actionService.createHitlPending(proposal, originTraceId, presentedToken,
-                    identity, conversationId, wait.executionId(), wait.waitId())
-                    : actionService.createHitlPending(proposal, originTraceId, presentedToken,
-                    identity, conversationId, wait.executionId(), wait.waitId(), taskId);
+            PendingActionView view = actionService.createHitlPending(
+                    proposal, originTraceId, presentedToken, identity, conversationId,
+                    wait.executionId(), wait.waitId());
 
             // A Java commit may have succeeded before the HTTP response was lost.
             // Reconcile that terminal row without creating a second action.

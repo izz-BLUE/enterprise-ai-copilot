@@ -121,7 +121,7 @@ class BusinessActionServiceTest {
 
         assertCode("ACTION_CONVERSATION_IN_PROGRESS", () -> f.service.createHitlPending(
                 standardProposal(), "o", ADMIN, USER_A, "conv-1",
-                wait.executionId(), wait.waitId(), "task-2"));
+                wait.executionId(), wait.waitId()));
         verify(f.actions).hasActiveByOwnerAndConversation(USER_A.userId(), "conv-1");
         verify(f.actions, never()).saveNew(any());
     }

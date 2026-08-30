@@ -50,11 +50,6 @@ public class JdbcTaskExecutionRepository implements TaskExecutionRepository {
     }
 
     @Override
-    public Optional<TaskExecution> findByTaskIdForUpdate(String taskId) {
-        return find("task_id = :taskId", Map.of("taskId", taskId), true);
-    }
-
-    @Override
     public Optional<TaskExecution> findByActionId(String actionId) {
         return find("action_id = :actionId", Map.of("actionId", actionId), false);
     }
@@ -62,25 +57,6 @@ public class JdbcTaskExecutionRepository implements TaskExecutionRepository {
     @Override
     public Optional<TaskExecution> findByActionIdForUpdate(String actionId) {
         return find("action_id = :actionId", Map.of("actionId", actionId), true);
-    }
-
-    @Override
-    public Optional<TaskExecution> findInteractiveByOwnerAndConversationForUpdate(
-            String ownerUserId, String conversationId) {
-        return jdbc.query("SELECT " + COLUMNS + """
-                FROM task_execution
-                WHERE owner_user_id = :ownerUserId
-                  AND conversation_id = :conversationId
-                  AND status IN ('WAITING_USER', 'WAITING_CLARIFICATION', 'RUNNING')
-                ORDER BY CASE status
-                    WHEN 'WAITING_USER' THEN 1
-                    WHEN 'WAITING_CLARIFICATION' THEN 2
-                    WHEN 'RUNNING' THEN 3
-                    ELSE 4 END,
-                    sequence_no
-                LIMIT 1 FOR UPDATE
-                """, Map.of("ownerUserId", ownerUserId, "conversationId", conversationId),
-                this::map).stream().findFirst();
     }
 
     @Override
@@ -94,14 +70,6 @@ public class JdbcTaskExecutionRepository implements TaskExecutionRepository {
                 FOR UPDATE
                 """, Map.of("ownerUserId", ownerUserId, "conversationId", conversationId),
                 this::map);
-    }
-
-    @Override
-    public Optional<TaskExecution> findPendingByGroupAndSequenceForUpdate(
-            String taskGroupId, int sequenceNo) {
-        return find("task_group_id = :taskGroupId AND sequence_no = :sequenceNo "
-                        + "AND status = 'PENDING'",
-                Map.of("taskGroupId", taskGroupId, "sequenceNo", sequenceNo), true);
     }
 
     @Override

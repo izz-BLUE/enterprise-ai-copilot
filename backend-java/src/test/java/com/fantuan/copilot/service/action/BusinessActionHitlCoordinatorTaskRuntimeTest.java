@@ -196,8 +196,8 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                         List.of(), memory, wait, null));
         when(taskRuntimeService.matchesTaskType(next, TaskType.LEAVE_REQUEST)).thenReturn(true);
         when(actionService.createHitlPending(eq(proposal), eq("trace"), eq("admin"),
-                eq(identity), eq(CONVERSATION_ID), eq(wait.executionId()), eq(wait.waitId()),
-                eq("task-2"))).thenReturn(pending);
+                eq(identity), eq(CONVERSATION_ID), eq(wait.executionId()), eq(wait.waitId())))
+                .thenReturn(pending);
         when(actions.findByHitlWaitId(wait.waitId())).thenReturn(Optional.empty());
         when(taskRuntimeService.markWaitingUser("task-2", "act-2")).thenReturn(true);
 

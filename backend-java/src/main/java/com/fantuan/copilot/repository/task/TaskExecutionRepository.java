@@ -12,20 +12,12 @@ public interface TaskExecutionRepository {
 
     Optional<TaskExecution> findByTaskId(String taskId);
 
-    Optional<TaskExecution> findByTaskIdForUpdate(String taskId);
-
     Optional<TaskExecution> findByActionId(String actionId);
 
     Optional<TaskExecution> findByActionIdForUpdate(String actionId);
 
-    Optional<TaskExecution> findInteractiveByOwnerAndConversationForUpdate(
-            String ownerUserId, String conversationId);
-
     List<TaskExecution> findByOwnerAndConversationForUpdate(
             String ownerUserId, String conversationId);
-
-    Optional<TaskExecution> findPendingByGroupAndSequenceForUpdate(
-            String taskGroupId, int sequenceNo);
 
     List<TaskExecution> findByGroup(String taskGroupId);
 
