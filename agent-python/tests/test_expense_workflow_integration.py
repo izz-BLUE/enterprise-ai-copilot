@@ -188,12 +188,12 @@ class TestPlannerSelection:
         assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
         assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
 
-    def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self):
+    def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self, caplog):
         """只读事实成功后合法但过早 finish，语义修复必须继续报销 Proposal。"""
         premature_finish = json.dumps({
             "action": "finish",
             "answer": "INVALID_FINISH_SHOULD_NOT_EXECUTE",
-            "reason_code": "task_complete",
+            "reason_code": "cannot_complete",
         }, ensure_ascii=False)
         decisions = [
             _tool("rag_answer_tool", {"question": "出差报销政策"}, "need_knowledge"),
@@ -238,6 +238,11 @@ class TestPlannerSelection:
         assert result["stop_reason"] == "task_complete"
         assert result["route"] == "action"
         assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
+        assert any(
+            "error_type=planner_completion_validation "
+            "error_code=expense_proposal_missing" in record.message
+            for record in caplog.records
+        )
 
 
 class TestStressScenarios:
