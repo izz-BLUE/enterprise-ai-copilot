@@ -15,6 +15,7 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.service.action.TaskRuntimeRegistrationRejectionException;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
 import com.fantuan.copilot.service.agent.AgentMemoryCoordinator;
@@ -413,6 +414,20 @@ public class LangGraphAgentController {
                             conversationId, traceId);
                     persistResponseMemory = false;
                 }
+            } catch (TaskRuntimeRegistrationRejectionException exception) {
+                log.warn("[{}] Task Runtime task rejected; successor pending action={}",
+                        traceId, exception.successorPendingAction() == null
+                                ? "none" : "present");
+                eventRecorder.record(traceId, "AGENT_REQUEST_CONTINUED_AFTER_REJECTION",
+                        AdminLogEvent.LEVEL_WARN, started);
+                if (exception.successorPendingAction() == null) {
+                    return AgentResponseFactory.actionFailure(traceId,
+                            "暂时无法生成申请草稿，请检查信息后重试。");
+                }
+                return AgentResponseFactory.actionRejectedWithContinuation(
+                        traceId,
+                        "上一项申请因业务规则未能生成，已继续处理下一项任务，请确认。",
+                        exception.successorPendingAction(), conversationId);
             } catch (ActionException exception) {
                 log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
                         traceId, exception.errorCode());

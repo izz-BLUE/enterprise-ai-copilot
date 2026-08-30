@@ -26,6 +26,7 @@ import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import com.fantuan.copilot.service.action.TaskRuntimeRegistrationRejectionException;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.task.TaskRuntimeService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -377,6 +378,94 @@ class LangGraphAgentActionMappingTest {
         order.verify(runtime).markWaitingUser("task-1", "act-1");
         order.verify(memoryService).upsertActiveFromAgent(identity.userId(), "conv-1",
                 "LEAVE_REQUEST", Map.of("waiting_for", "confirmation"), "等待确认");
+    }
+
+    @Test
+    void taskRuntimeDeterministicRejectionReturnsSuccessorPendingAction() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        AgentRuntimeThreadIdService threadIds = mock(AgentRuntimeThreadIdService.class);
+        AgentRuntimeThreadExecutionGuard guard = mock(AgentRuntimeThreadExecutionGuard.class);
+        BusinessActionHitlCoordinator hitl = mock(BusinessActionHitlCoordinator.class);
+        TaskRuntimeService runtime = mock(TaskRuntimeService.class);
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution task = new TaskExecution("group-1", "task-1", identity.userId(),
+                "conv-1", 1, TaskType.LEAVE_REQUEST, "请假", null,
+                TaskExecutionStatus.RUNNING, null, Instant.now(), Instant.now(), null);
+        AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 1), "私事", HalfDay.NONE);
+        HitlWaitMarker wait = new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + "b".repeat(64), "ex_" + "a".repeat(32),
+                BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        PendingActionView successor = new PendingActionView("act-2",
+                BusinessActionType.EXPENSE_CLAIM, ActionStatus.PENDING_CONFIRMATION,
+                "报销", null, "nonce", Instant.now(), true);
+        ActionException rejection = new ActionException(
+                HttpStatus.UNPROCESSABLE_ENTITY, "BUSINESS_RULE_VIOLATION",
+                "日期范围与已提交的模拟申请冲突。", null, null);
+
+        when(identityContext.require(any())).thenReturn(identity);
+        when(admin.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.hasBlockingAction(identity.userId(), "conv-1"))
+                .thenReturn(false, true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
+        when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
+                .thenReturn("task-thread");
+        when(guard.tryAcquire("conversation-thread")).thenReturn(true);
+        when(hitl.reconcileExpiredBeforeChat("trace", "admin", identity, "conv-1"))
+                .thenReturn(true);
+        when(runtime.reconcile(identity.userId(), "conv-1")).thenReturn(Optional.of(task));
+        when(memoryService.find(identity.userId(), "conv-1")).thenReturn(Optional.empty());
+        when(gateway.post(eq("/agent/langgraph/chat"), any(), any(),
+                eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
+                new PythonAgentResponse("已生成请假申请", "action", true, "business_action", "",
+                        List.of(), true, "trace", proposal, List.of(), null, wait, null));
+        when(runtime.matchesTaskType(task, TaskType.LEAVE_REQUEST)).thenReturn(true);
+        when(hitl.registerWait(eq(proposal), eq(wait), eq("trace"), eq("admin"),
+                eq(identity), eq("conv-1"), eq("task-1")))
+                .thenThrow(new TaskRuntimeRegistrationRejectionException(rejection, successor));
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, admin, actionService, identityContext, memoryService,
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("trace");
+        when(request.getHeader("X-Admin-Token")).thenReturn("admin");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("request", "conv-1"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("conv-1", response.getHeaders().getFirst("X-Conversation-Id"));
+        assertEquals("no-store", response.getHeaders().getCacheControl());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().success());
+        assertEquals("action", response.getBody().route());
+        assertEquals("business_action", response.getBody().category());
+        assertEquals("上一项申请因业务规则未能生成，已继续处理下一项任务，请确认。",
+                response.getBody().answer());
+        assertSame(successor, response.getBody().pendingAction());
+        verify(runtime, never()).markWaitingUser(anyString(), anyString());
+
+        ResponseEntity<AgentChatResponse> duplicate = controller.langgraphChat(
+                new ChatRequest("request", "conv-1"), request);
+
+        assertEquals(HttpStatus.OK, duplicate.getStatusCode());
+        assertNotNull(duplicate.getBody());
+        assertEquals("当前会话已有待确认的申请，请先确认或取消后再发起新申请。",
+                duplicate.getBody().answer());
+        verify(gateway, times(1)).post(eq("/agent/langgraph/chat"), any(), any(),
+                eq(PythonAgentResponse.class), eq("trace"));
+        verify(hitl, times(1)).registerWait(eq(proposal), eq(wait), eq("trace"),
+                eq("admin"), eq(identity), eq("conv-1"), eq("task-1"));
     }
 
     @Test
