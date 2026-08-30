@@ -473,8 +473,8 @@ class TestPromptInputs:
         assert RAG_TOOL_NAME in user
 
 
-class TestEmptyResponseRetry:
-    """空响应不做应用层重试，避免突破端到端 deadline。"""
+class TestPlannerRetryBoundaries:
+    """空响应不修复；结构/语义非法最多进行一次有界修复。"""
 
     def test_empty_string_ends_invalid_decision_without_retry(self):
         with patch('app.agents.planner_node.call_llm', return_value='') as llm:
@@ -506,11 +506,18 @@ class TestEmptyResponseRetry:
         assert llm.call_count == 1
         assert result['stop_reason'] == 'invalid_decision'
 
-    def test_invalid_non_empty_json_does_not_retry(self):
+    def test_invalid_non_empty_json_repairs_once(self):
         with patch('app.agents.planner_node.call_llm',
                    return_value='not json') as llm:
             result = planner_node(state())
-        assert llm.call_count == 1
+        assert llm.call_count == 2
+        assert result['stop_reason'] == 'invalid_decision'
+
+    def test_semantic_repair_skips_when_deadline_is_exhausted(self):
+        with patch('app.agents.planner_node.monotonic', side_effect=[0.0, 1.0]), \
+                patch('app.agents.planner_node.call_llm', return_value='not json') as llm:
+            result = planner_node(state(deadline_monotonic=0.5))
+        llm.assert_called_once()
         assert result['stop_reason'] == 'invalid_decision'
 
     def test_first_attempt_valid_calls_llm_once(self):

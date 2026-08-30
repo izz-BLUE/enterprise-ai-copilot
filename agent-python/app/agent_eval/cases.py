@@ -348,7 +348,8 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         max_step_count=1,
         max_tool_call_count=0,
         description='Planner 输出非法内容 → 明确失败路径终止',
-        planner_responses=('not a json',),
+        # 首次语义修复仍非法时，第二次失败必须保持 invalid_decision。
+        planner_responses=('not a json', 'not a json'),
     ),
     AgentEvalCase(
         case_id='018-provider-error',

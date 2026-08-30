@@ -70,6 +70,16 @@ def test_prompt_requires_completion_check_before_tool_call():
     assert '优先选择 finish' in PLANNER_SYSTEM_PROMPT
     assert '已成功获得' in PLANNER_SYSTEM_PROMPT
     assert '重复执行已经成功完成的相同调用' in PLANNER_SYSTEM_PROMPT
+    assert '只读查询或知识检索成功只表示事实已获得' in PLANNER_SYSTEM_PROMPT
+
+
+def test_dynamic_prompt_requires_business_proposal_after_read_only_facts():
+    prompt = build_planner_system_prompt(list(ToolName.__args__))
+    assert 'leave_balance_tool 成功只表示余额已查询' in prompt
+    assert '应继续调用 leave_proposal_tool' in prompt
+    assert 'rag_answer_tool、travel_record_tool、invoice_verify_tool 成功只提供报销所需事实' in prompt
+    assert '应继续调用 expense_proposal_tool' in prompt
+    assert '只生成待确认草稿，不执行业务写操作' in prompt
 
 
 def test_prompt_forbids_undefined_fields():
