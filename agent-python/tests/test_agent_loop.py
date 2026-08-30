@@ -185,7 +185,7 @@ class TestHistoryRendering:
             _finish('完成。'),
         ])
 
-        def fake_llm(system_prompt, user_prompt):
+        def fake_llm(system_prompt, user_prompt, **_kwargs):
             captured['user_prompt'] = user_prompt
             return next(responses)
 

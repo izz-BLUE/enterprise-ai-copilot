@@ -79,7 +79,7 @@ def scripted_call_llm(responses: list[str]):
     """构造一个"调用顺序消费"的 LLM 替身。每次返回下一条 JSON；用完抛 StopIteration。"""
     it = iter(responses)
 
-    def _call(system_prompt: str, user_prompt: str) -> str:
+    def _call(system_prompt: str, user_prompt: str, **_kwargs: object) -> str:
         return next(it)
 
     return _call

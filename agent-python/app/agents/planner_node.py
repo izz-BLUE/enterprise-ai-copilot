@@ -550,14 +550,13 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     system_prompt = build_planner_system_prompt(current_visible_tools)
 
     try:
+        provider_options = {
+            'response_format': {'type': 'json_object'},
+            'thinking': False,
+        }
         if remaining_seconds is not None and remaining_seconds < LLM_TIMEOUT:
-            raw = call_llm(
-                system_prompt,
-                user_prompt,
-                timeout_seconds=remaining_seconds,
-            )
-        else:
-            raw = call_llm(system_prompt, user_prompt)
+            provider_options['timeout_seconds'] = remaining_seconds
+        raw = call_llm(system_prompt, user_prompt, **provider_options)
     except LLMProviderError as exc:
         # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
         # 不引入 timeout/5xx 应用层 retry。

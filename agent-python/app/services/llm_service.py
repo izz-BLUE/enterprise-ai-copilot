@@ -106,9 +106,13 @@ def call_llm(
     user_prompt: str,
     *,
     timeout_seconds: float | None = None,
+    response_format: dict[str, str] | None = None,
+    thinking: bool | None = None,
 ) -> str:
     """调用 LLM 并返回首个 choice 的 content 文本。失败时抛 LLMProviderError。
 
+    response_format / thinking 均为可选 Provider 参数；不传时保持默认请求行为。
+    thinking=False 显式关闭支持该参数的 Provider 的 thinking 输出。
     应用层不引入额外网络 retry；SDK 自身的 max_retries 行为保持不变。
     """
     client = _get_client()
@@ -116,6 +120,14 @@ def call_llm(
         request_options = {}
         if timeout_seconds is not None:
             request_options['timeout'] = max(0.1, min(float(LLM_TIMEOUT), timeout_seconds))
+        if response_format is not None:
+            request_options['response_format'] = dict(response_format)
+        if thinking is not None:
+            request_options['extra_body'] = {
+                'thinking': {
+                    'type': 'enabled' if thinking else 'disabled',
+                },
+            }
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=[

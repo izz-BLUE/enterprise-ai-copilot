@@ -138,6 +138,35 @@ class TestCallLlmEmptyResponse:
         with self._patch_client(_FakeResponse(choices=[_FakeChoice('hello')])):
             assert call_llm('sys', 'usr') == 'hello'
 
+    def test_default_call_does_not_force_provider_specific_options(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = _FakeResponse(
+            choices=[_FakeChoice('hello')],
+        )
+        with patch.object(llm_service, '_get_client', return_value=client):
+            assert call_llm('sys', 'usr') == 'hello'
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert 'response_format' not in kwargs
+        assert 'extra_body' not in kwargs
+
+    def test_optional_json_output_and_thinking_are_forwarded(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = _FakeResponse(
+            choices=[_FakeChoice('hello')],
+        )
+        with patch.object(llm_service, '_get_client', return_value=client):
+            call_llm(
+                'sys',
+                'usr',
+                response_format={'type': 'json_object'},
+                thinking=False,
+            )
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs['response_format'] == {'type': 'json_object'}
+        assert kwargs['extra_body'] == {'thinking': {'type': 'disabled'}}
+
 
 class TestControlledClientUnchanged:
     """确认 Model Reliability P0 未触碰 controlled client（max_retries=0）。"""
@@ -159,3 +188,16 @@ class TestControlledClientUnchanged:
 
         assert captured_kwargs['max_retries'] == 0
         assert client.__class__.__name__ == '_StubOpenAI'
+
+    def test_provider_error_is_not_retried_by_application(self):
+        client = MagicMock()
+        client.chat.completions.create.side_effect = _timeout_exc()
+        with patch.object(llm_service, '_get_client', return_value=client):
+            try:
+                call_llm('sys', 'usr')
+            except LLMProviderError as exc:
+                assert exc.code == PROVIDER_ERROR_TIMEOUT
+            else:
+                raise AssertionError('LLMProviderError 未抛出')
+
+        assert client.chat.completions.create.call_count == 1

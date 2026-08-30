@@ -102,10 +102,13 @@ class TestPermissionBoundary:
 
 class TestFinishAndRefuse:
     def test_finish_decision(self):
-        with patch('app.agents.planner_node.call_llm', return_value=FINISH_RAW):
+        with patch('app.agents.planner_node.call_llm', return_value=FINISH_RAW) as llm:
             result = planner_node(state())
         assert result['planner_decision']['action'] == 'finish'
         assert result['stop_reason'] == 'task_complete'
+        kwargs = llm.call_args.kwargs
+        assert kwargs['response_format'] == {'type': 'json_object'}
+        assert kwargs['thinking'] is False
 
     def test_refuse_decision(self):
         with patch('app.agents.planner_node.call_llm', return_value=REFUSE_RAW):

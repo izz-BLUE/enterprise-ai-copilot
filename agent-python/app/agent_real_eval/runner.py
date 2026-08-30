@@ -563,17 +563,17 @@ def _evaluate_run(
 # ── 单次 Run 驱动：可注入 call_llm ─────────────────────────────
 
 def _wrap_call_llm(
-    real_call_llm: Callable[[str, str], str],
+    real_call_llm: Callable[..., str],
     captured: list[str],
-) -> Callable[[str, str], str]:
+) -> Callable[..., str]:
     """包装 call_llm：调用真实 LLM，同时把每次 Planner 输出保存到 captured。
 
     不修改任何 Planner 决策行为；同一个 system_prompt / user_prompt 仍
     走真实模型，wrapper 只在调用前后插桩。
     """
 
-    def wrapper(system_prompt: str, user_prompt: str) -> str:
-        raw = real_call_llm(system_prompt, user_prompt)
+    def wrapper(system_prompt: str, user_prompt: str, **kwargs: object) -> str:
+        raw = real_call_llm(system_prompt, user_prompt, **kwargs)
         captured.append(raw)
         return raw
 
@@ -584,7 +584,7 @@ def run_single_run(
     case: RealAgentEvalCase,
     run_index: int,
     *,
-    real_call_llm: Callable[[str, str], str],
+    real_call_llm: Callable[..., str],
 ) -> RealEvalRunResult:
     """执行一条 Case × 一次 Run。
 
@@ -622,7 +622,7 @@ def run_case_repeatedly(
     case: RealAgentEvalCase,
     runs: int,
     *,
-    real_call_llm: Callable[[str, str], str],
+    real_call_llm: Callable[..., str],
 ) -> RealEvalCaseReport:
     """对单 Case 执行 runs 次，返回聚合报告。"""
     report = RealEvalCaseReport(
@@ -845,7 +845,7 @@ def run_real_eval(
     cases: list[RealAgentEvalCase] | None = None,
     runs_per_case: int = 3,
     *,
-    real_call_llm: Callable[[str, str], str],
+    real_call_llm: Callable[..., str],
     temperature: float | None = None,
 ) -> RealEvalSuiteReport:
     """Real Eval 顶层入口。
