@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 
 const TEST_NONCE = 'test-nonce-not-a-secret'
 const TEST_ACTION_ID = 'act_business_action_test_1234567890'
+const NEXT_NONCE = 'next-confirmation-not-a-secret'
+const NEXT_ACTION_ID = 'act_expense_continuation_1234567890'
+const SECOND_ACTION_ID = 'act_business_action_test_0987654321'
+const SECOND_NONCE = 'second-nonce-not-a-secret'
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, state }) => {
@@ -107,6 +111,26 @@ async function openExpenseDraft(page, response = expensePendingResponse()) {
   await expect(page.getByRole('region', { name: '报销申请确认卡' })).toBeVisible()
 }
 
+const nextExpensePendingAction = (overrides = {}) => ({
+  actionId: NEXT_ACTION_ID,
+  type: 'EXPENSE_CLAIM',
+  status: 'PENDING_CONFIRMATION',
+  title: '提交模拟差旅报销申请',
+  summary: {
+    tripId: 'TRIP-20260818-001',
+    claimedAmount: '1830.00',
+    reimbursableAmount: '1730.00',
+    costCenter: 'COST-IT',
+    reason: '客户拜访',
+    itemCount: 2,
+    invoiceIds: ['INV-001', 'INV-002'],
+  },
+  confirmationNonce: NEXT_NONCE,
+  expiresAt: '2099-07-18T10:30:00Z',
+  confirmationRequired: true,
+  ...overrides,
+})
+
 async function fillAdminToken(page, token = 'test-only') {
   await page.getByRole('button', { name: /管理员演示设置/ }).click()
   await page.getByPlaceholder('输入 Admin Token...').fill(token)
@@ -203,6 +227,155 @@ test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page 
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   )
   expect(captured.body).toEqual({ confirmationNonce: TEST_NONCE })
+})
+
+test('Confirm continuation 自动追加 Expense 确认卡并保留下一步 nonce', async ({ page }) => {
+  const requests = []
+  await page.route('**/api/agent/actions/**/confirm', async route => {
+    const pathname = new URL(route.request().url()).pathname
+    const actionId = pathname.split('/').at(-2)
+    requests.push({ actionId, body: route.request().postDataJSON() })
+    const response = actionId === NEXT_ACTION_ID
+      ? executionResponse({
+          actionId: NEXT_ACTION_ID,
+          type: 'EXPENSE_CLAIM',
+          requestId: 'ER-202607-0001',
+        })
+      : executionResponse({ nextPendingAction: nextExpensePendingAction() })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    })
+  })
+
+  await openDraft(page)
+  await fillAdminToken(page)
+  await page.getByRole('region', { name: '年假申请确认卡' })
+    .getByRole('button', { name: '确认提交' }).click()
+
+  const leaveCard = page.getByRole('region', { name: '年假申请确认卡' })
+  const expenseCard = page.getByRole('region', { name: '报销申请确认卡' })
+  await expect(leaveCard).toContainText('模拟申请已提交')
+  await expect(expenseCard).toBeVisible()
+  await expect(expenseCard.getByRole('button', { name: '确认提交' })).toBeVisible()
+  expect(await page.evaluate(() => window.sessionStorage
+    .getItem('enterprise-ai-copilot.conversation-id'))).toBe('conv-from-chat')
+
+  const persisted = await readChatHistoryRecord(page, 'U10001')
+  const persistedLeave = persisted.messages.find(message =>
+    message.result?.pendingAction?.actionId === TEST_ACTION_ID)
+  const persistedExpense = persisted.messages.find(message =>
+    message.result?.pendingAction?.actionId === NEXT_ACTION_ID)
+  assert.equal(persistedLeave.actionUi.execution.nextPendingAction, undefined)
+  assert.equal(persistedExpense.result.pendingAction.confirmationNonce, undefined)
+  await expect(page.locator('body')).not.toContainText(NEXT_NONCE)
+
+  await expenseCard.getByRole('button', { name: '确认提交' }).click()
+  await expect(expenseCard).toContainText('模拟申请已提交')
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual({
+    actionId: TEST_ACTION_ID,
+    body: { confirmationNonce: TEST_NONCE },
+  })
+  expect(requests[1]).toEqual({
+    actionId: NEXT_ACTION_ID,
+    body: { confirmationNonce: NEXT_NONCE },
+  })
+})
+
+test('Confirm response 无 continuation 时保持单任务终态行为', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/confirm', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(executionResponse({ nextPendingAction: null })),
+  }))
+
+  await openDraft(page)
+  await page.getByRole('button', { name: '确认提交' }).click()
+
+  await expect(page.getByText('模拟申请已提交')).toBeVisible()
+  await expect(page.getByRole('region', { name: '报销申请确认卡' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.sessionStorage
+    .getItem('enterprise-ai-copilot.conversation-id'))).toBeNull()
+})
+
+test('Cancel continuation 自动追加 Expense 确认卡', async ({ page }) => {
+  await page.route('**/api/agent/actions/**/cancel', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ...executionResponse({ status: 'CANCELLED', requestId: null }),
+        nextPendingAction: nextExpensePendingAction(),
+      }),
+    })
+  })
+
+  await openDraft(page)
+  await page.getByRole('region', { name: '年假申请确认卡' })
+    .getByRole('button', { name: '取消草稿' }).click()
+
+  await expect(page.getByText('申请草稿已取消')).toBeVisible()
+  await expect(page.getByRole('region', { name: '报销申请确认卡' })).toBeVisible()
+  expect(await page.evaluate(() => window.sessionStorage
+    .getItem('enterprise-ai-copilot.conversation-id'))).toBe('conv-from-chat')
+})
+
+test('重复 materialize 同一 continuation actionId 时不新增卡片且不覆盖 nonce', async ({ page }) => {
+  let chatCount = 0
+  const confirmRequests = []
+  await page.route('**/api/agent/langgraph/chat', async route => {
+    chatCount += 1
+    const second = chatCount === 2
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'X-Conversation-Id': `conv-from-chat-${chatCount}` },
+      body: JSON.stringify(pendingResponse({
+        actionId: second ? SECOND_ACTION_ID : TEST_ACTION_ID,
+        confirmationNonce: second ? SECOND_NONCE : TEST_NONCE,
+      })),
+    })
+  })
+  await page.route('**/api/agent/actions/**/confirm', async route => {
+    const pathname = new URL(route.request().url()).pathname
+    const actionId = pathname.split('/').at(-2)
+    confirmRequests.push({ actionId, body: route.request().postDataJSON() })
+    const response = actionId === NEXT_ACTION_ID
+      ? executionResponse({
+          actionId: NEXT_ACTION_ID,
+          type: 'EXPENSE_CLAIM',
+          requestId: 'ER-202607-0002',
+        })
+      : executionResponse({ actionId, nextPendingAction: nextExpensePendingAction() })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    })
+  })
+
+  await page.goto('/')
+  await askForLeave(page)
+  await expect(page.getByRole('region', { name: '年假申请确认卡' })).toHaveCount(1)
+  await askForLeave(page)
+  await expect(page.getByRole('region', { name: '年假申请确认卡' })).toHaveCount(2)
+
+  const leaveCards = page.getByRole('region', { name: '年假申请确认卡' })
+  await leaveCards.nth(0).getByRole('button', { name: '确认提交' }).click()
+  await expect(page.getByRole('region', { name: '报销申请确认卡' })).toHaveCount(1)
+
+  await leaveCards.nth(1).getByRole('button', { name: '确认提交' }).click()
+  await expect(page.getByRole('region', { name: '报销申请确认卡' })).toHaveCount(1)
+
+  const expenseCard = page.getByRole('region', { name: '报销申请确认卡' })
+  await expenseCard.getByRole('button', { name: '确认提交' }).click()
+  await expect(expenseCard).toContainText('模拟申请已提交')
+  expect(confirmRequests.at(-1)).toEqual({
+    actionId: NEXT_ACTION_ID,
+    body: { confirmationNonce: NEXT_NONCE },
+  })
 })
 
 test('同步双击 Confirm 只发出一个请求', async ({ page }) => {
