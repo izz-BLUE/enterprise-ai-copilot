@@ -141,11 +141,11 @@ class TestFailureRecovery:
 class TestPlannerSemanticRepair:
     """Planner 结构/语义非法时最多自修复一次，且不扩大执行权限。"""
 
-    def test_balance_then_invalid_finish_repairs_to_leave_proposal(self):
+    def test_balance_then_invalid_finish_repairs_to_leave_proposal(self, caplog):
         premature_finish = json.dumps({
             'action': 'finish',
             'answer': 'DO_NOT_ECHO',
-            'reason_code': 'task_complete',
+            'reason_code': 'cannot_complete',
         }, ensure_ascii=False)
         proposal = ProposalPlanningResult(proposal=AnnualLeaveActionProposal(
             action_type='ANNUAL_LEAVE_REQUEST',
@@ -200,6 +200,53 @@ class TestPlannerSemanticRepair:
         assert result['step_count'] == 3  # repair stays within the same Planner node
         assert '尚未完成 leave_proposal_tool' in prompts[2]
         assert 'DO_NOT_ECHO' not in prompts[2]
+        assert any(
+            'error_type=planner_completion_validation '
+            'error_code=leave_proposal_missing' in record.message
+            for record in caplog.records
+        )
+
+    def test_balance_then_reason_mismatch_premature_finish_fails_closed_after_one_repair(
+            self, caplog):
+        """业务完成校验优先于 finish reason 校验，且仍只修复一次。"""
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': 'not accepted',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        balance_tool = Mock()
+        balance_tool.invoke.return_value = json.dumps({
+            'success': True, 'data': {'remaining_days': 5},
+        }, ensure_ascii=False)
+        proposal_tool = Mock()
+        with patch('app.agents.planner_node.call_llm',
+                   side_effect=[
+                       _tool('leave_balance_tool', {}, 'need_balance'),
+                       invalid_finish,
+                       invalid_finish,
+                   ]) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool), \
+                patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '我明天请一天年假，原因为私事',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 3  # balance + original decision + one repair
+        assert balance_tool.invoke.call_count == 1
+        proposal_tool.invoke.assert_not_called()
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        failures = [record.message for record in caplog.records
+                    if 'planner semantic validation failure' in record.message]
+        assert len(failures) == 2
+        assert all('error_code=leave_proposal_missing' in message for message in failures)
+        assert not any('finish_reason_code_mismatch' in message for message in failures)
 
     def test_second_invalid_decision_fails_closed_after_one_repair(self):
         invalid_finish = json.dumps({
@@ -298,6 +345,45 @@ class TestPlannerSemanticRepair:
         assert result['route'] == 'action'
         assert result['action_proposal'] is None
         assert result['missing_fields'] == ['reason']
+
+    def test_successful_proposal_runs_finish_reason_validation(self, caplog):
+        """Proposal 已成功后，普通 finish reason consistency 仍保留。"""
+        clarification_payload = json.dumps({
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请补充申请原因。',
+        }, ensure_ascii=False)
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': 'not accepted',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        proposal_tool = Mock()
+        proposal_tool.invoke.return_value = clarification_payload
+        with patch('app.agents.planner_node.call_llm',
+                   side_effect=[
+                       _tool('leave_proposal_tool', {}, 'need_proposal'),
+                       invalid_finish,
+                       invalid_finish,
+                   ]) as llm, \
+                patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '申请明天一天年假',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 3
+        assert proposal_tool.invoke.call_count == 1
+        assert result['stop_reason'] == 'invalid_decision'
+        failures = [record.message for record in caplog.records
+                    if 'planner semantic validation failure' in record.message]
+        assert len(failures) == 2
+        assert all('error_code=finish_reason_code_mismatch' in message for message in failures)
+        assert not any('leave_proposal_missing' in message for message in failures)
 
     def test_legal_decision_uses_one_llm_call(self):
         with patch('app.agents.planner_node.call_llm',

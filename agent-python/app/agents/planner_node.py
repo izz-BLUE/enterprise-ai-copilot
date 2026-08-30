@@ -870,13 +870,13 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         try:
             payload = json.loads(raw)
             decision = PlannerDecision.model_validate(payload)
-            decision.validate_decision()
             _validate_business_completion(
                 decision,
                 question=question,
                 current_visible_tools=current_visible_tools,
                 tool_history=state.get('tool_history', []),
             )
+            decision.validate_decision()
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
             _log_planner_validation_failure(
                 trace_id,
