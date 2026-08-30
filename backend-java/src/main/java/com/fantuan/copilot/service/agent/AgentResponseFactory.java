@@ -1,6 +1,7 @@
 package com.fantuan.copilot.service.agent;
 
 import com.fantuan.copilot.dto.AgentChatResponse;
+import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.service.action.ActionException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +27,17 @@ public final class AgentResponseFactory {
     public static ResponseEntity<AgentChatResponse> actionFailure(String traceId, String message) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(response(message, "error", "business_action", traceId));
+    }
+
+    public static ResponseEntity<AgentChatResponse> actionRejectedWithContinuation(
+            String traceId, String message, PendingActionView successorPendingAction,
+            String conversationId) {
+        return ResponseEntity.ok()
+                .header("X-Conversation-Id", conversationId)
+                .cacheControl(CacheControl.noStore())
+                .body(new AgentChatResponse(
+                        message, "action", true, "business_action", "", List.of(),
+                        true, traceId, successorPendingAction));
     }
 
     public static ResponseEntity<AgentChatResponse> recoveryConflict(String traceId) {

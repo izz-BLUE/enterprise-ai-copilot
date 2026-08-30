@@ -4,6 +4,7 @@ import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.dto.PythonAgentResponse;
 import com.fantuan.copilot.dto.action.ActionExecutionResponse;
 import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
+import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.dto.memory.AgentMemoryProposal;
@@ -20,6 +21,7 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.task.TaskRuntimeException;
 import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -35,10 +38,13 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -162,6 +168,219 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
     }
 
     @Test
+    void deterministicRejectionCarriesSuccessorWithoutRequeue() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = task(TASK_ID, 1, TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.RUNNING);
+        TaskExecution successor = task("task-2", 2, TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.RUNNING);
+        AnnualLeaveActionProposal leaveProposal = leaveProposal();
+        HitlWaitMarker leaveWait = wait(BusinessActionType.ANNUAL_LEAVE_REQUEST, "a");
+        BusinessActionProposal expenseProposal = mock(BusinessActionProposal.class);
+        when(expenseProposal.actionType()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        HitlWaitMarker expenseWait = wait(BusinessActionType.EXPENSE_CLAIM, "c");
+        PendingActionView successorPending = pendingView(
+                "expense-action", BusinessActionType.EXPENSE_CLAIM);
+        ActionException rejection = deterministicRejection();
+
+        when(taskRuntimeService.findByTaskId(TASK_ID)).thenReturn(Optional.of(current));
+        when(taskRuntimeService.startNextRunnable("group-1"))
+                .thenReturn(Optional.of(successor));
+        when(taskRuntimeService.matchesTaskType(successor, TaskType.EXPENSE_CLAIM))
+                .thenReturn(true);
+        when(taskRuntimeService.markTerminal(TASK_ID, TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+        when(taskRuntimeService.markWaitingUser("task-2", successorPending.actionId()))
+                .thenReturn(true);
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, TASK_ID))
+                .thenReturn("t1-thread");
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn("t2-thread");
+        when(actionService.createHitlPending(
+                leaveProposal, "trace", "admin", identity, CONVERSATION_ID,
+                leaveWait.executionId(), leaveWait.waitId()))
+                .thenThrow(rejection);
+        when(actionService.createHitlPending(
+                expenseProposal, "trace", "admin", identity, CONVERSATION_ID,
+                expenseWait.executionId(), expenseWait.waitId()))
+                .thenReturn(successorPending);
+        when(actions.findByHitlWaitId(expenseWait.waitId())).thenReturn(Optional.empty());
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("trace")))
+                .thenAnswer(invocation -> "/agent/langgraph/chat".equals(invocation.getArgument(0))
+                        ? new PythonAgentResponse("请确认报销", "action", true,
+                        "business_action", "", List.of(), true, "trace", expenseProposal,
+                        List.of(), null, expenseWait, null)
+                        : new PythonAgentResponse("已拒绝", "action", true,
+                        "business_action", "", List.of(), true, "trace", null, List.of(), null));
+
+        TaskRuntimeRegistrationRejectionException exception = assertThrows(
+                TaskRuntimeRegistrationRejectionException.class,
+                () -> coordinator(memoryService).registerWait(leaveProposal, leaveWait,
+                        "trace", "admin", identity, CONVERSATION_ID, TASK_ID));
+
+        assertSame(rejection, exception.rejection());
+        assertSame(successorPending, exception.successorPendingAction());
+        verify(taskRuntimeService).markTerminal(TASK_ID, TaskExecutionStatus.FAILED);
+        verify(taskRuntimeService).markWaitingUser("task-2", successorPending.actionId());
+        verify(taskRuntimeService, never()).markWaitingUser(TASK_ID, successorPending.actionId());
+        verify(taskRuntimeService, never()).requeueAfterLaunchFailure("task-2");
+        verify(actionService).createHitlPending(
+                expenseProposal, "trace", "admin", identity, CONVERSATION_ID,
+                expenseWait.executionId(), expenseWait.waitId());
+    }
+
+    @Test
+    void deterministicRejectionWithoutSuccessorKeepsSafeFailureContinuation() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = task(TASK_ID, 1, TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.RUNNING);
+        AnnualLeaveActionProposal proposal = leaveProposal();
+        HitlWaitMarker wait = wait(BusinessActionType.ANNUAL_LEAVE_REQUEST, "a");
+        ActionException rejection = deterministicRejection();
+
+        when(taskRuntimeService.findByTaskId(TASK_ID)).thenReturn(Optional.of(current));
+        when(taskRuntimeService.startNextRunnable("group-1"))
+                .thenReturn(Optional.empty());
+        when(taskRuntimeService.markTerminal(TASK_ID, TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, TASK_ID))
+                .thenReturn("t1-thread");
+        when(actionService.createHitlPending(
+                proposal, "trace", "admin", identity, CONVERSATION_ID,
+                wait.executionId(), wait.waitId()))
+                .thenThrow(rejection);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("trace")))
+                .thenReturn(new PythonAgentResponse("已拒绝", "action", true,
+                        "business_action", "", List.of(), true, "trace", null, List.of(), null));
+
+        TaskRuntimeRegistrationRejectionException exception = assertThrows(
+                TaskRuntimeRegistrationRejectionException.class,
+                () -> coordinator(memoryService).registerWait(proposal, wait, "trace", "admin",
+                        identity, CONVERSATION_ID, TASK_ID));
+
+        assertSame(rejection, exception.rejection());
+        assertNull(exception.successorPendingAction());
+        verify(taskRuntimeService).markTerminal(TASK_ID, TaskExecutionStatus.FAILED);
+        verify(taskRuntimeService, never()).requeueAfterLaunchFailure(anyString());
+    }
+
+    @Test
+    void transientSuccessorLaunchFailureRemainsRetryable() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = task(TASK_ID, 1, TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.RUNNING);
+        TaskExecution successor = task("task-2", 2, TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.RUNNING);
+        AnnualLeaveActionProposal proposal = leaveProposal();
+        HitlWaitMarker wait = wait(BusinessActionType.ANNUAL_LEAVE_REQUEST, "a");
+        ActionException rejection = deterministicRejection();
+
+        when(taskRuntimeService.findByTaskId(TASK_ID)).thenReturn(Optional.of(current));
+        when(taskRuntimeService.startNextRunnable("group-1"))
+                .thenReturn(Optional.of(successor));
+        when(taskRuntimeService.markTerminal(TASK_ID, TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, TASK_ID))
+                .thenReturn("t1-thread");
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn("t2-thread");
+        when(actionService.createHitlPending(
+                proposal, "trace", "admin", identity, CONVERSATION_ID,
+                wait.executionId(), wait.waitId()))
+                .thenThrow(rejection);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("trace")))
+                .thenAnswer(invocation -> "/agent/langgraph/chat".equals(invocation.getArgument(0))
+                        ? throwRuntime("python unavailable")
+                        : new PythonAgentResponse("已拒绝", "action", true,
+                        "business_action", "", List.of(), true, "trace", null, List.of(), null));
+
+        TaskRuntimeRegistrationRejectionException exception = assertThrows(
+                TaskRuntimeRegistrationRejectionException.class,
+                () -> coordinator(memoryService).registerWait(proposal, wait, "trace", "admin",
+                        identity, CONVERSATION_ID, TASK_ID));
+
+        assertSame(rejection, exception.rejection());
+        assertNull(exception.successorPendingAction());
+        verify(taskRuntimeService).requeueAfterLaunchFailure("task-2");
+        verify(taskRuntimeService, never()).markTerminal("task-2", TaskExecutionStatus.FAILED);
+    }
+
+    @Test
+    void nestedDeterministicSuccessorRejectionDoesNotRequeueTerminalSuccessor() {
+        VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
+                "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        TaskExecution current = task(TASK_ID, 1, TaskType.LEAVE_REQUEST,
+                TaskExecutionStatus.RUNNING);
+        TaskExecution successor = task("task-2", 2, TaskType.EXPENSE_CLAIM,
+                TaskExecutionStatus.RUNNING);
+        AnnualLeaveActionProposal leaveProposal = leaveProposal();
+        HitlWaitMarker leaveWait = wait(BusinessActionType.ANNUAL_LEAVE_REQUEST, "a");
+        BusinessActionProposal expenseProposal = mock(BusinessActionProposal.class);
+        when(expenseProposal.actionType()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        HitlWaitMarker expenseWait = wait(BusinessActionType.EXPENSE_CLAIM, "c");
+        ActionException t1Rejection = deterministicRejection();
+        ActionException t2Rejection = new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "EXPENSE_AMOUNT_INVALID", "费用明细金额无效。", null, null);
+
+        when(taskRuntimeService.findByTaskId(TASK_ID)).thenReturn(Optional.of(current));
+        when(taskRuntimeService.findByTaskId("task-2")).thenReturn(Optional.of(successor));
+        when(taskRuntimeService.startNextRunnable("group-1"))
+                .thenReturn(Optional.of(successor), Optional.empty());
+        when(taskRuntimeService.markTerminal(TASK_ID, TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+        when(taskRuntimeService.markTerminal("task-2", TaskExecutionStatus.FAILED))
+                .thenReturn(true);
+        when(taskRuntimeService.matchesTaskType(successor, TaskType.EXPENSE_CLAIM))
+                .thenReturn(true);
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, TASK_ID))
+                .thenReturn("t1-thread");
+        when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
+                .thenReturn("t2-thread");
+        when(actionService.createHitlPending(
+                leaveProposal, "trace", "admin", identity, CONVERSATION_ID,
+                leaveWait.executionId(), leaveWait.waitId()))
+                .thenThrow(t1Rejection);
+        when(actionService.createHitlPending(
+                expenseProposal, "trace", "admin", identity, CONVERSATION_ID,
+                expenseWait.executionId(), expenseWait.waitId()))
+                .thenThrow(t2Rejection);
+        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
+        when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), eq("trace")))
+                .thenReturn(new PythonAgentResponse("已拒绝", "action", true,
+                        "business_action", "", List.of(), true, "trace", expenseProposal,
+                        List.of(), null, expenseWait, null));
+
+        TaskRuntimeRegistrationRejectionException exception = assertThrows(
+                TaskRuntimeRegistrationRejectionException.class,
+                () -> coordinator(memoryService).registerWait(leaveProposal, leaveWait,
+                        "trace", "admin", identity, CONVERSATION_ID, TASK_ID));
+
+        assertSame(t1Rejection, exception.rejection());
+        assertNull(exception.successorPendingAction());
+        verify(taskRuntimeService).markTerminal(TASK_ID, TaskExecutionStatus.FAILED);
+        verify(taskRuntimeService).markTerminal("task-2", TaskExecutionStatus.FAILED);
+        verify(taskRuntimeService, never()).requeueAfterLaunchFailure("task-2");
+    }
+
+    @Test
     void nextTaskPersistsMemoryOnlyAfterWaitingUserTransition() {
         VerifiedIdentity identity = new VerifiedIdentity(USER_ID, "user", EMPLOYEE_ID,
                 "用户", AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
@@ -250,5 +469,44 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         order.verify(taskRuntimeService).markWaitingClarification("task-2");
         order.verify(memoryService).upsertActiveForNextTask(USER_ID, CONVERSATION_ID,
                 "EXPENSE_CLAIM", java.util.Map.of("waiting_for", "invoice"), "等待补充");
+    }
+
+    private BusinessActionHitlCoordinator coordinator(AiTaskMemoryService memoryService) {
+        return new BusinessActionHitlCoordinator(
+                actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, null,
+                taskRuntimeService, memoryService);
+    }
+
+    private static TaskExecution task(String taskId, int sequenceNo, TaskType taskType,
+                                      TaskExecutionStatus status) {
+        return new TaskExecution("group-1", taskId, USER_ID, CONVERSATION_ID, sequenceNo,
+                taskType, taskType.name(), null, status, null,
+                Instant.now(), Instant.now(), null);
+    }
+
+    private static AnnualLeaveActionProposal leaveProposal() {
+        return new AnnualLeaveActionProposal(BusinessActionType.ANNUAL_LEAVE_REQUEST,
+                LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 1), "私事",
+                com.fantuan.copilot.model.action.HalfDay.NONE);
+    }
+
+    private static HitlWaitMarker wait(BusinessActionType actionType, String suffix) {
+        return new HitlWaitMarker(1, "BUSINESS_ACTION_CONFIRMATION",
+                "wait_" + suffix.repeat(64), "ex_" + suffix.repeat(32), actionType);
+    }
+
+    private static PendingActionView pendingView(String actionId, BusinessActionType actionType) {
+        return new PendingActionView(actionId, actionType, ActionStatus.PENDING_CONFIRMATION,
+                actionType.name(), null, "nonce", Instant.now(), true);
+    }
+
+    private static ActionException deterministicRejection() {
+        return new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "BUSINESS_RULE_VIOLATION", "日期范围与已提交的模拟申请冲突。", null, null);
+    }
+
+    private static PythonAgentResponse throwRuntime(String message) {
+        throw new TaskRuntimeException(message);
     }
 }

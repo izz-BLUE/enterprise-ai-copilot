@@ -183,16 +183,21 @@ public class BusinessActionHitlCoordinator {
                 // so a retry can perform Memory -> Graph in that order.
                 actionService.abandonMemoryAfterHitlRejection(
                         identity, conversationId);
+                PendingActionView successorPendingAction = null;
                 if (taskId != null && taskRuntimeService != null) {
                     taskRuntimeService.markTerminal(taskId, TaskExecutionStatus.FAILED);
                     tryResumeRejected(wait, identity, conversationId,
                             presentedToken, originTraceId, taskId);
-                    startNextTask(taskRuntimeService.findByTaskId(taskId).orElse(null),
+                    successorPendingAction = startNextTask(
+                            taskRuntimeService.findByTaskId(taskId).orElse(null),
                             identity, presentedToken, originTraceId);
                 } else {
                     tryResumeRejected(wait, identity, conversationId,
                             presentedToken, originTraceId);
+                    throw exception;
                 }
+                throw new TaskRuntimeRegistrationRejectionException(
+                        exception, successorPendingAction);
             }
             throw exception;
         }
@@ -540,6 +545,11 @@ public class BusinessActionHitlCoordinator {
                 memoryCoordinator.abandon(identity.userId(), task.conversationId(), traceId);
             }
             return null;
+        } catch (TaskRuntimeRegistrationRejectionException exception) {
+            // The successor has already been deterministically terminalized;
+            // requeueing it would turn a business rejection into a launch
+            // failure and could cause a duplicate proposal on the next Chat.
+            return exception.successorPendingAction();
         } catch (RuntimeException exception) {
             // The prior Java business fact is already authoritative.  A
             // launch failure leaves this task PENDING so the next guarded Chat
