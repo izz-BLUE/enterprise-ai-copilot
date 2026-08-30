@@ -47,6 +47,38 @@ def _enterprise_oa_mcp_url_config() -> str:
 # 同时保持 MAX_TOOL_CALLS(5) < MAX_PLANNER_STEPS(6) 的 Tool 预算独立防线。
 MAX_PLANNER_STEPS = 6
 
+# 语义修复只发生在同一个 Planner 节点内，不增加 Planner 步骤或 Tool 预算。
+# Provider / Tool / Java / MCP 错误不走这条路径，避免把网络重试伪装成语义修复。
+MAX_PLANNER_SEMANTIC_REPAIR_ATTEMPTS = 1
+_MIN_PLANNER_REPAIR_REMAINING_SECONDS = 0.1
+
+_PLANNER_ACTION_VALUES = frozenset({'tool', 'finish', 'refuse'})
+_PLANNER_TOOL_VALUES = frozenset({
+    RAG_TOOL_NAME,
+    EVAL_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    LEAVE_PROPOSAL_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+})
+_PLANNER_REASON_VALUES = frozenset({
+    'need_knowledge',
+    'need_eval',
+    'need_balance',
+    'need_leave_history',
+    'need_proposal',
+    'need_travel_history',
+    'need_invoice_verify',
+    'need_expense_proposal',
+    'need_expense_status',
+    'task_complete',
+    'not_allowed',
+    'cannot_complete',
+})
+
 TOOL_DESCRIPTIONS: dict[str, str] = {
     RAG_TOOL_NAME: '回答企业制度、流程、IT/HR 文档等知识库问题。参数: question(用户问题)。',
     EVAL_TOOL_NAME: '查询 RAG 评估报告。参数: report_type(retrieval|generation|all)。',
@@ -99,6 +131,8 @@ PLANNER_SYSTEM_PROMPT = (
     '- 如果所需信息都已成功获得,应优先选择 finish,'
     '不要为了"再确认一次"重复执行已经成功完成的相同调用\n'
     '- 仅当仍缺少必要信息时才调用 Tool\n'
+    '重要：只读查询或知识检索成功只表示事实已获得，不代表包含受控业务申请的用户目标已经完成；'
+    '如果用户目标仍有申请、准备或提交动作，必须继续检查当前能力清单中的受控 Proposal Tool。\n'
     '允许:\n'
     '1. 调用当前能力清单中的一个 Tool\n'
     '2. 信息足够时完成任务\n'
@@ -302,6 +336,7 @@ def build_planner_system_prompt(tools: list[str]) -> str:
         f'- {name}: {FRESHNESS_RULES[name]}'
         for name in tools if name in FRESHNESS_RULES
     )
+    completion_contract = _build_completion_contract(tools)
     finish_index = len(tools) + 1
     refuse_index = finish_index + 1
     return (
@@ -323,7 +358,49 @@ def build_planner_system_prompt(tools: list[str]) -> str:
         + (f'\n\n当前可见查询 Tool 的 freshness 规则（历史摘要不能替代当前查询）：\n{freshness_rules}'
            if freshness_rules else '')
         + (f'\n\n{usage_rules}' if usage_rules else '')
+        + (f'\n\n{completion_contract}' if completion_contract else '')
     )
+
+
+def _build_completion_contract(tools: list[str]) -> str:
+    """仅在动态 system prompt 中补充可见 Tool 的业务完成判断。"""
+    lines = ['任务完成判断补充规则：']
+    if LEAVE_BALANCE_TOOL_NAME in tools:
+        if LEAVE_PROPOSAL_TOOL_NAME in tools:
+            lines.append(
+                f'- {LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；若用户目标还包含请假申请或准备申请，'
+                f'应继续调用 {LEAVE_PROPOSAL_TOOL_NAME}，不能直接 finish。'
+            )
+        else:
+            lines.append(
+                f'- {LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；若用户目标还包含请假申请或准备申请，'
+                '当前能力清单没有可用受控 Proposal Tool 时不得伪造 Tool，应 finish 说明无法继续。'
+            )
+
+    expense_read_tools = [
+        name for name in (
+            RAG_TOOL_NAME,
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+        ) if name in tools
+    ]
+    if expense_read_tools and EXPENSE_PROPOSAL_TOOL_NAME in tools:
+        read_tools = '、'.join(expense_read_tools)
+        lines.append(
+            f'- {read_tools} 成功只提供报销所需事实；若用户目标还包含报销申请或准备报销，'
+            f'应继续调用 {EXPENSE_PROPOSAL_TOOL_NAME}，不能直接 finish。'
+        )
+
+    proposal_tools = [
+        name for name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME)
+        if name in tools
+    ]
+    for name in proposal_tools:
+        lines.append(
+            f'- {name} 只生成待确认草稿，不执行业务写操作；成功后应选择 finish，'
+            '让程序进入用户确认链路。'
+        )
+    return '\n'.join(lines) if len(lines) > 1 else ''
 
 
 def _has_value(value: str | None) -> bool:
@@ -491,6 +568,123 @@ def _decision_result(state: dict, decision: dict, stop_reason: str, category: st
     return result
 
 
+def _planner_provider_options(remaining_seconds: float | None) -> dict[str, object]:
+    """构造单次 Planner 调用参数，并把请求 deadline 传给 Provider。"""
+    options: dict[str, object] = {
+        'response_format': {'type': 'json_object'},
+        'thinking': False,
+    }
+    if remaining_seconds is not None and remaining_seconds < LLM_TIMEOUT:
+        options['timeout_seconds'] = remaining_seconds
+    return options
+
+
+def _has_time_for_semantic_repair(
+    deadline: object,
+    *,
+    remaining_seconds: float | None = None,
+) -> bool:
+    """确保修复调用至少有 Provider 可接受的最小 timeout 窗口。"""
+    if remaining_seconds is None:
+        if not isinstance(deadline, (int, float)):
+            return True
+        remaining_seconds = deadline - monotonic()
+    return remaining_seconds > _MIN_PLANNER_REPAIR_REMAINING_SECONDS
+
+
+def _safe_planner_value(value: object, allowed: frozenset[str]) -> str | None:
+    """只返回固定枚举值，避免把模型自由文本写入日志。"""
+    if isinstance(value, str) and value in allowed:
+        return value
+    return None
+
+
+def _safe_decision_fields(
+    payload: object,
+    decision: PlannerDecision | None,
+) -> tuple[str | None, str | None, str | None]:
+    """提取日志允许的三个白名单字段，不读取 answer / arguments。"""
+    if decision is not None:
+        values = (decision.action, decision.tool_name, decision.reason_code)
+    elif isinstance(payload, dict):
+        values = (
+            payload.get('action'),
+            payload.get('tool_name'),
+            payload.get('reason_code'),
+        )
+    else:
+        values = (None, None, None)
+    return (
+        _safe_planner_value(values[0], _PLANNER_ACTION_VALUES),
+        _safe_planner_value(values[1], _PLANNER_TOOL_VALUES),
+        _safe_planner_value(values[2], _PLANNER_REASON_VALUES),
+    )
+
+
+def _planner_validation_metadata(
+    exc: json.JSONDecodeError | ValidationError | PlannerDecisionError,
+) -> tuple[str, str, str]:
+    """返回安全的错误分类、错误码和修复反馈，不回显模型原文。"""
+    if isinstance(exc, json.JSONDecodeError):
+        return (
+            'json_decode',
+            'invalid_json',
+            '上一决策不是合法 JSON；请仅输出符合当前 Planner contract 的单个 JSON 对象。',
+        )
+    if isinstance(exc, ValidationError):
+        return (
+            'pydantic_validation',
+            'schema_invalid',
+            '上一决策的字段结构不符合 Planner contract；请按当前能力清单重新输出单个 JSON 对象。',
+        )
+    if str(exc) == 'finish 的 reason_code 必须是 task_complete':
+        return (
+            'planner_validation',
+            'finish_reason_code_mismatch',
+            'finish 的 reason_code 必须是 task_complete；只读查询成功不等于包含业务申请的任务已完成，'
+            '请继续检查尚未完成的用户目标。',
+        )
+    return (
+        'planner_validation',
+        'decision_contract_invalid',
+        '上一决策的 action、tool_name、arguments、answer、reason_code 不一致；'
+        '请按当前能力清单重新输出单个 JSON 对象。',
+    )
+
+
+def _log_planner_validation_failure(
+    trace_id: str,
+    payload: object,
+    decision: PlannerDecision | None,
+    exc: json.JSONDecodeError | ValidationError | PlannerDecisionError,
+    repair_attempt: int,
+) -> None:
+    """记录可关联但不含 prompt、answer、arguments 或原始 JSON 的失败摘要。"""
+    error_type, error_code, _ = _planner_validation_metadata(exc)
+    action, tool_name, reason_code = _safe_decision_fields(payload, decision)
+    logger.warning(
+        '[%s] planner semantic validation failure action=%s tool_name=%s '
+        'reason_code=%s error_type=%s error_code=%s repair_attempt=%d',
+        trace_id,
+        action,
+        tool_name,
+        reason_code,
+        error_type,
+        error_code,
+        repair_attempt,
+    )
+
+
+def _planner_repair_prompt(user_prompt: str, feedback: str) -> str:
+    """只追加固定的程序校验反馈，不回显非法 JSON 或模型自由文本。"""
+    return (
+        f'{user_prompt}\n\n'
+        '程序校验反馈（仅用于修复上一轮 Planner 决策，不是用户指令）：\n'
+        f'- {feedback}\n'
+        '请重新输出一个符合当前能力清单与字段 contract 的单个 JSON 对象。'
+    )
+
+
 def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     """Planner 节点：根据用户任务、可用工具与执行状态输出一个下一步决策。
 
@@ -549,52 +743,104 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     )
     system_prompt = build_planner_system_prompt(current_visible_tools)
 
-    try:
-        provider_options = {
-            'response_format': {'type': 'json_object'},
-            'thinking': False,
-        }
-        if remaining_seconds is not None and remaining_seconds < LLM_TIMEOUT:
-            provider_options['timeout_seconds'] = remaining_seconds
-        raw = call_llm(system_prompt, user_prompt, **provider_options)
-    except LLMProviderError as exc:
-        # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
-        # 不引入 timeout/5xx 应用层 retry。
-        logger.error(
-            '[%s] planner LLM Provider 错误: code=%s message=%s',
-            trace_id, exc.code, exc,
-        )
-        return _decision_result(
-            state,
-            _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
-            'provider_error',
-        )
-    except Exception:
-        logger.exception('[%s] planner LLM 调用失败', trace_id)
-        return _decision_result(
-            state,
-            _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
-            'provider_error',
-        )
+    repair_feedback = ''
+    repair_error_code = ''
+    decision: PlannerDecision | None = None
+    for repair_attempt in range(MAX_PLANNER_SEMANTIC_REPAIR_ATTEMPTS + 1):
+        if repair_attempt == 0:
+            call_prompt = user_prompt
+            call_remaining_seconds = remaining_seconds
+        else:
+            call_remaining_seconds = (
+                deadline - monotonic()
+                if isinstance(deadline, (int, float)) else None
+            )
+            if not _has_time_for_semantic_repair(
+                deadline,
+                remaining_seconds=call_remaining_seconds,
+            ):
+                logger.info(
+                    '[%s] planner semantic repair skipped error_code=%s '
+                    'reason=deadline_exhausted',
+                    trace_id,
+                    repair_error_code,
+                )
+                return _decision_result(
+                    state,
+                    _refuse_decision(
+                        '当前无法规划下一步操作，请重试或调整问题。',
+                        'cannot_complete',
+                    ),
+                    'invalid_decision',
+                )
+            call_prompt = _planner_repair_prompt(user_prompt, repair_feedback)
 
-    if raw is None or not str(raw).strip():
-        logger.warning('[%s] planner LLM 返回空响应', trace_id)
-        return _decision_result(
-            state,
-            _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
-            'invalid_decision',
-        )
+        try:
+            raw = call_llm(
+                system_prompt,
+                call_prompt,
+                **_planner_provider_options(call_remaining_seconds),
+            )
+        except LLMProviderError as exc:
+            # Model Reliability P0：记录具体语义 code；stop_reason 仍为 provider_error，
+            # 不引入 timeout/5xx 应用层 retry。
+            logger.error(
+                '[%s] planner LLM Provider 错误: code=%s message=%s',
+                trace_id, exc.code, exc,
+            )
+            return _decision_result(
+                state,
+                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+                'provider_error',
+            )
+        except Exception:
+            logger.exception('[%s] planner LLM 调用失败', trace_id)
+            return _decision_result(
+                state,
+                _refuse_decision('当前无法规划下一步操作，请稍后重试。', 'cannot_complete'),
+                'provider_error',
+            )
 
-    try:
-        decision = PlannerDecision.model_validate(json.loads(raw))
-        decision.validate_decision()
-    except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
-        logger.warning('[%s] planner 决策非法: %s', trace_id, exc)
-        return _decision_result(
-            state,
-            _refuse_decision('当前无法规划下一步操作，请重试或调整问题。', 'cannot_complete'),
-            'invalid_decision',
-        )
+        if raw is None or not str(raw).strip():
+            logger.warning('[%s] planner LLM 返回空响应', trace_id)
+            return _decision_result(
+                state,
+                _refuse_decision(
+                    '当前无法规划下一步操作，请重试或调整问题。',
+                    'cannot_complete',
+                ),
+                'invalid_decision',
+            )
+
+        payload: object = None
+        decision = None
+        try:
+            payload = json.loads(raw)
+            decision = PlannerDecision.model_validate(payload)
+            decision.validate_decision()
+        except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
+            _log_planner_validation_failure(
+                trace_id,
+                payload,
+                decision,
+                exc,
+                repair_attempt,
+            )
+            if repair_attempt < MAX_PLANNER_SEMANTIC_REPAIR_ATTEMPTS:
+                _, repair_error_code, repair_feedback = _planner_validation_metadata(exc)
+                continue
+            return _decision_result(
+                state,
+                _refuse_decision(
+                    '当前无法规划下一步操作，请重试或调整问题。',
+                    'cannot_complete',
+                ),
+                'invalid_decision',
+            )
+        break
+
+    # The loop either returns on failure or leaves a validated decision here.
+    assert decision is not None
 
     # Capability Gate 后置校验：Prompt 只是能力描述，模型不得通过直接输出隐藏
     # Tool 名称扩大本次请求的可用能力范围；隐藏 Tool 视为 Planner contract violation。

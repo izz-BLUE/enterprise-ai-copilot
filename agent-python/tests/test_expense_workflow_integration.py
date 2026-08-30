@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -187,6 +187,57 @@ class TestPlannerSelection:
         assert result["category"] == "business_action"
         assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
         assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
+
+    def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self):
+        """只读事实成功后错误 finish，语义修复必须继续报销 Proposal。"""
+        invalid_finish = json.dumps({
+            "action": "finish",
+            "answer": "INVALID_FINISH_SHOULD_NOT_EXECUTE",
+            "reason_code": "need_knowledge",
+        }, ensure_ascii=False)
+        decisions = [
+            _tool("rag_answer_tool", {"question": "出差报销政策"}, "need_knowledge"),
+            invalid_finish,
+            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+            _finish("已生成报销申请草稿，请确认后提交。"),
+        ]
+        expense_payload = json.dumps({
+            "success": True,
+            "kind": "proposal",
+            "action_proposal": {
+                "action_type": "EXPENSE_CLAIM",
+                "trip_id": "TRIP-20260818-001",
+                "claimed_amount": "1600.00",
+                "reimbursable_amount": "1500.00",
+                "cost_center": "COST-DEFAULT",
+                "reason": "客户拜访",
+                "invoice_ids": ["INV-001"],
+                "expense_items": [],
+                "stay_nights": 2,
+            },
+            "missing_fields": [],
+        }, ensure_ascii=False)
+        rag = Mock()
+        rag.invoke.return_value = RAG_ANSWER
+        proposal = Mock()
+        proposal.invoke.return_value = expense_payload
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions) as llm, \
+             patch("app.agents.tool_executor_node.rag_answer_tool", rag), \
+             patch("app.agents.tool_executor_node.expense_proposal_tool", proposal):
+            result = run_langgraph_agent(
+                "根据最近一次已批准出差和发票，帮我准备差旅报销申请",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+            )
+
+        assert llm.call_count == 4
+        assert rag.invoke.call_count == 1
+        assert proposal.invoke.call_count == 1
+        assert result["stop_reason"] == "task_complete"
+        assert result["route"] == "action"
+        assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
 
 
 class TestStressScenarios:

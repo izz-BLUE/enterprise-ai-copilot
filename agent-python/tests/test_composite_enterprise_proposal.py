@@ -428,6 +428,7 @@ class TestActionProposalFinalization:
             [
                 _planner_payload('proposal'),
                 'not a json',
+                'not a json',
             ],
             _proposal_payload('2026-09-01', '2026-09-01'),
         )
