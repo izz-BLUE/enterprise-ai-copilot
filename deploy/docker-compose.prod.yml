@@ -43,6 +43,29 @@ services:
     networks:
       - ai-copilot-net
 
+  enterprise-oa-mcp:
+    image: "${ENTERPRISE_OA_MCP_IMAGE:?ENTERPRISE_OA_MCP_IMAGE is required in production}"
+    container_name: ai-copilot-enterprise-oa-mcp
+    restart: unless-stopped
+    environment:
+      ENTERPRISE_OA_MCP_HOST: 0.0.0.0
+      ENTERPRISE_OA_MCP_PORT: 8100
+      ENTERPRISE_OA_MCP_PATH: /mcp
+    expose:
+      - "8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 8100), 2); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - ai-copilot-net
+
   python-agent:
     image: "${PYTHON_IMAGE:?PYTHON_IMAGE is required in production}"
     container_name: ai-copilot-python
@@ -68,6 +91,8 @@ services:
       PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-enterprise-ai-copilot}"
       PHOENIX_SAMPLE_RATE: "${PHOENIX_SAMPLE_RATE:-1.0}"
       PHOENIX_CAPTURE_CONTENT: "${PHOENIX_CAPTURE_CONTENT:-false}"
+      MEMORY_WRITE_MODE: "${MEMORY_WRITE_MODE:-DISABLED}"
+      ENTERPRISE_OA_MCP_URL: "${ENTERPRISE_OA_MCP_URL:?ENTERPRISE_OA_MCP_URL is required in production}"
     volumes:
       - /opt/enterprise-ai-copilot/models/bge-small-zh-v1.5-onnx:/app/models/embedding/bge-small-zh-v1.5-onnx:ro
       - /opt/enterprise-ai-copilot/data/processed:/data/processed:ro
@@ -76,6 +101,8 @@ services:
       - "8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      enterprise-oa-mcp:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/agent/ready')"]

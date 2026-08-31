@@ -40,8 +40,8 @@
 
 生产发布应传入正式版本号、完整 Commit SHA 和 UTC 构建时间。Java 可通过
 `/api/version` 查询，Python 内部可通过 `/agent/version` 查询；两个接口均不返回 Secret。
-生产 `.env` 应设置 `JAVA_IMAGE`、`PYTHON_IMAGE` 和 `MOCK_OA_IMAGE`，值使用版本号与 Git 短 SHA
-组成的不可变标签。
+生产 `.env` 应设置 `JAVA_IMAGE`、`PYTHON_IMAGE`、`MOCK_OA_IMAGE` 和
+`ENTERPRISE_OA_MCP_IMAGE`，值使用版本号与 Git 短 SHA 组成的不可变标签。
 
 ### 镜像
 
@@ -50,6 +50,7 @@
 | `JAVA_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
 | `PYTHON_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
 | `MOCK_OA_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
+| `ENTERPRISE_OA_MCP_IMAGE` | 必填；由 `agent-python/enterprise_oa_mcp_server/Dockerfile` 构建，推荐 `registry/repository:<git-sha>` |
 
 ## 目录结构
 
@@ -107,7 +108,7 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | 维度 | main 代码能力（已实装） | 仓库部署默认（`deploy/docker-compose.prod.yml` + `agent-python/.env.example`） | 公网实际状态 |
 |------|------------------------|------------------------------------------------------------------------|--------------|
 | Python Agent 状态图 | 生产入口固定为 `safety → planner ⇄ tool_executor`（Planner-first）；legacy Router-first 仅测试/离线兼容 | Compose 不再注入图选择开关，服务启动后固定走 Planner-first | 仓库无证据 |
-| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；公开 `demo` 由 Java 固定为 `allow_business_actions=false`；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；compose 默认未注入 Java read 与 Enterprise OA MCP 配置，因此对应 Tool 不暴露给 Planner。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
+| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；公开 `demo` 由 Java 固定为 `allow_business_actions=false`；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；Compose 注入 Enterprise OA MCP 内部 URL，但 Java read 配置仍默认未注入，因此对应 Java read Tool 不暴露给 Planner。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
 | `leave_balance_tool` / `leave_request_tool`（Python → Java 只读） | 通过 `JavaReadClient` 调 `/api/internal/leave/*`，依赖受信任 `employee_id`、`JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` | compose **未注入** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` / `JAVA_TIMEOUT_SECONDS` ⇒ 两个 Tool 不暴露给 Planner；若绕过 Planner 直接调用，下游仍返回 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` | 仓库无证据 |
 | `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认开启 ⇒ 请求具备 `allow_business_actions=true` 与受信任 `employee_id` 时可见；公开 `demo` 永远不可见；即使 Planner-first 启用，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
 | `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
@@ -115,7 +116,7 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | LangGraph PostgreSQL 执行快照 | Java 用可信 `userId + conversationId` 计算 `X-Agent-Thread-Id`；Python 启动时固定创建 Pool / `PostgresSaver` / 持久化图，节点以 `sync` 落盘 | Compose 以 `:?` 强制运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`；Python 等待 PostgreSQL health 后启动 | 仓库无证据 |
 | Phoenix/OpenTelemetry | Python 两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；BatchSpanProcessor、采样、默认正文脱敏、fail-open | `PHOENIX_TRACING=false` 且 Phoenix 服务位于可选 `observability` profile，不随默认 Compose 启动 | 仓库无证据 |
 
-**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署固定使用 Planner-first 与 PostgreSQL 执行快照；后者要求运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`，连接、`setup()` 或图编译失败会阻止 Python 启动，绝不退回无快照模式。受控业务动作、只读企业 Tool 与 Scoped Conversation Memory 写入仍默认关闭。对外宣称的“Planner-first + 受控业务动作公网演示”需要服务器 `.env` 显式打开 `BUSINESS_ACTIONS_ENABLED=true`；若演示包含只读企业 Tool，还需额外设置 `JAVA_INTERNAL_TOKEN` 与 `JAVA_BASE_URL`。Memory 真实写入还需显式设置 `MEMORY_WRITE_MODE=ENABLED`，但不依赖 Java URL、内部 Token 或 write scope；Java 在当前认证请求中落库。**且这些事实仓库不掌握**。
+**默认安全启动口径**：本仓库的 `deploy/docker-compose.prod.yml` 默认部署固定使用 Planner-first、PostgreSQL 执行快照和内部 Enterprise OA MCP fixture；Checkpoint 要求运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`，连接、`setup()` 或图编译失败会阻止 Python 启动，绝不退回无快照模式。受控业务动作、Scoped Conversation Memory 写入仍默认关闭，Enterprise OA MCP 端点则必须显式提供且通过 Compose 内部服务复用。公网完整 Demo 的服务器 `.env` 唯一行为组合是 `DEMO_AUTH_ENABLED=true`、`BUSINESS_ACTIONS_ENABLED=true`、`BUSINESS_ACTIONS_REQUIRE_ADMIN=false`、`MOCK_OA_ENABLED=true`、`MEMORY_WRITE_MODE=ENABLED`；如果改用正式外部 OA，只能将 `ENTERPRISE_OA_MCP_URL` 替换为 Python 容器可达的非本机地址。Memory 真实写入不依赖 Java URL、内部 Token 或 write scope；Java 在当前认证请求中落库。**公网实际事实仓库不掌握**。
 
 ### 域名和证书
 
@@ -181,18 +182,21 @@ graph TD
     subgraph Net2 ["ai-copilot-net (bridge)"]
         J
         P[Python expose 8000]
+        OA[Enterprise OA MCP expose 8100]
         PHX[Phoenix optional<br/>6006 / 4317]
     end
 
     U -->|HTTPS| NG
     NG -->|/api| J
     J -->|HTTP| P
+    P -->|Streamable HTTP| OA
     P -.->|OTLP gRPC, opt-in| PHX
 ```
 
 - Nginx 位于 `deploy_eat-what-net`（与 eat-what/jobfit 共享）
 - Java 同时连接 `deploy_eat-what-net` 和 `ai-copilot-net`
 - Python 只连接 `ai-copilot-net`
+- Enterprise OA MCP 只连接 `ai-copilot-net`，仅由 Python 访问
 - Phoenix 只在 `observability` profile 下启动；控制台端口绑定宿主机 localhost，Collector 只供 Docker 内网访问
 - Nginx 无法直接访问 Python
 
@@ -218,10 +222,12 @@ graph LR
     H[Host localhost] --> J[Java Backend<br/>127.0.0.1:8080]
     J --> N[Docker bridge<br/>ai-copilot-net]
     N --> P[Python Agent<br/>expose 8000]
+    N --> OA[Enterprise OA MCP fixture<br/>expose 8100]
     N --> PG[PostgreSQL 16<br/>expose 5432]
     N -. optional .-> PHX[Phoenix<br/>localhost UI 6006 / OTLP 4317]
-    P --> M[models/:ro]
+    P --> MD[models/:ro]
     P --> D[data/processed/:ro]
+    P --> OA
 ```
 
 ### 资源限制
@@ -229,6 +235,7 @@ graph LR
 | 服务 | 内存限制 | 说明 |
 |------|----------|------|
 | Python | 512 MiB | Uvicorn 单 Worker |
+| Enterprise OA MCP | 256 MiB | Streamable HTTP；内存 fixture |
 | Java | 512 MiB | JVM -Xms64m -Xmx256m |
 | PostgreSQL | Compose 管理 | 独立命名 Volume，Flyway 自动迁移 |
 | Phoenix | 未设置固定上限 | 可选 profile；SQLite 独立 Volume，启用前需按目标主机压测并设置资源预算 |
@@ -238,6 +245,7 @@ graph LR
 | 服务 | 端口 | 绑定 |
 |------|------|------|
 | Python | 8000 | 仅 Docker 内网（expose） |
+| Enterprise OA MCP | 8100 | 仅 Docker 内网（expose） |
 | Java | 8080 | 127.0.0.1（仅 localhost） |
 | PostgreSQL | 5432 | 仅 Docker 内网（expose，不映射宿主机） |
 | Phoenix UI / OTLP HTTP | 6006 | 仅 `127.0.0.1`，不得直接暴露公网 |
@@ -283,7 +291,9 @@ graph LR
 | JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时只读企业 Tool 不可用 |
 | JAVA_BASE_URL | compose 默认未注入；缺值时只读企业 Tool 返回 `LEAVE_READ_DISABLED` |
 | JAVA_TIMEOUT_SECONDS | compose 默认未注入；Python 端 `.env.example` 默认 5 |
-| MEMORY_WRITE_MODE | compose 默认未注入；Python 默认 `DISABLED`；`AUDIT_ONLY` 仅审计，`ENABLED` 随 Agent 响应返回提案 |
+| MEMORY_WRITE_MODE | compose `${MEMORY_WRITE_MODE:-DISABLED}`；默认 `DISABLED`；`AUDIT_ONLY` 仅审计，`ENABLED` 随 Agent 响应返回提案 |
+| ENTERPRISE_OA_MCP_IMAGE | Enterprise OA MCP fixture 镜像；必填，推荐 `registry/repository:<git-sha>` |
+| ENTERPRISE_OA_MCP_URL | `:?` 必填；默认内部服务地址 `http://enterprise-oa-mcp:8100/mcp`，不得使用 localhost、127.0.0.1 或 `host.docker.internal` |
 | PHOENIX_TRACING | compose 默认 `${:-false}`；关闭时不加载 Phoenix 插桩组件 |
 | PHOENIX_COLLECTOR_ENDPOINT | compose 固定 `http://phoenix:4317`；仅启用 tracing 时使用 |
 | PHOENIX_PROJECT_NAME | `${PHOENIX_PROJECT_NAME:-enterprise-ai-copilot}` |
@@ -304,13 +314,13 @@ graph LR
 | EXTERNAL_APPROVAL_RESUME_RETRY_INTERVAL_MS | external resume 即时失败后的重试间隔，默认 60000 ms |
 | EXTERNAL_APPROVAL_RESUME_BATCH_SIZE | 每轮 external resume 候选上限，默认 20，代码限制为 1–100 |
 
-生产 Compose 的 Mock OA 服务只在 `ai-copilot-net` 内以 `expose: 8010` 提供服务，不配置宿主机 `ports`；Java 使用 `http://mock-oa:8010` 访问。生产环境要求通过 Secret 注入 `MOCK_OA_WEBHOOK_SECRET`，而 `MOCK_OA_ENABLED` 仍默认关闭。Local Compose 保留 `127.0.0.1:8010:8010`，仅用于本地测试和调试。
+生产 Compose 的 Enterprise OA MCP 服务只在 `ai-copilot-net` 内以 `expose: 8100` 提供服务，不配置宿主机 `ports`；Python 使用 `http://enterprise-oa-mcp:8100/mcp` 访问，Nginx、浏览器和 Java 均不直接访问。该服务复用仓库内 `agent-python/enterprise_oa_mcp_server` 的只读 fixture 和 Streamable HTTP 入口，不引入数据库或写操作。Mock OA 服务同样只在 `ai-copilot-net` 内以 `expose: 8010` 提供服务，不配置宿主机 `ports`；Java 使用 `http://mock-oa:8010` 访问。生产环境要求通过 Secret 注入 `MOCK_OA_WEBHOOK_SECRET`，而 `MOCK_OA_ENABLED` 仍默认关闭。Local Compose 保留 `127.0.0.1:8010:8010`，仅用于本地测试和调试。
 
 PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
-本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。其中 public password 是刻意公开的体验凭据，其他三个密码只存在服务端配置；Java 服务端按可信身份计算 `allow_business_actions`，`demo` 永远为 `false`，正常员工按既有员工权限允许；`BUSINESS_ACTIONS_REQUIRE_ADMIN` 默认 `false`，只有显式设为 `true` 才额外要求 server-only `ADMIN_TOKEN`，浏览器不发送该 Token。前端只允许通过 `frontend/.env.example` 注入公开 demo 凭据，`VITE_*` 会进入浏览器 bundle。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
+本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。公网完整 Demo 还必须使用 `BUSINESS_ACTIONS_REQUIRE_ADMIN=false`、`MOCK_OA_ENABLED=true`、`MEMORY_WRITE_MODE=ENABLED`，并将 `ENTERPRISE_OA_MCP_URL` 指向 Python 容器可达的内部或正式外部服务。对当前 Compose，内部值是 `http://enterprise-oa-mcp:8100/mcp`。其中 public password 是刻意公开的体验凭据，其他三个密码只存在服务端配置；Java 服务端按可信身份计算 `allow_business_actions`，`demo` 永远为 `false`，正常员工按既有员工权限允许；`BUSINESS_ACTIONS_REQUIRE_ADMIN` 默认 `false`，只有显式设为 `true` 才额外要求 server-only `ADMIN_TOKEN`，浏览器不发送该 Token。前端只允许通过 `frontend/.env.example` 注入公开 demo 凭据，`VITE_*` 会进入浏览器 bundle。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
 
-Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；启用后由 Java 当前认证请求持久化响应内提案。
+Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Enterprise OA MCP 的 `travel_record_tool` / `invoice_verify_tool` 由 Compose 内部服务提供，Python 只接受显式、容器可达的 `ENTERPRISE_OA_MCP_URL`。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；公网完整 Demo 必须设为 `ENABLED`，由 Java 当前认证请求持久化响应内提案。
 
 ### 按需启动 Phoenix
 
