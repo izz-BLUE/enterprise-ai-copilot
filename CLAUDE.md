@@ -56,6 +56,10 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d
   /api/agent/actions/{id}/confirm → Business Action 确认
 ```
 
+### D2 Mock OA 管理边界
+
+管理员审批台只调用 Java `/api/admin/mock-oa/**`，由已验证 JWT 的 `role=ADMIN` 授权；Java 服务端调用内网 Mock OA，浏览器不接触 Mock OA secret、`ADMIN_TOKEN` 或 `X-Admin-Token`。Mock OA 终态与 Java Expense 终态保持独立，直到 webhook 或 reconciliation 成功收口。
+
 ### Phoenix 可观测性
 
 - `PHOENIX_TRACING=false` 为默认值；Phoenix 是可选旁路，不改变 Java → Python API 契约。

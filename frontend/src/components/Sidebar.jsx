@@ -19,8 +19,18 @@ const MODES = [
   },
 ]
 
-export default function Sidebar({ mode, onModeChange, loading, userRole, onAdminLogsOpen, showAdminLogs }) {
+export default function Sidebar({
+  mode,
+  onModeChange,
+  loading,
+  userRole,
+  onAdminLogsOpen,
+  showAdminLogs,
+  onMockOaOpen,
+  showMockOa,
+}) {
   const isAdmin = userRole === 'ADMIN'
+  const showAdminView = showAdminLogs || showMockOa
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -40,9 +50,9 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
             key={m.key}
             type="button"
             aria-label={`切换到${m.label}`}
-            aria-pressed={mode === m.key && !showAdminLogs}
+            aria-pressed={mode === m.key && !showAdminView}
             data-mode={m.key}
-            className={`nav-item ${mode === m.key && !showAdminLogs ? 'active' : ''}`}
+            className={`nav-item ${mode === m.key && !showAdminView ? 'active' : ''}`}
             onClick={() => onModeChange(m.key)}
             disabled={loading}
           >
@@ -51,7 +61,7 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
               <span className="nav-label">{m.label}</span>
               <span className="nav-desc">{m.desc}</span>
             </div>
-            {mode === m.key && !showAdminLogs && <span className="nav-active-dot" />}
+            {mode === m.key && !showAdminView && <span className="nav-active-dot" />}
           </button>
         ))}
 
@@ -73,6 +83,22 @@ export default function Sidebar({ mode, onModeChange, loading, userRole, onAdmin
                 <span className="nav-desc">管理员运行日志查询</span>
               </div>
               {showAdminLogs && <span className="nav-active-dot" />}
+            </button>
+            <button
+              type="button"
+              aria-label="模拟 OA 审批"
+              aria-pressed={showMockOa}
+              data-mode="mock-oa"
+              className={`nav-item ${showMockOa ? 'active' : ''}`}
+              onClick={() => onMockOaOpen()}
+              disabled={loading}
+            >
+              <span className="nav-icon"><UiIcon name="calendar-check" size={19} /></span>
+              <div className="nav-content">
+                <span className="nav-label">模拟 OA 审批</span>
+                <span className="nav-desc">处理外部报销审批</span>
+              </div>
+              {showMockOa && <span className="nav-active-dot" />}
             </button>
           </>
         )}

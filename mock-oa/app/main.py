@@ -19,13 +19,15 @@ from typing import Annotated
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
 WEBHOOK_EVENT_TYPE = "EXPENSE_APPROVAL_CHANGED"
 TERMINAL_STATUSES = frozenset({"APPROVED", "REJECTED"})
+APPROVAL_STATUSES = frozenset({"PENDING", *TERMINAL_STATUSES})
+MAX_ADMIN_LIST_LIMIT = 100
 
 Money = Annotated[Decimal, Field(strict=False, ge=Decimal(0), decimal_places=2)]
 
@@ -50,6 +52,25 @@ class ExpenseApprovalSubmission(BaseModel):
 class ExpenseApprovalResponse(BaseModel):
     requestId: str
     status: str
+
+
+class ExpenseApprovalAdminRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requestId: str
+    status: str
+    expenseId: str
+    employeeId: str
+    tripId: str
+    costCenter: str
+    claimedAmount: Money
+    reimbursableAmount: Money
+    createdAt: datetime
+
+
+class ExpenseApprovalListResponse(BaseModel):
+    items: list[ExpenseApprovalAdminRecord]
+    count: int
 
 
 class MockOaStore:
@@ -120,6 +141,52 @@ class MockOaStore:
                 "SELECT request_id, status FROM expense_approval WHERE request_id = ?", (request_id,)
             ).fetchone()
         return None if row is None else ExpenseApprovalResponse(requestId=row[0], status=row[1])
+
+    @staticmethod
+    def _admin_record(row: tuple[str, str, str, str]) -> ExpenseApprovalAdminRecord:
+        try:
+            payload = json.loads(row[2])
+            submission = ExpenseApprovalSubmission.model_validate(payload)
+            created_at = datetime.fromisoformat(row[3])
+        except (TypeError, ValueError, json.JSONDecodeError) as exception:
+            raise ValueError("stored approval payload is invalid") from exception
+        return ExpenseApprovalAdminRecord(
+            requestId=row[0],
+            status=row[1],
+            expenseId=submission.expenseId,
+            employeeId=submission.employeeId,
+            tripId=submission.tripId,
+            costCenter=submission.costCenter,
+            claimedAmount=submission.claimedAmount,
+            reimbursableAmount=submission.reimbursableAmount,
+            createdAt=created_at,
+        )
+
+    def list(self, approval_status: str | None, limit: int = MAX_ADMIN_LIST_LIMIT) -> ExpenseApprovalListResponse:
+        normalized_status = approval_status.strip().upper() if approval_status else None
+        if normalized_status == "ALL":
+            normalized_status = None
+        if normalized_status is not None and normalized_status not in APPROVAL_STATUSES:
+            raise ValueError("unsupported approval status")
+        bounded_limit = max(1, min(limit, MAX_ADMIN_LIST_LIMIT))
+        where = ""
+        parameters: tuple[object, ...] = ()
+        if normalized_status is not None:
+            where = "WHERE status = ?"
+            parameters = (normalized_status,)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT request_id, status, payload_json, created_at
+                FROM expense_approval
+                {where}
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (*parameters, bounded_limit),
+            ).fetchall()
+        records = [self._admin_record(row) for row in rows]
+        return ExpenseApprovalListResponse(items=records, count=len(records))
 
     def decide(self, request_id: str, decision: str) -> ExpenseApprovalResponse | None:
         if decision not in TERMINAL_STATUSES:
@@ -223,6 +290,26 @@ def get_expense_approval(request_id: str) -> ExpenseApprovalResponse:
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval request not found")
     return record
+
+
+@app.get("/api/admin/expense-approvals", response_model=ExpenseApprovalListResponse)
+def list_expense_approvals(
+    approval_status: Annotated[str | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_ADMIN_LIST_LIMIT)] = MAX_ADMIN_LIST_LIMIT,
+) -> ExpenseApprovalListResponse:
+    try:
+        return store.list(approval_status, limit)
+    except ValueError as exception:
+        if str(exception) == "unsupported approval status":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="status must be PENDING, APPROVED, or REJECTED",
+            ) from exception
+        logger.error("Mock OA 审批列表数据无效 errorType=%s", type(exception).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="approval data is unavailable",
+        ) from exception
 
 
 def _decide_expense_approval(request_id: str, decision: str) -> ExpenseApprovalResponse:

@@ -13,6 +13,7 @@
 ## 关键 invariant
 
 - **Java authority boundary**：受控业务动作必须经 Java 侧 PendingAction 持久化 + nonce 校验 + 幂等确认才执行，默认关闭；启用后由 Java trusted identity policy 决定，public demo 永久只读；`BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 仅作为额外 server-side hardening，要求内部请求携带匹配的 `ADMIN_TOKEN`。浏览器管理能力使用已验证 JWT 的 `role=ADMIN`，不携带 `ADMIN_TOKEN`。
+- **D2 Mock OA 管理边界**：管理员审批台只调用 Java `/api/admin/mock-oa/**`，由已验证 JWT 的 `role=ADMIN` 授权；Java 服务端调用内网 Mock OA，浏览器不接触 Mock OA secret、`ADMIN_TOKEN` 或 `X-Admin-Token`。Mock OA 终态与 Java Expense 终态保持独立，直到 webhook 或 reconciliation 成功收口。
 - **Python Agent Graph**：`/agent/langgraph/chat` 固定走 Planner-first：`safety → planner ⇄ tool_executor → finalize`，Planner 拥有规划权、无最终业务执行授权，预算受 `MAX_PLANNER_STEPS=5` / `MAX_TOOL_CALLS=3` 收敛。legacy Router-first 图仅作为直接测试/离线兼容实现保留，不是生产运行时选择。Planner-first **最多支持 5 个 Tool**，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
   - 始终可见：`rag_answer_tool`；`employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加 `leave_balance_tool` / `leave_request_tool`
   - `allow_eval=true` 时追加：`eval_report_tool`

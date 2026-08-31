@@ -178,6 +178,8 @@ Mock OA is independent from Java and uses SQLite. Submission is idempotent by `e
 
 For webhook exposure, Java permits only the exact `POST /api/webhooks/mock-oa/expense-approval` path without normal user authentication. Health/version and token-protected internal read routes have separate contracts. The webhook handler validates the raw-body HMAC-SHA256 signature and timestamp window (300 seconds), strictly parses the body, then calls Mock OA `GET /api/expense-approvals/{requestId}`. Only that authoritative status can update `ExpenseClaim`; `PENDING` never regresses a terminal local claim, and a terminal decision cannot be reversed.
 
+D2 管理员审批台使用独立的 `Browser → Java /api/admin/mock-oa/** → Mock OA` 链路。Java 的 `/api/admin/**` 继续由已验证 JWT 的 `role=ADMIN` 授权；前端不持有 Mock OA secret、`ADMIN_TOKEN` 或 `X-Admin-Token`。生产 Compose 中 Mock OA 只加入 `ai-copilot-net` 并使用 `expose: 8010`，没有宿主机 `ports` 映射，因此公网浏览器不能直接访问 Mock OA。
+
 Reconciliation and retry delivery are separate, low-frequency, bounded workers. They select only their durable candidate sets; the Mock OA provider remains fail-closed when `MOCK_OA_ENABLED=false`. Reconciliation uses a due `external_last_checked_at` compare-and-set before the out-of-transaction GET and shares the same status-sync path as webhook processing. A failed external resume never rolls back a committed Java terminal state.
 
 ## 9. Checkpoint and crash recovery

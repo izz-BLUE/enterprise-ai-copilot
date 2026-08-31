@@ -40,6 +40,67 @@ def test_first_post_creates_pending_record_and_get_returns_it(tmp_path, monkeypa
     assert fetched.json() == created.json()
 
 
+def test_admin_list_filters_pending_and_maps_payload_fields(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    _create_approval(client)
+
+    response = client.get("/api/admin/expense-approvals", params={"status": "PENDING"})
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["items"] == [{
+        "requestId": response.json()["items"][0]["requestId"],
+        "status": "PENDING",
+        "expenseId": "EXP-20260827-000001",
+        "employeeId": "E10001",
+        "tripId": "TRIP-001",
+        "costCenter": "COST-IT",
+        "claimedAmount": "100",
+        "reimbursableAmount": "100",
+        "createdAt": response.json()["items"][0]["createdAt"],
+    }]
+
+
+def test_admin_list_returns_terminal_records_and_status_filter(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    request_id = _create_approval(client)
+    monkeypatch.setattr(main, "send_approval_webhook", lambda _: True)
+    client.post(f"/api/admin/expense-approvals/{request_id}/approve")
+
+    approved = client.get("/api/admin/expense-approvals", params={"status": "APPROVED"})
+    rejected = client.get("/api/admin/expense-approvals", params={"status": "REJECTED"})
+
+    assert approved.status_code == 200
+    assert approved.json()["items"][0]["status"] == "APPROVED"
+    assert rejected.status_code == 200
+    assert rejected.json()["items"] == []
+
+
+def test_admin_list_has_explicit_limit_and_does_not_expose_internal_columns(tmp_path, monkeypatch):
+    store = main.MockOaStore(str(tmp_path / "mock-oa.sqlite3"))
+    monkeypatch.setattr(main, "store", store)
+    payload = main.ExpenseApprovalSubmission(**_payload())
+    for index in range(105):
+        store.submit(f"expense:EXP-{index:06d}", payload.model_copy(update={"expenseId": f"EXP-{index:06d}"}))
+
+    response = TestClient(main.app).get("/api/admin/expense-approvals", params={"limit": 100})
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 100
+    assert all(set(item) == {
+        "requestId", "status", "expenseId", "employeeId", "tripId", "costCenter",
+        "claimedAmount", "reimbursableAmount", "createdAt",
+    } for item in response.json()["items"])
+
+
+def test_admin_list_rejects_unknown_status(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.get("/api/admin/expense-approvals", params={"status": "CANCELLED"})
+
+    assert response.status_code == 400
+
+
 def test_same_key_and_payload_reuses_exact_request_id(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     headers = {"Idempotency-Key": "expense:EXP-20260827-000001"}

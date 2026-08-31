@@ -218,6 +218,20 @@ Mock OA 不是浏览器 API，是独立模拟外部审批服务。
 
 响应：`{"requestId":"oa_…","status":"PENDING"}`，或幂等 replay 时返回当前 `APPROVED/REJECTED`。相同 key 的 payload hash 不一致返回 409；不存在 request 返回 404；反向终态决定返回 409。Mock OA 在终态提交后才 best-effort webhook，webhook 失败不回滚 OA 状态。
 
+### 6.1 Java 管理员审批 Facade
+
+公网浏览器只能访问下面的 Java 路径。Java 从已验证 JWT 的 `role=ADMIN` 授权后，在服务端调用 Mock OA；浏览器不拼接 Mock OA 地址，也不发送 `ADMIN_TOKEN` 或 `X-Admin-Token`。
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/api/admin/mock-oa/expense-approvals` | 查询最近最多 100 条审批，可用 `status=PENDING\|APPROVED\|REJECTED` 筛选 |
+| `POST` | `/api/admin/mock-oa/expense-approvals/{requestId}/approve` | 请求 Mock OA 批准 |
+| `POST` | `/api/admin/mock-oa/expense-approvals/{requestId}/reject` | 请求 Mock OA 拒绝 |
+
+列表只返回 `requestId`、`status`、`expenseId`、`employeeId`、`tripId`、`costCenter`、`claimedAmount`、`reimbursableAmount`、`createdAt`。`idempotency_key`、`payload_hash`、webhook secret 和其他内部 credential 永不返回浏览器。成功审批只代表 Mock OA 已提交终态；页面会提示该结果将通过 webhook 异步同步到 Java 业务系统。
+
+Java Facade 将 Mock OA 的不存在、状态冲突、不可用和超时分别映射为 404、409、502/503；超时提示结果未知，前端不会把它渲染成业务失败终态。Mock OA 未启用时返回 503，不静默成功。
+
 ## 7. Common headers and errors
 
 | Header | 来源/用途 |

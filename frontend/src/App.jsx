@@ -5,6 +5,7 @@ import WelcomeScreen from './components/WelcomeScreen'
 import ChatMessage, { UserMessage, LoadingMessage } from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import AdminLogConsole from './components/AdminLogConsole'
+import MockOaApprovalConsole from './components/MockOaApprovalConsole'
 import useBusinessActionFlow from './hooks/useBusinessActionFlow'
 import useChatRequest from './hooks/useChatRequest'
 import {
@@ -76,6 +77,7 @@ function App({ authState, onLogout }) {
     return restored?.messages ?? []
   })
   const [showAdminLogs, setShowAdminLogs] = useState(false)
+  const [showMockOa, setShowMockOa] = useState(false)
   const [clearConfirming, setClearConfirming] = useState(false)
   const chatEndRef = useRef(null)
   // Phase 2 conversationId：挂载时按模式恢复（sessionStorage 缓存 + 对应模式历史）
@@ -195,8 +197,9 @@ function App({ authState, onLogout }) {
     if (hasActiveAction()) return
     // 日志控制台是视图分支而非第三种 mode：在控制台内点击左侧模式按钮时，
     // 必须先退出控制台，再执行模式切换（同模式直接返回，保留聊天状态）。
-    if (showAdminLogs) {
+    if (showAdminLogs || showMockOa) {
       setShowAdminLogs(false)
+      setShowMockOa(false)
     }
     if (newMode === mode) {
       return
@@ -272,11 +275,19 @@ function App({ authState, onLogout }) {
         onModeChange={handleModeChange}
         loading={loading || actionBusy}
         userRole={authState?.user?.role}
-        onAdminLogsOpen={() => setShowAdminLogs(true)}
+        onAdminLogsOpen={() => {
+          setShowAdminLogs(true)
+          setShowMockOa(false)
+        }}
         showAdminLogs={showAdminLogs}
+        onMockOaOpen={() => {
+          setShowMockOa(true)
+          setShowAdminLogs(false)
+        }}
+        showMockOa={showMockOa}
       />
 
-      <main className={`main-area ${showAdminLogs ? 'admin-view' : ''}`}>
+      <main className={`main-area ${showAdminLogs || showMockOa ? 'admin-view' : ''}`}>
         <div className="main-header">
           <div className="header-left">
             {/* 移动端模式切换 - 仅在侧边栏隐藏时显示 */}
@@ -285,10 +296,14 @@ function App({ authState, onLogout }) {
               <select
                 id="mobile-view-select"
                 className="mode-select"
-                value={showAdminLogs ? 'admin-logs' : mode}
+                value={showAdminLogs ? 'admin-logs' : (showMockOa ? 'mock-oa' : mode)}
                 onChange={e => {
                   if (e.target.value === 'admin-logs') {
                     setShowAdminLogs(true)
+                    setShowMockOa(false)
+                  } else if (e.target.value === 'mock-oa') {
+                    setShowMockOa(true)
+                    setShowAdminLogs(false)
                   } else {
                     handleModeChange(e.target.value)
                   }
@@ -301,13 +316,20 @@ function App({ authState, onLogout }) {
                 {authState?.user?.role === 'ADMIN' && (
                   <option value="admin-logs">🧾 日志控制台</option>
                 )}
+                {authState?.user?.role === 'ADMIN' && (
+                  <option value="mock-oa">✅ 模拟 OA 审批</option>
+                )}
               </select>
             </div>
             <h2 className="header-title">
-              {showAdminLogs ? '日志控制台' : (mode === 'agent' ? '智能体问答' : '标准问答')}
+              {showAdminLogs
+                ? '日志控制台'
+                : (showMockOa ? '模拟 OA 审批' : (mode === 'agent' ? '智能体问答' : '标准问答'))}
             </h2>
             <span className="header-badge">
-              {showAdminLogs ? '运行审计' : (mode === 'agent' ? '任务协作' : '知识检索')}
+              {showAdminLogs
+                ? '运行审计'
+                : (showMockOa ? '外部审批' : (mode === 'agent' ? '任务协作' : '知识检索'))}
             </span>
           </div>
           <div className="header-actions">
@@ -335,6 +357,12 @@ function App({ authState, onLogout }) {
             <AdminLogConsole
               accessToken={authState.accessToken}
               onBackToChat={() => setShowAdminLogs(false)}
+            />
+          ) : showMockOa ? (
+            <MockOaApprovalConsole
+              accessToken={authState.accessToken}
+              onBackToChat={() => setShowMockOa(false)}
+              onAuthenticationExpired={handleAuthenticationExpired}
             />
           ) : messages.length === 0 ? (
             <WelcomeScreen
@@ -374,7 +402,7 @@ function App({ authState, onLogout }) {
           )}
         </div>
 
-        {!showAdminLogs && (
+        {!showAdminLogs && !showMockOa && (
           <InfoPanel
             compact
             result={lastResult}
@@ -383,7 +411,7 @@ function App({ authState, onLogout }) {
           />
         )}
 
-        {!showAdminLogs && (
+        {!showAdminLogs && !showMockOa && (
           <div className="input-section">
             <ChatInput
               input={input}
@@ -395,7 +423,7 @@ function App({ authState, onLogout }) {
         )}
       </main>
 
-      {!showAdminLogs && (
+      {!showAdminLogs && !showMockOa && (
         <InfoPanel
           result={lastResult}
           resultMode={lastResultMode || mode}

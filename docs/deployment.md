@@ -290,6 +290,7 @@ graph LR
 | PHOENIX_CAPTURE_CONTENT | `${PHOENIX_CAPTURE_CONTENT:-false}`；默认隐藏 Prompt、输入和输出正文 |
 | PHOENIX_DEFAULT_RETENTION_POLICY_DAYS | `${PHOENIX_DEFAULT_RETENTION_POLICY_DAYS:-7}` |
 | MOCK_OA_ENABLED | Java 是否启用 Mock OA 提交与状态查询，默认 false |
+| MOCK_OA_IMAGE | 生产 Compose 使用的 Mock OA 镜像；默认 `enterprise-ai-copilot-mock-oa:6e24f52` |
 | MOCK_OA_BASE_URL | Java 访问 Mock OA 的基础地址；本地通常为 `http://localhost:8010` |
 | MOCK_OA_WEBHOOK_SECRET | Java 与 Mock OA 共享的 HMAC-SHA256 密钥；生产必须通过 Secret 注入 |
 | MOCK_OA_WEBHOOK_REPLAY_WINDOW_SECONDS | Java webhook 时间戳窗口，最大 300 秒，默认 300 |
@@ -301,6 +302,8 @@ graph LR
 | EXTERNAL_APPROVAL_RECONCILIATION_BATCH_SIZE | 每轮 reconciliation 候选上限，默认 20，代码限制为 1–100 |
 | EXTERNAL_APPROVAL_RESUME_RETRY_INTERVAL_MS | external resume 即时失败后的重试间隔，默认 60000 ms |
 | EXTERNAL_APPROVAL_RESUME_BATCH_SIZE | 每轮 external resume 候选上限，默认 20，代码限制为 1–100 |
+
+生产 Compose 的 Mock OA 服务只在 `ai-copilot-net` 内以 `expose: 8010` 提供服务，不配置宿主机 `ports`；Java 使用 `http://mock-oa:8010` 访问。生产环境要求通过 Secret 注入 `MOCK_OA_WEBHOOK_SECRET`，而 `MOCK_OA_ENABLED` 仍默认关闭。Local Compose 保留 `127.0.0.1:8010:8010`，仅用于本地测试和调试。
 
 PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 

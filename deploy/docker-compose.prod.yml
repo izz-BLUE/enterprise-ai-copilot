@@ -90,6 +90,32 @@ services:
     networks:
       - ai-copilot-net
 
+  mock-oa:
+    image: "${MOCK_OA_IMAGE:-enterprise-ai-copilot-mock-oa:6e24f52}"
+    container_name: ai-copilot-mock-oa
+    restart: unless-stopped
+    environment:
+      MOCK_OA_DB_PATH: /data/mock-oa.sqlite3
+      MOCK_OA_WEBHOOK_URL: http://java-backend:8080/api/webhooks/mock-oa/expense-approval
+      MOCK_OA_WEBHOOK_SECRET: "${MOCK_OA_WEBHOOK_SECRET:?MOCK_OA_WEBHOOK_SECRET is required in production}"
+      MOCK_OA_WEBHOOK_TIMEOUT_SECONDS: ${MOCK_OA_WEBHOOK_TIMEOUT_SECONDS:-5}
+    volumes:
+      - copilot-mock-oa-data:/data
+    expose:
+      - "8010"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/docs')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - ai-copilot-net
+
   java-backend:
     image: "${JAVA_IMAGE:-enterprise-ai-copilot-java:6e24f52}"
     container_name: ai-copilot-java
@@ -98,6 +124,8 @@ services:
       python-agent:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      mock-oa:
         condition: service_healthy
     environment:
       PYTHON_AGENT_BASE_URL: http://python-agent:8000
@@ -122,6 +150,9 @@ services:
       BUSINESS_ACTION_MAX_COMPLETED: ${BUSINESS_ACTION_MAX_COMPLETED:-500}
       DEMO_ANNUAL_LEAVE_BALANCE: ${DEMO_ANNUAL_LEAVE_BALANCE:-5.0}
       BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-Asia/Shanghai}
+      MOCK_OA_ENABLED: ${MOCK_OA_ENABLED:-false}
+      MOCK_OA_BASE_URL: http://mock-oa:8010
+      MOCK_OA_WEBHOOK_SECRET: "${MOCK_OA_WEBHOOK_SECRET:?MOCK_OA_WEBHOOK_SECRET is required in production}"
       EXTERNAL_APPROVAL_RECONCILIATION_INTERVAL_MS: ${EXTERNAL_APPROVAL_RECONCILIATION_INTERVAL_MS:-60000}
       EXTERNAL_APPROVAL_RECONCILIATION_BATCH_SIZE: ${EXTERNAL_APPROVAL_RECONCILIATION_BATCH_SIZE:-20}
       EXTERNAL_APPROVAL_RESUME_RETRY_INTERVAL_MS: ${EXTERNAL_APPROVAL_RESUME_RETRY_INTERVAL_MS:-60000}
@@ -156,3 +187,4 @@ networks:
 volumes:
   copilot-postgres-data:
   copilot-phoenix-data:
+  copilot-mock-oa-data:

@@ -132,6 +132,8 @@ curl http://localhost:8000/agent/ready
 
 ### Step E — Submit and decide in Mock OA
 
+D2 公网 Demo 由 `admin` 登录 Copilot 后打开“模拟 OA 审批”页面完成审批。页面只调用 Java `/api/admin/mock-oa/**`，不会直接访问 Mock OA；下面的 Mock OA 管理端点仅保留给本地服务间调试使用。
+
 确认 Java 已启用 external submission 后，Mock OA 会收到：
 
 ```text
