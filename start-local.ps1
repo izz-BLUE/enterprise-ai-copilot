@@ -64,7 +64,7 @@ if (-not (Test-Path $envFile)) {
     Write-Host "  Please create it from .env.example:" -ForegroundColor Yellow
     Write-Host "    cd agent-python" -ForegroundColor Yellow
     Write-Host "    copy .env.example .env" -ForegroundColor Yellow
-    Write-Host "  Then edit .env and set DEEPSEEK_API_KEY." -ForegroundColor Yellow
+    Write-Host "  Then edit .env and set DEEPSEEK_API_KEY and LANGGRAPH_CHECKPOINT_DSN." -ForegroundColor Yellow
     Write-Host ""
     $continue = Read-Host "Continue anyway? (y/N)"
     if ($continue -ne "y" -and $continue -ne "Y") {
@@ -72,6 +72,10 @@ if (-not (Test-Path $envFile)) {
         exit 1
     }
 }
+
+Write-Host "  Python requires a reachable PostgreSQL checkpoint DSN." -ForegroundColor Yellow
+Write-Host "  Start local PostgreSQL with: docker compose -f deploy/docker-compose.local.yml up -d postgres" -ForegroundColor Yellow
+Write-Host "  Compose default DSN: postgresql://copilot:copilot_dev@localhost:5432/enterprise_ai_copilot" -ForegroundColor Yellow
 
 # Step 1: Python AI Service
 Write-Step "Starting Python AI Service (port 8000)..."

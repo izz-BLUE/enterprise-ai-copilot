@@ -27,7 +27,7 @@ flowchart TB
 | Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume | 最终业务授权、业务数据库写入、Memory terminal lifecycle |
 | Enterprise OA MCP | 读取当前 trip/invoice 事实 | 报销写入、审批状态 authority |
 | Mock OA | 独立 SQLite 的模拟外部审批服务 | Enterprise AI Copilot 的业务事实、Java action authority |
-| PostgreSQL | Java 业务表和可选 LangGraph checkpoint | 让 LLM 获得权限或替代 Java 状态机 |
+| PostgreSQL | Java 业务表和 LangGraph checkpoint | 让 LLM 获得权限或替代 Java 状态机 |
 
 ## 2. Trusted runtime context
 
