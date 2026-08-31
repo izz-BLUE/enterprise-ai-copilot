@@ -73,7 +73,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - Java 生成服务端 traceId，错误响应不暴露 exception message、secret、nonce digest 或 webhook raw body；
 - Python、内部 Java API、Mock OA admin API 不作为公网业务入口；
 - `PHOENIX_TRACING` 默认关闭，启用时旁路导出失败不阻断业务；
-- `BUSINESS_ACTIONS_ENABLED`、Memory 写入、Mock OA、reconciliation 和 external resume retry 默认关闭。
+- `BUSINESS_ACTIONS_ENABLED`、Memory 写入和 Mock OA provider 默认关闭；reconciliation 与 external resume retry worker 始终低频调度并由 provider gateway fail-closed。
 
 ## 6. Accepted limitations
 

@@ -21,7 +21,6 @@ public class ExpenseExternalApprovalReconciliationWorker {
     private final ExpenseClaimRepository claims;
     private final ExpenseExternalApprovalStatusSyncService statusSyncService;
     private final TransactionOperations transactions;
-    private final boolean enabled;
     private final long intervalMillis;
     private final int batchSize;
     private final Clock clock;
@@ -30,14 +29,12 @@ public class ExpenseExternalApprovalReconciliationWorker {
             ExpenseClaimRepository claims,
             ExpenseExternalApprovalStatusSyncService statusSyncService,
             TransactionOperations transactions,
-            @Value("${external.approval.reconciliation.enabled:false}") boolean enabled,
             @Value("${external.approval.reconciliation.interval-ms:60000}") long intervalMillis,
             @Value("${external.approval.reconciliation.batch-size:20}") int batchSize,
             Clock clock) {
         this.claims = claims;
         this.statusSyncService = statusSyncService;
         this.transactions = transactions;
-        this.enabled = enabled;
         this.intervalMillis = Math.max(1L, intervalMillis);
         this.batchSize = Math.max(1, Math.min(batchSize, 100));
         this.clock = clock;
@@ -45,9 +42,6 @@ public class ExpenseExternalApprovalReconciliationWorker {
 
     @Scheduled(fixedDelayString = "${external.approval.reconciliation.interval-ms:60000}")
     public void runOnce() {
-        if (!enabled) {
-            return;
-        }
         Instant now = clock.instant();
         Instant cutoff = now.minusMillis(intervalMillis);
         List<ExpenseClaim> candidates = claims.findExternalApprovalReconciliationCandidates(cutoff, batchSize);

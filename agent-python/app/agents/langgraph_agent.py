@@ -24,7 +24,7 @@ from app.agents.execution_history_policy import merge_execution_history
 from app.agents.planner_node import planner_node
 from app.agents.runtime_context import AgentRuntimeContext, ExecutionMode
 from app.agents.tool_executor_node import tool_executor_node
-from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, REWRITE_MODE, logger
+from app.core.config import AGENT_REQUEST_TIMEOUT_SECONDS, logger
 from app.guards.safety_guard import check_user_query_safety
 from app.retrieval.query_rewriter import rewrite_query
 from app.schemas.execution_recovery_schema import (
@@ -135,7 +135,7 @@ def rag_node(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> dict:
     question = state["question"]
 
     # Query Rewrite（只改写检索用 query，不改 original_query）
-    rewrite_result = rewrite_query(question, mode=REWRITE_MODE)
+    rewrite_result = rewrite_query(question, mode='none')
     retrieval_query = rewrite_result['rewritten_query']
     if rewrite_result['rewrite_applied']:
         logger.info('[%s] LangGraph query rewrite applied reason=%s',

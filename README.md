@@ -30,9 +30,8 @@ flowchart LR
     J -->|/api/chat or /api/agent/langgraph/chat| P[Python FastAPI :8000]
     J --> AUTH[JWT DemoAuth / Admin gate]
     J --> DB[(PostgreSQL business DB)]
-    P --> G{AGENT_LOOP_ENABLED}
-    G -->|true: repository deployment default| PL[Planner-first Graph]
-    G -->|false: explicit fallback| RT[Legacy Router-first Graph]
+    P --> PL[Planner-first Graph]
+    P -.->|test/offline compatibility only| RT[Legacy Router-first Graph]
     PL --> EX[Tool Executor]
     EX --> RAG[Hybrid RAG]
     EX --> MCP[Enterprise OA MCP read tools]
@@ -55,9 +54,9 @@ Webhook 仅是通知；Java 直接 GET Mock OA 取得审批权威状态，再把
 
 请求先进入 Java。Python 不对公网映射宿主机端口；在生产 Compose 中，Nginx 是公网入口，Java 绑定宿主机 `127.0.0.1:8080`，Python 只在 Docker 网络内 `expose 8000`。Java 生成并透传可信 `trace_id`、`employee_id`、`business_date`、conversation scope 和 runtime thread；这些字段不由 LLM arguments 提供。
 
-### 两套互斥 Agent 图
+### Planner-first Agent 图
 
-仓库部署默认 `AGENT_LOOP_ENABLED=true`，使用 Planner-first：
+生产入口固定使用 Planner-first：
 
 ```text
 safety → planner ⇄ tool_executor → finalize
@@ -66,7 +65,7 @@ safety → planner ⇄ tool_executor → finalize
                               └─ confirmed expense → WAITING_EXTERNAL → END
 ```
 
-`AGENT_LOOP_ENABLED=false` 是显式回退的 legacy Router-first：
+legacy Router-first 仅作为直接测试/离线兼容图保留：
 
 ```text
 safety → router → rag | eval | action | refuse
@@ -134,7 +133,7 @@ Confirm-time revalidation 在 Java 本地事务外调用 Python narrow adapter�
 
 Mock OA 是独立的 SQLite 模拟外部系统，不是企业业务事实源。提交使用 `Idempotency-Key: expense:<expenseId>`，初始为 `PENDING`；审批端点把它提交为 `APPROVED` 或 `REJECTED`。状态提交后才 best-effort 发送不含 status 的通知。Java 只接受精确 webhook 路径，验证原始 body 的 HMAC-SHA256 和不超过 5 分钟的 timestamp，再通过 Mock OA `GET` 取得权威状态；同终态 no-op，禁止回退到 `PENDING` 或反向覆盖终态。
 
-Webhook 丢失时，默认关闭的 reconciliation 仅扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，按 `external_last_checked_at` 做 due CAS，短事务提交后在事务外 GET，批量和频率均有上限。Java ExpenseClaim 终态提交后才发送 external resume；发送失败不会回滚 Java 终态，`external_resume_last_attempt_at` / `external_resume_completed_at` 支持低频重试。Python 收到严格 payload 后用 `Command(resume)` 收口 `Graph END`。
+Webhook 丢失时，reconciliation worker 始终低频、限批地扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，按 `external_last_checked_at` 做 due CAS，短事务提交后在事务外 GET；provider 关闭或查询失败时 fail-closed。Java ExpenseClaim 终态提交后才发送 external resume；发送失败不会回滚 Java 终态，`external_resume_last_attempt_at` / `external_resume_completed_at` 支持低频重试。Python 收到严格 payload 后用 `Command(resume)` 收口 `Graph END`。
 
 ## Memory、history 与 checkpoint
 
@@ -150,7 +149,7 @@ Webhook 丢失时，默认关闭的 reconciliation 仅扫描 `WAITING_APPROVAL +
 
 Memory Read 只读取 ACTIVE；现有 ACTIVE Memory 本身不会触发新的 Extractor。Memory trigger 只来自 `action_proposal` 或白名单 Memory-eligible Tool 的成功结果；纯 RAG、eval、余额、历史查询、失败和拒答不触发。Python 仅执行 trigger → extractor → write policy，写策略只允许 `UPSERT + ACTIVE` 提案；Java 在当前认证上下文中持久化。Python 不执行 terminal Memory write，Memory 也不替代业务状态。
 
-`LANGGRAPH_CHECKPOINT_MODE=DISABLED` 不持久化执行快照；`POSTGRES` 使用 `ConnectionPool + PostgresSaver`，启动时 setup/连接/图编译失败即 fail-closed，不自动降级。崩溃恢复只接受精确 raw question、业务日期 anchor、actor scope、当前能力残留和 replay-safe pending node，通过后用 `graph.invoke(None)`；HITL 用户确认与外部审批分别使用 `Command(resume)`。
+Python 固定使用 `ConnectionPool + PostgresSaver` 持久化执行快照；`LANGGRAPH_CHECKPOINT_DSN` 缺失或启动时 setup/连接/图编译失败即 fail-closed，不自动降级。崩溃恢复只接受精确 raw question、业务日期 anchor、actor scope、当前能力残留和 replay-safe pending node，通过后用 `graph.invoke(None)`；HITL 用户确认与外部审批分别使用 `Command(resume)`。
 
 Java 和 Python 都有 process-local runtime-thread guard。Java guard 覆盖从 Memory Read 到 Python 调用、PendingAction/Memory 写入和响应结束的生命周期；Python guard 覆盖 recovery inspection 到最终 Checkpoint。单实例内按 exact-one owner release/handoff 规则工作，不是分布式锁。
 
@@ -165,7 +164,7 @@ data/hr|bank|it/*.md
   → bounded context → DeepSeek prompt → answer + sources
 ```
 
-`hybrid` 是默认检索模式；`vector` 和 `hybrid_rerank` 可用于比较。规则 Query Rewrite 只改检索 query，原始问题仍进入最终 Prompt。无证据时明确拒答，不把检索结果当作业务授权。38 个固定用例覆盖来源/关键词命中和生成回归，并区分 answerable 与 no-answer。
+`hybrid` 是默认检索模式；`vector` 和 `hybrid_rerank` 可用于比较。生产 RAG 固定不做 Query Rewrite，原始问题直接进入检索和最终 Prompt；`rule` 仅用于离线对照评估。无证据时明确拒答，不把检索结果当作业务授权。38 个固定用例覆盖来源/关键词命中和生成回归，并区分 answerable 与 no-answer。
 
 ## Quick start
 
@@ -195,7 +194,7 @@ npm run dev
 docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 ```
 
-本地 Python 默认 `LANGGRAPH_CHECKPOINT_MODE=DISABLED`；要演示可恢复 HITL/外部审批，需显式设置 `LANGGRAPH_CHECKPOINT_MODE=POSTGRES` 和独立 `LANGGRAPH_CHECKPOINT_DSN`，并按 [Demo Guide](docs/demo-guide.md) 配置 Java/Python/Mock OA。受控动作、Memory 写入、外部提交和 reconciliation 均默认关闭，必须按演示范围显式开启。
+本地 Python 启动即要求 `LANGGRAPH_CHECKPOINT_DSN` 并连接 PostgreSQL；按 [Demo Guide](docs/demo-guide.md) 配置 Java/Python/Mock OA。受控动作、Memory 写入和 Mock OA provider 仍默认关闭，按演示范围显式开启。
 
 生产 Compose 默认启用 Planner-first 和 PostgreSQL Checkpoint，但仍要求运维显式提供数据库、JWT、Admin Token、模型密钥及实际的功能开关。详见 [Deployment](docs/deployment.md)。
 

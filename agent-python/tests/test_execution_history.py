@@ -181,7 +181,7 @@ class TestExecutionHistoryPolicy:
 class TestExecutionHistoryRuntime:
     def test_active_matching_memory_hydrates_latest_checkpoint_only(self):
         runtime = CheckpointRuntime(
-            mode='POSTGRES', dsn='postgresql://unused',
+            dsn='postgresql://unused',
             connect_timeout_seconds=1, max_connections=1,
         )
         graph = Mock()
@@ -203,7 +203,7 @@ class TestExecutionHistoryRuntime:
 
     def test_no_or_terminal_memory_does_not_read_or_hydrate_history(self):
         runtime = CheckpointRuntime(
-            mode='POSTGRES', dsn='postgresql://unused',
+            dsn='postgresql://unused',
             connect_timeout_seconds=1, max_connections=1,
         )
         graph = Mock()
@@ -219,7 +219,7 @@ class TestExecutionHistoryRuntime:
 
     def test_task_type_mismatch_filters_old_history(self):
         runtime = CheckpointRuntime(
-            mode='POSTGRES', dsn='postgresql://unused',
+            dsn='postgresql://unused',
             connect_timeout_seconds=1, max_connections=1,
         )
         graph = Mock()
@@ -234,7 +234,7 @@ class TestExecutionHistoryRuntime:
 
     def test_checkpoint_read_error_is_not_silently_converted_to_empty_history(self):
         runtime = CheckpointRuntime(
-            mode='POSTGRES', dsn='postgresql://unused',
+            dsn='postgresql://unused',
             connect_timeout_seconds=1, max_connections=1,
         )
         graph = Mock()
@@ -248,7 +248,7 @@ class TestExecutionHistoryRuntime:
 
     def test_same_thread_guard_is_atomic_but_different_threads_can_enter(self):
         runtime = CheckpointRuntime(
-            mode='POSTGRES', dsn='postgresql://unused',
+            dsn='postgresql://unused',
             connect_timeout_seconds=1, max_connections=1,
         )
         assert runtime.try_acquire_thread('thread-a') is True

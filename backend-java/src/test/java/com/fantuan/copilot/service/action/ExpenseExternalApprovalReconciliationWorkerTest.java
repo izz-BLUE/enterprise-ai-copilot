@@ -24,7 +24,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -45,16 +44,7 @@ class ExpenseExternalApprovalReconciliationWorkerTest {
 
     @BeforeEach
     void setUp() {
-        worker = worker(true, 60000, 20);
-    }
-
-    @Test
-    void disabledWorkerDoesNotReadCandidates() {
-        worker = worker(false, 60000, 20);
-
-        worker.runOnce();
-
-        verify(claims, never()).findExternalApprovalReconciliationCandidates(any(), anyInt());
+        worker = worker(60000, 20);
     }
 
     @Test
@@ -140,26 +130,25 @@ class ExpenseExternalApprovalReconciliationWorkerTest {
 
     @Test
     void batchSizeIsClampedToOneHundred() {
-        worker = worker(true, 60000, 1000);
+        worker = worker(60000, 1000);
 
         worker.runOnce();
 
         verify(claims).findExternalApprovalReconciliationCandidates(CUTOFF, 100);
     }
 
-    private ExpenseExternalApprovalReconciliationWorker worker(boolean enabled,
-                                                               long intervalMillis,
+    private ExpenseExternalApprovalReconciliationWorker worker(long intervalMillis,
                                                                int batchSize) {
         return new ExpenseExternalApprovalReconciliationWorker(
                 claims, statusSyncService, new TransactionTemplate(new NoopTransactionManager()),
-                enabled, intervalMillis, batchSize, Clock.fixed(NOW, ZoneOffset.UTC));
+                intervalMillis, batchSize, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private ExpenseExternalApprovalReconciliationWorker workerWithRealStatusSync() {
         TransactionTemplate transactions = new TransactionTemplate(new NoopTransactionManager());
         return new ExpenseExternalApprovalReconciliationWorker(
                 claims, new ExpenseExternalApprovalStatusSyncService(claims, gateway, transactions),
-                transactions, true, 60000, 20, Clock.fixed(NOW, ZoneOffset.UTC));
+                transactions, 60000, 20, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private void stubDueClaim() {

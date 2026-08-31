@@ -52,15 +52,15 @@ bm25_weak     = 2.10
 
 这些数值仅用于复现实验，不是经过验证的可部署参数。
 
-## 5. Shadow 与 fail-open 设计
+## 5. 历史 Shadow 与 fail-open 设计
 
-Gate 支持：
+历史实验曾使用以下模式：
 
 - `off`：默认模式，不计算实际拦截决策，不改变原链路。
 - `shadow`：显式启用，计算并记录决策，但不因 block 提前返回。
-- `enforce`：禁止使用，配置后服务启动失败。
+- `enforce`：历史上禁止使用，配置后服务启动失败。
 
-Shadow evaluator 自身异常时使用 fail-open：记录 traceId、异常类型和非敏感决策字段，然后继续原生成链路。该异常保护只覆盖 Gate evaluator，不会掩盖检索、Query Rewrite、Prompt 或 LLM 异常。
+Shadow evaluator 自身异常时使用 fail-open：记录 traceId、异常类型和非敏感决策字段，然后继续原生成链路。该异常保护只覆盖 Gate evaluator，不会掩盖检索、Query Rewrite、Prompt 或 LLM 异常。以上模式仅描述历史实验，不是当前运行时配置。
 
 空候选保持 Gate 接入前的历史行为：普通 RAG 继续原 Prompt/LLM 流程；LangGraph RAG 返回原有固定无答案结果。
 
@@ -146,16 +146,16 @@ Calibration 的相对最优 `0.58` 在一次性 Holdout 上只拦截 `1/8` no-an
 
 因此首轮阈值仅保留用于复现实验，生产默认模式改为 `off`。
 
-## 14. 为什么默认不启用 Enforcement
+## 14. 为什么生产固定关闭 Gate
 
 Enforcement 会让 Gate block 真正阻断生成。当前 Holdout 已证明该决策不可靠，启用后会同时造成正常问题误拒和无答案问题漏放。
 
-后续实现保留了显式 `RAG_GATE_MODE=enforce` 供目标数据集验收：block 会真正阻断生成，evaluator 异常时 fail-closed。该模式仍不是仓库部署默认值，未完成目标数据集阈值验收不得启用。
+后续历史实现曾保留可配置的 enforce 分支供目标数据集验收；该实验已停止，生产代码固定关闭 Gate，相关性信号只用于观测，不阻断生成。`rule` 查询重写同样只保留在离线评估脚本中。
 
 ## 15. 当前最终状态
 
 - Scored Retrieval、同候选信号合并、Shadow 日志和 evaluator fail-open 已实现。
-- Gate 默认模式为 `off`；`shadow` 只分析不阻断；`enforce` 仅供显式验收后启用。
+- 当前 Gate 固定关闭；`shadow` / `enforce` 不再是生产或运行时路径，本文件中的相关结果仅作为历史实验资料保留。
 - 当前没有实现可靠的生成前无答案拦截。
 - 当前没有减少实际 LLM 调用。
 - Shadow 数据不能作为生产准确率。

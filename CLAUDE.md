@@ -65,9 +65,9 @@ cd deploy && docker compose -f docker-compose.prod.yml up -d
 
 ### Python Agent 状态图（LangGraph）
 
-main 同时保留两套互斥状态图，由 `AGENT_LOOP_ENABLED` 切换：
+main 的生产入口固定使用 Planner-first 状态图；legacy 图仅保留给直接测试/离线兼容场景：
 
-- **legacy Router-first**（`AGENT_LOOP_ENABLED=false`，显式回退）
+- **legacy Router-first**（仅直接测试/离线兼容）
 
 ```
 START → safety_node → router_node → rag_node → END
@@ -76,7 +76,7 @@ START → safety_node → router_node → rag_node → END
                               └→ refuse_node → END
 ```
 
-- **Planner-first**（`AGENT_LOOP_ENABLED=true`，仓库部署默认）
+- **Planner-first**（生产唯一入口）
 
 ```
 START → safety_node → planner_node ⇄ tool_executor_node → finalize_node → END
@@ -94,10 +94,10 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 ### LangGraph PostgreSQL 执行快照
 
 - Java 仅用已认证 `VerifiedIdentity.userId()` 和已解析 `conversationId` 计算稳定 `X-Agent-Thread-Id`；客户端 header 不可信。
-- Python `LANGGRAPH_CHECKPOINT_MODE=POSTGRES` 时在 FastAPI 启动阶段创建 Pool、执行 `PostgresSaver.setup()`、编译两套持久化图；任一步失败即启动失败，不降级。
+- Python 在 FastAPI 启动阶段固定创建 PostgreSQL Pool、执行 `PostgresSaver.setup()`、编译持久化图；DSN 缺失或任一步失败即启动失败，不降级。
 - Planner 与 legacy 分别使用 `:planner-v1` / `:deterministic-v1` 后缀；每个节点 `durability="sync"` 写入。Planner-first fresh execution 保存 strict recovery marker；同一 thread 的 exact same unfinished request 通过 latest `snapshot.next`、marker/date/pending-node/replay-safe 校验后使用 `graph.invoke(None)` 恢复，并重新注入当前 Runtime Context。completed execution 和 legacy deterministic graph 永远 Fresh；interrupt、冲突、不兼容 marker 或 unsafe Tool fail-closed 为 409。
 - Checkpoint 只保存 Agent 执行状态；Conversation Memory 仍是语义连续性，Java 业务数据库仍是业务事实和授权权威。`tool_history` 是当前 execution 历史，Fresh 时清空、Resume 时保留；`execution_history` 是最多 16 条的 `CONTEXT_ONLY` 成功步骤摘要，仅在 ACTIVE Memory 且 task type 匹配时 hydrate，不可直接复用为当前业务事实。Recovery marker 只保存 request/date/actor scope locator，不保存 raw employee 或权限；当前权限撤销且旧状态已有 eval 成功结果或 business proposal material 时 fail-closed。
-- P3-5A / P3-5B2a / P3-5B2b / P3-5B3：Python 图只为已由 Java 成功提交且带本地 ExpenseClaim `request_id` 的报销确认追加持久化 `external_wait_node(interrupt)`。B2a 的 Mock OA SQLite 先提交 PENDING → APPROVED/REJECTED，再发送不含 status 的 HMAC-SHA256 webhook；Java 验证原始 body、5 分钟 timestamp 后 GET OA 权威状态，以幂等且禁止回退的方式更新 ExpenseClaim。B2b 增加默认关闭、低频、限批的 Java reconciliation，只对 due 的 `WAITING_APPROVAL + MOCK_OA` 记录先做 `external_last_checked_at` CAS，再执行权威 GET；Webhook 与 reconciliation 共用状态同步逻辑。B3 只在 Java ExpenseClaim 终态提交后从持久化 correlation 重建可信 Runtime Context，使用 `allow_eval=false`、`allow_business_actions=false` 调用 external resume；Python 严格匹配后用 `Command(resume)` 收口 Graph END。普通 Chat 不跨过 external interrupt，Python 失败不回滚 Java 终态，交付可重试且同 payload 幂等；当前 Java thread guard 仍是单实例进程内边界。
+- P3-5A / P3-5B2a / P3-5B2b / P3-5B3：Python 图只为已由 Java 成功提交且带本地 ExpenseClaim `request_id` 的报销确认追加持久化 `external_wait_node(interrupt)`。B2a 的 Mock OA SQLite 先提交 PENDING → APPROVED/REJECTED，再发送不含 status 的 HMAC-SHA256 webhook；Java 验证原始 body、5 分钟 timestamp 后 GET OA 权威状态，以幂等且禁止回退的方式更新 ExpenseClaim。B2b 由 Java reconciliation worker 始终低频、限批地处理 due 的 `WAITING_APPROVAL + MOCK_OA` 记录，先做 `external_last_checked_at` CAS，再执行权威 GET；provider 关闭或查询失败时 fail-closed，Webhook 与 reconciliation 共用状态同步逻辑。B3 只在 Java ExpenseClaim 终态提交后从持久化 correlation 重建可信 Runtime Context，使用 `allow_eval=false`、`allow_business_actions=false` 调用 external resume；Python 严格匹配后用 `Command(resume)` 收口 Graph END。普通 Chat 不跨过 external interrupt，Python 失败不回滚 Java 终态，交付可重试且同 payload 幂等；当前 Java thread guard 仍是单实例进程内边界。
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）
@@ -156,9 +156,8 @@ Java 和 Python 都有并发限制：
 | `DEEPSEEK_BASE_URL` | API 地址 | https://api.deepseek.com |
 | `DEEPSEEK_MODEL` | 模型名称 | deepseek-chat |
 | `EMBEDDING_BACKEND` | 推理后端 | torch (可选 onnx_direct) |
-| `REWRITE_MODE` | 查询重写 | none (可选 rule) |
-| `RAG_GATE_MODE` | 检索门控 | off (可选 shadow) |
-| `AGENT_LOOP_ENABLED` | 切换 LangGraph 两套状态图 | true（仓库部署默认 Planner-first；false 显式回退 legacy） |
+| `LANGGRAPH_CHECKPOINT_DSN` | PostgreSQL 执行快照 DSN | 必填 |
+| `LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS` | PostgreSQL 连接/就绪超时 | 3 |
 | `JAVA_BASE_URL` | Python → Java 内部只读端点地址 | 空（只读企业 Tool 关闭；空时返回 `LEAVE_READ_DISABLED`） |
 | `JAVA_INTERNAL_TOKEN` | Python → Java 内部只读端点鉴权 | 空（空时鉴权失败） |
 | `JAVA_TIMEOUT_SECONDS` | Python → Java 内部只读超时秒数 | 5 |
@@ -182,7 +181,7 @@ Java 和 Python 都有并发限制：
 - **检索评估**: source_hit_rate + keyword_hit_rate → final_pass_rate
 - **生成评估**: keyword_groups 同义词组（组内 OR、组间 AND）
 - **负样本**: 10 个 no-answer 用例验证拒答能力
-- **Shadow Gate**: 实验性检索相关性门控（off/shadow）
+- **RAG Gate**: 固定关闭；相关性实验仅保留在离线评估材料中
 
 ## 注意事项
 

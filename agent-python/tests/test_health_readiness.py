@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
 
 from app import main
@@ -29,6 +31,9 @@ def test_readiness_returns_200_only_when_all_dependencies_are_ready(monkeypatch)
     monkeypatch.setattr(main, 'DEEPSEEK_MODEL', 'model')
     monkeypatch.setattr(main, 'chunk_store_status', lambda: {'ready': True, 'count': 1})
     monkeypatch.setattr(main, 'faiss_status', lambda: {'ready': True, 'count': 1})
+    runtime = Mock()
+    runtime.readiness.return_value = {'enabled': True, 'ready': True}
+    monkeypatch.setattr(main.app.state, 'checkpoint_runtime', runtime, raising=False)
 
     response = client.get('/agent/ready')
 

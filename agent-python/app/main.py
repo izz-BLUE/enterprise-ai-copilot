@@ -19,11 +19,9 @@ from app.capabilities.memory_capability_registry import MemoryCapabilityRegistry
 from app.capabilities.p0_default_capabilities import DEFAULT_P0_CAPABILITIES
 from app.core.concurrency import ConcurrencyLimitExceeded, ai_request_limiter
 from app.core.config import (
-    AGENT_LOOP_ENABLED,
     DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
-    LANGGRAPH_CHECKPOINT_MODE,
     MAX_MESSAGE_LENGTH,
     MEMORY_WRITE_MODE,
     logger,
@@ -245,7 +243,7 @@ def health():
     return {
         'service': 'agent-python',
         'status': 'UP',
-        'checkpoint': {'mode': LANGGRAPH_CHECKPOINT_MODE},
+        'checkpoint': {'mode': 'POSTGRES'},
         'concurrency': ai_request_limiter.snapshot(),
     }
 
@@ -258,8 +256,8 @@ def readiness() -> Response:
     checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
     if checkpoint_runtime is None:
         checkpoint = {
-            'enabled': LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES',
-            'ready': LANGGRAPH_CHECKPOINT_MODE == 'DISABLED',
+            'enabled': True,
+            'ready': False,
         }
     else:
         checkpoint = checkpoint_runtime.readiness()
@@ -450,8 +448,6 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     execution_mode, mode_error = _trusted_execution_mode(req, trace_id, request.taskId)
     if mode_error is not None:
         return mode_error
-    if execution_mode == 'TASK_RUNTIME' and LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
-        return _checkpoint_failure_response(trace_id, status_code=503)
     task_message = _task_input_message(request, execution_mode)
 
     if _validate_message_length(task_message, trace_id):
@@ -492,158 +488,140 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     # 不进入 Safety Guard 二次扫描，不修改任何 trusted 系统字段。
     memory_context = _memory_context_to_dict(request.memoryContext)
 
-    graph = None
-    runtime_thread_id = None
+    checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
+    if checkpoint_runtime is None:
+        logger.error('[%s] LangGraph checkpoint runtime 不可用', trace_id)
+        return _checkpoint_failure_response(trace_id, status_code=503)
+
     execution_history: list[dict] = []
     skip_memory_pipeline = False
-    if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES':
-        checkpoint_runtime = getattr(app.state, 'checkpoint_runtime', None)
-        if checkpoint_runtime is None:
-            logger.error('[%s] LangGraph checkpoint runtime 不可用', trace_id)
-            return _checkpoint_failure_response(trace_id, status_code=503)
-        try:
-            # X-Agent-Thread-Id 只由 Java 根据可信 identity + resolved conversationId
-            # 注入；缺失或格式不合法时 fail-closed，绝不自行生成或回退无快照模式。
-            runtime_thread_id = checkpoint_runtime.build_thread_id(
-                (req.headers.get('x-agent-thread-id') or '').strip(),
-                use_planner=AGENT_LOOP_ENABLED,
-            )
-            graph = checkpoint_runtime.get_graph(use_planner=AGENT_LOOP_ENABLED)
-        except (RuntimeError, ValueError):
-            logger.warning('[%s] LangGraph checkpoint 请求上下文无效', trace_id)
-            return _checkpoint_failure_response(trace_id, status_code=400)
+    try:
+        # X-Agent-Thread-Id 只由 Java 根据可信 identity + resolved conversationId
+        # 注入；缺失或格式不合法时 fail-closed，绝不自行生成或回退无快照模式。
+        runtime_thread_id = checkpoint_runtime.build_thread_id(
+            (req.headers.get('x-agent-thread-id') or '').strip(),
+            use_planner=True,
+        )
+        graph = checkpoint_runtime.get_graph(use_planner=True)
+    except (RuntimeError, ValueError):
+        logger.warning('[%s] LangGraph checkpoint 请求上下文无效', trace_id)
+        return _checkpoint_failure_response(trace_id, status_code=400)
 
     try:
-        if graph is not None:
-            # P3-2：同一个最终 thread_id 的 hydrate + invoke 必须处于同一进程内
-            # guard 中；并发请求立即返回 429，让客户端重新走完整 Java 链路。
-            if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
-                return _busy_response('/agent/langgraph/chat', trace_id)
+        # P3-2：同一个最终 thread_id 的 hydrate + invoke 必须处于同一进程内
+        # guard 中；并发请求立即返回 429，让客户端重新走完整 Java 链路。
+        if not checkpoint_runtime.try_acquire_thread(runtime_thread_id):
+            return _busy_response('/agent/langgraph/chat', trace_id)
+        try:
             try:
-                recovery = None
-                if AGENT_LOOP_ENABLED:
-                    try:
-                        recovery = checkpoint_runtime.inspect_recovery(
-                            graph=graph,
-                            thread_id=runtime_thread_id,
-                            question=task_message,
-                            business_date=business_date,
-                            employee_id=employee_id,
-                            allow_eval=allow_eval,
-                            allow_business_actions=allow_business_actions,
-                        )
-                    except Exception:
-                        logger.exception('[%s] LangGraph recovery inspection 读取失败', trace_id)
-                        return _checkpoint_failure_response(trace_id, status_code=503)
+                recovery = checkpoint_runtime.inspect_recovery(
+                    graph=graph,
+                    thread_id=runtime_thread_id,
+                    question=task_message,
+                    business_date=business_date,
+                    employee_id=employee_id,
+                    allow_eval=allow_eval,
+                    allow_business_actions=allow_business_actions,
+                )
+            except Exception:
+                logger.exception('[%s] LangGraph recovery inspection 读取失败', trace_id)
+                return _checkpoint_failure_response(trace_id, status_code=503)
 
-                    if recovery.is_conflict:
-                        logger.warning(
-                            '[%s] recovery_mode=CONFLICT reason=%s execution_id_prefix=%s pending_node=%s',
-                            trace_id,
-                            recovery.reason,
-                            (recovery.execution_id or '')[:11],
-                            recovery.pending_node or '-',
-                        )
-                        return _recovery_conflict_response(trace_id)
+            if recovery.is_conflict:
+                logger.warning(
+                    '[%s] recovery_mode=CONFLICT reason=%s execution_id_prefix=%s pending_node=%s',
+                    trace_id,
+                    recovery.reason,
+                    (recovery.execution_id or '')[:11],
+                    recovery.pending_node or '-',
+                )
+                return _recovery_conflict_response(trace_id)
 
-                    logger.info(
-                        '[%s] recovery_mode=%s execution_id_prefix=%s pending_node=%s',
-                        trace_id,
-                        recovery.mode.value,
-                        (recovery.execution_id or '')[:11],
-                        recovery.pending_node or '-',
-                    )
+            logger.info(
+                '[%s] recovery_mode=%s execution_id_prefix=%s pending_node=%s',
+                trace_id,
+                recovery.mode.value,
+                (recovery.execution_id or '')[:11],
+                recovery.pending_node or '-',
+            )
 
-                if recovery is not None and recovery.mode is RecoveryMode.RESUME:
-                    # Resume 使用 Checkpoint 中同一次 execution 的 state；不 hydrate
-                    # P3-2 execution_history，也不重建 initial AgentState。
-                    result = resume_langgraph_agent(
+            if recovery.mode is RecoveryMode.RESUME:
+                # Resume 使用 Checkpoint 中同一次 execution 的 state；不 hydrate
+                # P3-2 execution_history，也不重建 initial AgentState。
+                result = resume_langgraph_agent(
+                    graph=graph,
+                    runtime_thread_id=runtime_thread_id,
+                    allow_eval=allow_eval,
+                    allow_business_actions=allow_business_actions,
+                    business_date=business_date,
+                    trace_id=trace_id,
+                    employee_id=employee_id,
+                )
+            elif recovery.mode is RecoveryMode.WAITING_USER:
+                # A normal chat must never cross an active approval interrupt.
+                # Return the persisted proposal/wait marker so Java can perform
+                # idempotent PendingAction registration.
+                snapshot = graph.get_state(
+                    {'configurable': {'thread_id': runtime_thread_id}},
+                )
+                values = getattr(snapshot, 'values', None)
+                if not isinstance(values, dict):
+                    return _checkpoint_failure_response(trace_id, status_code=503)
+                result = dict(values)
+                result.update({
+                    'route': 'action',
+                    'category': 'business_action',
+                    'safe': True,
+                    'success': True,
+                    'hitl_wait': recovery.hitl_wait,
+                })
+            elif recovery.mode is RecoveryMode.WAITING_EXTERNAL:
+                # An external OA wait outranks a new user question and is
+                # never crossed by ordinary crash recovery.
+                snapshot = graph.get_state(
+                    {'configurable': {'thread_id': runtime_thread_id}},
+                )
+                values = getattr(snapshot, 'values', None)
+                if not isinstance(values, dict):
+                    return _checkpoint_failure_response(trace_id, status_code=503)
+                result = dict(values)
+                result.update({
+                    'answer': '报销申请已提交，正在等待外部审批。',
+                    'route': 'action',
+                    'category': 'business_action',
+                    'safe': True,
+                    'success': True,
+                    'external_wait': recovery.external_wait,
+                })
+                skip_memory_pipeline = True
+            else:
+                try:
+                    execution_history = checkpoint_runtime.load_execution_history(
                         graph=graph,
-                        runtime_thread_id=runtime_thread_id,
-                        allow_eval=allow_eval,
-                        allow_business_actions=allow_business_actions,
-                        business_date=business_date,
-                        trace_id=trace_id,
-                        employee_id=employee_id,
-                    )
-                elif recovery is not None and recovery.mode is RecoveryMode.WAITING_USER:
-                    # A normal chat must never cross an active approval
-                    # interrupt.  Return the persisted proposal/wait marker so
-                    # Java can perform idempotent PendingAction registration.
-                    snapshot = graph.get_state(
-                        {'configurable': {'thread_id': runtime_thread_id}},
-                    )
-                    values = getattr(snapshot, 'values', None)
-                    if not isinstance(values, dict):
-                        return _checkpoint_failure_response(trace_id, status_code=503)
-                    result = dict(values)
-                    result.update({
-                        'route': 'action',
-                        'category': 'business_action',
-                        'safe': True,
-                        'success': True,
-                        'hitl_wait': recovery.hitl_wait,
-                    })
-                elif recovery is not None and recovery.mode is RecoveryMode.WAITING_EXTERNAL:
-                    # An external OA wait outranks a new user question and is
-                    # never crossed by ordinary crash recovery.
-                    snapshot = graph.get_state(
-                        {'configurable': {'thread_id': runtime_thread_id}},
-                    )
-                    values = getattr(snapshot, 'values', None)
-                    if not isinstance(values, dict):
-                        return _checkpoint_failure_response(trace_id, status_code=503)
-                    result = dict(values)
-                    result.update({
-                        'answer': '报销申请已提交，正在等待外部审批。',
-                        'route': 'action',
-                        'category': 'business_action',
-                        'safe': True,
-                        'success': True,
-                        'external_wait': recovery.external_wait,
-                    })
-                    skip_memory_pipeline = True
-                else:
-                    try:
-                        execution_history = checkpoint_runtime.load_execution_history(
-                            graph=graph,
-                            thread_id=runtime_thread_id,
-                            memory_context=memory_context,
-                        )
-                    except Exception:
-                        logger.exception('[%s] LangGraph execution history 读取失败', trace_id)
-                        return _checkpoint_failure_response(trace_id, status_code=503)
-
-                    result = run_langgraph_agent(
-                        task_message,
-                        allow_eval=allow_eval,
-                        allow_business_actions=allow_business_actions,
-                        business_date=business_date,
-                        trace_id=trace_id,
-                        employee_id=employee_id,
-                        use_planner=AGENT_LOOP_ENABLED,
+                        thread_id=runtime_thread_id,
                         memory_context=memory_context,
-                        execution_history=execution_history,
-                        graph=graph,
-                        runtime_thread_id=runtime_thread_id,
-                        execution_mode=execution_mode,
                     )
-            finally:
-                # Memory Pipeline 在 guard 外运行；它不是 Checkpoint 的写入步骤。
-                checkpoint_runtime.release_thread(runtime_thread_id)
-        else:
-            agent_kwargs = {
-                'allow_eval': allow_eval,
-                'allow_business_actions': allow_business_actions,
-                'business_date': business_date,
-                'trace_id': trace_id,
-                'employee_id': employee_id,
-                'use_planner': AGENT_LOOP_ENABLED,
-                'memory_context': memory_context,
-            }
-            if execution_mode == 'TASK_RUNTIME':
-                agent_kwargs['execution_mode'] = execution_mode
-            result = run_langgraph_agent(task_message, **agent_kwargs)
+                except Exception:
+                    logger.exception('[%s] LangGraph execution history 读取失败', trace_id)
+                    return _checkpoint_failure_response(trace_id, status_code=503)
+
+                result = run_langgraph_agent(
+                    task_message,
+                    allow_eval=allow_eval,
+                    allow_business_actions=allow_business_actions,
+                    business_date=business_date,
+                    trace_id=trace_id,
+                    employee_id=employee_id,
+                    use_planner=True,
+                    memory_context=memory_context,
+                    execution_history=execution_history,
+                    graph=graph,
+                    runtime_thread_id=runtime_thread_id,
+                    execution_mode=execution_mode,
+                )
+        finally:
+            # Memory Pipeline 在 guard 外运行；它不是 Checkpoint 的写入步骤。
+            checkpoint_runtime.release_thread(runtime_thread_id)
 
         # Memory 提案是出口层旁路；任何 Pipeline 失败都不得阻断主响应。
         # Python 不再反向调用 Java，不持有 owner 签名能力；Java 在当前已认证请求内落库。
@@ -709,9 +687,6 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
         req, trace_id, req.headers.get('x-agent-task-id'))
     if mode_error is not None:
         return mode_error
-    if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
-        return _checkpoint_failure_response(trace_id, status_code=503)
-
     allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
     allow_business_actions = (
         req.headers.get('x-allow-business-actions', 'false').lower() == 'true'
@@ -834,9 +809,6 @@ def langgraph_external_resume(
         return mode_error
     if execution_mode == 'TASK_RUNTIME':
         return _external_resume_conflict_response(trace_id)
-    if LANGGRAPH_CHECKPOINT_MODE != 'POSTGRES':
-        return _checkpoint_failure_response(trace_id, status_code=503)
-
     allow_eval = req.headers.get('x-allow-eval', 'false').lower() == 'true'
     allow_business_actions = (
         req.headers.get('x-allow-business-actions', 'false').lower() == 'true'

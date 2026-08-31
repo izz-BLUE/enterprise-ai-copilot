@@ -40,14 +40,12 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 复制 `agent-python/.env.example` 为 `.env`，并按演示目的配置：
 
 ```text
-AGENT_LOOP_ENABLED=true
-LANGGRAPH_CHECKPOINT_MODE=POSTGRES
 LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
 ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 MEMORY_WRITE_MODE=DISABLED
 ```
 
-Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`，以及按需开启 `EXTERNAL_APPROVAL_RECONCILIATION_ENABLED` / `EXTERNAL_APPROVAL_RESUME_ENABLED`。功能默认关闭是安全基线，不是演示失败。
+Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`。外部审批 retry/reconciliation worker 会按间隔和批量参数低频运行，provider 关闭时 gateway fail-closed。
 
 ## 3. Start services
 
@@ -150,7 +148,7 @@ Java 收到通知后检查 HMAC 和 300 秒 timestamp window，然后 GET：
 GET http://localhost:8010/api/expense-approvals/<requestId>
 ```
 
-只有 GET 的 `APPROVED/REJECTED` 能更新本地 ExpenseClaim。Webhook 丢失时，打开 reconciliation，等待 due poll；它只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先做 CAS 再在事务外 GET。
+只有 GET 的 `APPROVED/REJECTED` 能更新本地 ExpenseClaim。Webhook 丢失时，reconciliation worker 会按低频、限批策略自动等待 due poll；它只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先做 CAS 再在事务外 GET。
 
 终态提交后 Java 才调用 Python external resume。成功时 Graph 以 `Command(resume)` 到 END；Python 不重新跑 Planner/Tool，也不触发 Memory proposal pipeline。若 resume 失败，ExpenseClaim 终态仍保留，retry markers 支持重新投递。
 
@@ -198,15 +196,15 @@ Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只
 
 | 现象 | 检查 |
 |---|---|
-| Agent 返回 checkpoint unavailable | `LANGGRAPH_CHECKPOINT_MODE`、DSN、PostgreSQL health、`PostgresSaver.setup()` |
+| Agent 返回 checkpoint unavailable | DSN、PostgreSQL health、`PostgresSaver.setup()` |
 | Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture employee ownership、trip/invoice 状态 |
 | Confirm 返回 503 | Python revalidation adapter 或 OA MCP 不可用；PendingAction 应保持可重试 |
 | Confirm 被拒绝为 stale | trip/invoice 在 Proposal 后发生变化；重新读取当前事实再建 Proposal |
 | OA 状态不变化 | `MOCK_OA_ENABLED`、base URL、webhook secret、Mock OA SQLite volume |
 | webhook 被拒绝 | raw body 签名、timestamp、精确 path 和共享 secret |
-| external resume 没有立即收口 | Java 终态是否已提交、resume enabled、retry markers；不要回滚 ExpenseClaim |
+| external resume 没有立即收口 | Java 终态是否已提交、retry markers；不要回滚 ExpenseClaim |
 | 两次请求互相 busy | 同一 runtime thread 的 process-local guard 正在保护完整 lifecycle |
 
 ## 8. Demo boundary
 
-演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、Mock OA、reconciliation、external resume retry 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。
+演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、`MOCK_OA_ENABLED` 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。

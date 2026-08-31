@@ -1,6 +1,9 @@
+from unittest.mock import Mock
+
 from fastapi.testclient import TestClient
 
 from app import main
+from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
 from app.schemas.chat_schema import ChatResponse
 
 client = TestClient(main.app)
@@ -18,6 +21,13 @@ def test_standard_rag_technical_failure_uses_502(monkeypatch):
 
 
 def test_agent_technical_failure_uses_502(monkeypatch):
+    runtime = Mock()
+    runtime.build_thread_id.return_value = 'rt_' + ('a' * 64) + ':planner-v1'
+    runtime.get_graph.return_value = Mock()
+    runtime.try_acquire_thread.return_value = True
+    runtime.inspect_recovery.return_value = RecoveryDecision(RecoveryMode.NEW_EXECUTION)
+    runtime.load_execution_history.return_value = []
+    monkeypatch.setattr(main.app.state, 'checkpoint_runtime', runtime, raising=False)
     monkeypatch.setattr(main, 'run_langgraph_agent', lambda *_args, **_kwargs: {
         'answer': 'unavailable',
         'route': 'error',

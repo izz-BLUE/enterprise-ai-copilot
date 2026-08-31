@@ -40,6 +40,6 @@
 
 ## Operational boundary
 
-默认策略：`MEMORY_WRITE_MODE=DISABLED`、`business.actions.enabled=false`、Mock OA/reconciliation/external-resume retry disabled。打开功能必须同时理解 Java authority、数据库、内部 token、Checkpoint 和外部回调边界。
+默认策略：`MEMORY_WRITE_MODE=DISABLED`、`business.actions.enabled=false`、Mock OA provider disabled。外部 reconciliation/external-resume retry worker 仍按低频边界调度，但 provider 不可用时 fail-closed。打开功能必须同时理解 Java authority、数据库、内部 token、Checkpoint 和外部回调边界。
 
 当前实现是小规格单机方案：Java/Python runtime guard 只在进程内生效，没有 distributed lease、event inbox/outbox、完整审计/告警或生产 SLA。任何需要多实例、真实 OA、强一致外部事务或长期 retention 的场景都需要单独的生产设计。

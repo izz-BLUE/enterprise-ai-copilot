@@ -28,7 +28,7 @@ Prompt 要求基于检索证据回答，无证据时明确拒答；返回 source
 
 ## Q7：Planner-first 与 Router-first 的关系？
 
-默认 `AGENT_LOOP_ENABLED=true` 是 `safety → planner ⇄ tool_executor → finalize`；`false` 才走 `safety → router → rag|eval|action|refuse`。两套图互斥但共享 Java authority；Router-first 是兼容回退，不是 primary。
+生产入口固定是 `safety → planner ⇄ tool_executor → finalize`；`safety → router → rag|eval|action|refuse` 仅作为测试/离线兼容图。两套图共享 Java authority；Router-first 不是生产 primary。
 
 ## Q8：Planner 会不会直接执行报销？
 
@@ -68,7 +68,7 @@ Mock OA webhook 故意不带 status，只带 event/request correlation。Java �
 
 ## Q17：webhook 丢失怎么办？
 
-默认关闭的 reconciliation 只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，对 `external_last_checked_at` 做 due CAS 后在事务外 GET，并与 webhook 共用 status-sync service。它是低频、限批补偿，不是消息队列。
+Reconciliation worker 始终低频、限批地扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，对 `external_last_checked_at` 做 due CAS 后在事务外 GET，并与 webhook 共用 status-sync service；provider 关闭或查询失败时 fail-closed。它是补偿机制，不是消息队列。
 
 ## Q18：外部 resume 失败会不会回滚报销？
 

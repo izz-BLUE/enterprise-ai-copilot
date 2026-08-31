@@ -16,6 +16,8 @@ cd backend-java
 cd agent-python
 uv sync
 uv run pytest -q
+# app.core.config requires a reachable PostgreSQL checkpoint DSN for evaluations.
+export LANGGRAPH_CHECKPOINT_DSN=postgresql://checkpoint_user:checkpoint_password@localhost:5432/enterprise_ai_runtime
 uv run python scripts/eval/eval_retrieval.py --rewrite-mode none \
   --min-source-hit-rate 100 --min-keyword-hit-rate 95 --min-final-pass-rate 95
 uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule

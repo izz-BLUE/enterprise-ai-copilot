@@ -27,7 +27,7 @@
 
 预期 `safe=false` 或 `route=refuse`，说明 Safety Guard 位于 Planner/RAG 前，是规则型纵深防御，不是完整授权系统。
 
-说明：仓库部署默认 `AGENT_LOOP_ENABLED=true`，走 Planner-first；显式 `false` 才走 Router-first 兼容图。Planner 只有规划权，Tool Executor 和 Java authority 仍是执行边界。
+说明：生产入口固定走 Planner-first；Router-first 仅作为测试/离线兼容图保留。Planner 只有规划权，Tool Executor 和 Java authority 仍是执行边界。
 
 ## 3. Expense Proposal（90 秒）
 
@@ -82,7 +82,7 @@ curl -X POST http://localhost:8010/api/admin/expense-approvals/<requestId>/appro
 GET /api/expense-approvals/{requestId}
 ```
 
-同终态 no-op，禁止回退和反向覆盖。Webhook 丢失时，默认关闭的 bounded reconciliation 共享同一 status-sync service。
+同终态 no-op，禁止回退和反向覆盖。Webhook 丢失时，始终运行的 bounded reconciliation worker 共享同一 status-sync service，provider 关闭时 fail-closed。
 
 ## 7. External resume（60 秒）
 
