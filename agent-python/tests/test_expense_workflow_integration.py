@@ -65,6 +65,26 @@ INVOICE_ANSWER = json.dumps({
     "amount": 1600, "category": "HOTEL", "duplicate": False,
 }, ensure_ascii=False)
 
+TRAVEL_MULTI_TRIP_ANSWER = json.dumps({
+    "success": True,
+    "items": [
+        json.loads(TRAVEL_ANSWER)["items"][0],
+        {
+            "trip_id": "TRIP-20260825-003",
+            "employee_id": "E10001",
+            "destination": "深圳",
+            "start_date": "2026-08-25",
+            "end_date": "2026-08-27",
+            "purpose": "供应商洽谈",
+            "status": "PENDING",
+            "expense_documents": [
+                {"invoice_id": "INV-006", "category": "MEAL",
+                 "declared_amount": 80, "description": "供应商工作餐"},
+            ],
+        },
+    ],
+}, ensure_ascii=False)
+
 INVOICE_2_ANSWER = json.dumps({
     "success": True, "invoice_id": "INV-002", "valid": True,
     "amount": 230, "category": "TAXI", "duplicate": False,
@@ -544,6 +564,60 @@ class TestPlannerSelection:
         assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
         assert prop.invoke.call_args.args[0]["expense_reason"] == "客户拜访"
         assert result["tool_history"][-1]["arguments"] == {}
+
+    def test_multi_trip_expense_chain_verifies_only_selected_trip_invoices(self):
+        """Planner 只应验真 selected trip 的 INV-001 / INV-002。"""
+        decisions = [
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
+                  "need_invoice_verify", expense_reason="客户拜访"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify", expense_reason="客户拜访"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户拜访"),
+            _finish("已生成报销申请草稿，请确认后提交。"),
+        ]
+        proposal_payload = json.dumps({
+            "success": True,
+            "kind": "proposal",
+            "action_proposal": {
+                "action_type": "EXPENSE_CLAIM",
+                "trip_id": "TRIP-20260818-001",
+                "claimed_amount": "1830.00",
+                "reimbursable_amount": "1730.00",
+                "cost_center": "COST-DEFAULT",
+                "reason": "客户拜访",
+                "invoice_ids": ["INV-001", "INV-002"],
+                "expense_items": [],
+                "stay_nights": 2,
+            },
+            "missing_fields": [],
+        }, ensure_ascii=False)
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
+             patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
+            travel.invoke.return_value = TRAVEL_MULTI_TRIP_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
+            prop.invoke.return_value = proposal_payload
+            result = run_langgraph_agent(
+                "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+            )
+
+        names = [h["tool_name"] for h in result["tool_history"]]
+        assert names == [
+            "travel_record_tool", "invoice_verify_tool", "invoice_verify_tool",
+            "expense_proposal_tool",
+        ]
+        assert [call.args[0]["invoice_id"] for call in inv.invoke.call_args_list] == [
+            "INV-001", "INV-002",
+        ]
+        assert result["action_proposal"]["invoice_ids"] == ["INV-001", "INV-002"]
 
     def test_task_runtime_clarification_callback_supplies_planner_reason(self):
         """第一次缺原因停在 clarification，Task Runtime 补充回答后可生成草稿。"""

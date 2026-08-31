@@ -9,8 +9,11 @@ app.schemas.planner_schema.PlannerDecision 保持完全一致：
 
 import json
 
+import pytest
+
 from app.agents.planner_node import (
     PLANNER_SYSTEM_PROMPT,
+    build_planner_prompt,
     build_planner_system_prompt,
 )
 from app.schemas.planner_schema import (
@@ -91,6 +94,103 @@ def test_prompt_declares_expense_reason_first_and_invoice_prerequisite():
     assert 'expense_reason 缺失时应优先调用该 Tool' in prompt
     assert '所有需要的发票验真成功后才能调用 expense_proposal_tool' in prompt
     assert '不得跳过验真直接生成草稿' in prompt
+
+
+def test_prompt_scopes_invoice_verification_to_selected_trip_only():
+    prompt = build_planner_system_prompt(list(ToolName.__args__))
+    assert '每个 trip 的 expense_documents 只属于该 trip，不能跨 trip 合并' in prompt
+    assert 'invoice_verify_tool 的范围严格等于 selected trip 的 expense_documents' in prompt
+    assert '不得验证其它 trip 的 invoice references' in prompt
+    assert 'selected trip 的 expense_documents 全部成功验真后，必须立即调用 expense_proposal_tool' in prompt
+    assert 'selected trip 没有 expense_documents 时不得借用其它 trip 的发票' in prompt
+
+
+_MULTI_TRIP_OBSERVATION = json.dumps({
+    'success': True,
+    'items': [
+        {
+            'trip_id': 'TRIP-20260818-001',
+            'status': 'APPROVED',
+            'expense_documents': [
+                {'invoice_id': 'INV-001'},
+                {'invoice_id': 'INV-002'},
+            ],
+        },
+        {
+            'trip_id': 'TRIP-20260825-003',
+            'status': 'PENDING',
+            'expense_documents': [{'invoice_id': 'INV-006'}],
+        },
+    ],
+}, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ('case_name', 'question', 'tool_history', 'observation', 'memory_context',
+     'continuation_original_request'),
+    [
+        ('case1', '最近一次已批准出差和对应发票', [], _MULTI_TRIP_OBSERVATION,
+         None, None),
+        ('case2', '最近一次已批准出差和对应发票', [
+            {'tool_name': 'travel_record_tool', 'status': 'success',
+             'arguments': {}, 'observation': _MULTI_TRIP_OBSERVATION},
+            {'tool_name': 'invoice_verify_tool', 'status': 'success',
+             'arguments': {'invoice_id': 'INV-001'},
+             'observation': '{"success":true,"invoice_id":"INV-001"}'},
+        ], '{"success":true,"invoice_id":"INV-001"}', None, None),
+        ('case3', '最近一次已批准出差和对应发票', [
+            {'tool_name': 'travel_record_tool', 'status': 'success',
+             'arguments': {}, 'observation': _MULTI_TRIP_OBSERVATION},
+            {'tool_name': 'invoice_verify_tool', 'status': 'success',
+             'arguments': {'invoice_id': 'INV-001'},
+             'observation': '{"success":true,"invoice_id":"INV-001"}'},
+            {'tool_name': 'invoice_verify_tool', 'status': 'success',
+             'arguments': {'invoice_id': 'INV-002'},
+             'observation': '{"success":true,"invoice_id":"INV-002"}'},
+        ], '{"success":true,"invoice_id":"INV-002"}', None, None),
+        ('case4', '目标 trip 没有发票时准备报销', [], json.dumps({
+            'success': True,
+            'items': [
+                {'trip_id': 'TRIP-TARGET', 'status': 'APPROVED',
+                 'expense_documents': []},
+                {'trip_id': 'TRIP-OTHER', 'status': 'APPROVED',
+                 'expense_documents': [{'invoice_id': 'INV-OTHER'}]},
+            ],
+        }, ensure_ascii=False), None, None),
+        ('case5', '请报销 TRIP-20260818-001 的对应发票', [],
+         _MULTI_TRIP_OBSERVATION, None, None),
+        ('case6', '客户拜访', [], _MULTI_TRIP_OBSERVATION, {
+            'taskType': 'EXPENSE_REQUEST',
+            'status': 'ACTIVE',
+            'taskStateJson': '{"waiting_for":"reason"}',
+        }, '根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。'),
+    ],
+)
+def test_expense_planner_cases_receive_scoped_trip_invoice_contract(
+    case_name, question, tool_history, observation, memory_context,
+    continuation_original_request,
+):
+    """所有 Expense Planner 场景都收到同一 selected-trip scope contract。"""
+    del case_name
+    tools = ['travel_record_tool', 'invoice_verify_tool', 'expense_proposal_tool']
+    system = build_planner_system_prompt(tools)
+    user = build_planner_prompt(
+        question,
+        tools,
+        tool_history,
+        observation,
+        3,
+        memory_context,
+        continuation_original_request=continuation_original_request,
+    )
+    assert 'invoice_verify_tool 的范围严格等于 selected trip 的 expense_documents' in system
+    assert '不得验证其它 trip 的 invoice references' in system
+    assert 'selected trip 的 expense_documents 全部成功验真后，必须立即调用 expense_proposal_tool' in system
+    assert 'selected trip 没有 expense_documents 时不得借用其它 trip 的发票' in system
+    assert observation in user
+    if continuation_original_request:
+        assert 'current user input（expense_reason 来源）: 客户拜访' in user
+        assert continuation_original_request in user
 
 
 def test_dynamic_prompt_requires_business_proposal_after_read_only_facts():

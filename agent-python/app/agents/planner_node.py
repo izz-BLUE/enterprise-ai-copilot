@@ -105,6 +105,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     TRAVEL_RECORD_TOOL_NAME: (
         '查询当前登录用户自己的出差记录。返回每条 trip 及其关联的 '
         'expense_documents(invoice reference,需 invoice_verify_tool 验真)。'
+        '每个 trip 的 expense_documents 只属于该 trip，不能跨 trip 合并。'
         '无 LLM 入参,身份与 limit 由程序层注入。'
     ),
     INVOICE_VERIFY_TOOL_NAME: (
@@ -339,10 +340,13 @@ TOOL_USAGE_RULES: dict[str, str] = {
         f'{RAG_TOOL_NAME}，不得进入报销 Proposal 或 reason clarification。\n'
         '- expense_reason 缺失时应优先调用该 Tool 产生 reason clarification；不要先调用 '
         f'{TRAVEL_RECORD_TOOL_NAME} 或 {INVOICE_VERIFY_TOOL_NAME} 收集其它字段。\n'
-        '- 用户要求“对应发票 / 相关发票 / 全部发票”时，先调用 '
-        f'{TRAVEL_RECORD_TOOL_NAME} 选择目标 trip，再对该 trip 的每个 invoice_id 调用 '
-        f'{INVOICE_VERIFY_TOOL_NAME}；所有需要的发票验真成功后才能调用 '
-        f'{EXPENSE_PROPOSAL_TOOL_NAME}。不得跳过验真直接生成草稿。\n'
+        '- 用户要求“对应发票 / 相关发票 / 全部发票”时，若返回多条 trip，必须先根据用户 selector '
+        '选出唯一 selected trip；每个 trip 的 expense_documents 只属于该 trip，不能跨 trip 合并。\n'
+        f'- {INVOICE_VERIFY_TOOL_NAME} 的范围严格等于 selected trip 的 expense_documents；只对其中的 '
+        'invoice_id 验真，不得验证其它 trip 的 invoice references，也不得为了“完整检查”继续调用。\n'
+        f'- selected trip 的 expense_documents 全部成功验真后，必须立即调用 '
+        f'{EXPENSE_PROPOSAL_TOOL_NAME}；selected trip 没有 expense_documents 时不得借用其它 trip 的发票。\n'
+        f'- 所有需要的发票验真成功后才能调用 {EXPENSE_PROPOSAL_TOOL_NAME}；不得跳过验真直接生成草稿。\n'
         '- 该 Tool 只生成待用户确认的草稿或 clarification，不会提交任何写操作。'
     ),
 }
