@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from contextlib import asynccontextmanager, nullcontext
@@ -62,6 +63,7 @@ from app.schemas.expense_revalidation_schema import (
 )
 from app.schemas.external_wait_schema import ExternalResumePayload
 from app.schemas.hitl_schema import HitlResumePayload
+from app.schemas.planner_schema import EXPENSE_PROPOSAL_TOOL_NAME
 from app.schemas.task_decomposition_schema import (
     TaskDecompositionRequest,
     TaskDecompositionResult,
@@ -310,6 +312,75 @@ def _memory_context_to_dict(memory_context) -> dict | None:
     if not data:
         return None
     return data
+
+
+def _attach_expense_original_request(
+    command: MemoryWriteCommand,
+    agent_result: dict,
+) -> MemoryWriteCommand:
+    """为首次 reason clarification 的 Memory command 注入原始用户请求。
+
+    Memory Extractor 负责提出任务状态，当前集成边界负责保存确定性的原始
+    Q1。它只在 Expense Proposal 明确返回 reason clarification 时生效，
+    不读取 summary，也不影响其它任务的 Memory command。
+    """
+    if (
+        command.action != 'UPSERT'
+        or command.status != 'ACTIVE'
+        or command.task_type != 'EXPENSE_REQUEST'
+        or not isinstance(command.task_state, dict)
+        or command.task_state.get('waiting_for') != 'reason'
+    ):
+        return command
+    missing_fields = agent_result.get('missing_fields')
+    if not isinstance(missing_fields, list) or 'reason' not in missing_fields:
+        return command
+    if agent_result.get('action_proposal') is not None:
+        return command
+
+    clarification_found = False
+    tool_history = agent_result.get('tool_history')
+    if isinstance(tool_history, list):
+        for item in tool_history:
+            if (
+                not isinstance(item, dict)
+                or item.get('tool_name') != EXPENSE_PROPOSAL_TOOL_NAME
+                or item.get('status') != 'success'
+            ):
+                continue
+            observation = item.get('observation')
+            if isinstance(observation, str):
+                try:
+                    observation = json.loads(observation)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if not isinstance(observation, dict):
+                continue
+            observed_missing = observation.get('missing_fields')
+            if (
+                observation.get('kind') == 'clarification'
+                and isinstance(observed_missing, list)
+                and 'reason' in observed_missing
+            ):
+                clarification_found = True
+                break
+    if not clarification_found:
+        return command
+
+    current_original = command.task_state.get('original_request')
+    if isinstance(current_original, str) and current_original.strip():
+        return command
+    original_request = agent_result.get('question')
+    if not isinstance(original_request, str) or not original_request.strip():
+        return command
+
+    enriched_state = dict(command.task_state)
+    enriched_state['original_request'] = original_request
+    # 与 MemoryWritePolicy / Java AiTaskMemoryService 保持同一 fail-closed
+    # 上限；超限时不返回一个可能被下游拒绝的提案。
+    if len(json.dumps(enriched_state, ensure_ascii=False).encode('utf-8')) > 16 * 1024:
+        return command
+    return command.model_copy(update={'task_state': enriched_state})
 
 
 def _revalidation_unavailable(trace_id: str) -> JSONResponse:
@@ -632,7 +703,10 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                 memory_hook, response_writer = runtime
                 runtime_result = memory_hook.after_agent_response(result, conversation_id)
                 if runtime_result.written and response_writer.command is not None:
-                    command = response_writer.command
+                    command = _attach_expense_original_request(
+                        response_writer.command,
+                        result,
+                    )
                     memory_proposal = AgentMemoryProposal(
                         task_type=command.task_type,
                         task_state=command.task_state,

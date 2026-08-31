@@ -131,6 +131,9 @@ class _ExecutorContext:
     question: str
     business_date: Any  # date | None
     expense_reason: str | None = None
+    # ACTIVE Expense continuation 的 Q1 仅供 expense_proposal_tool 的
+    # 差旅/发票确定性解析；普通 Tool 仍只接收当前请求 question。
+    expense_request_question: str | None = None
     tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
 
 
@@ -296,7 +299,7 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
         raise PlannerDecisionError(
             f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
         )
-    merged['question'] = ctx.question
+    merged['question'] = ctx.expense_request_question or ctx.question
     merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
     merged['trace_id'] = ctx.trace_id
     merged['context'] = _build_expense_proposal_context(ctx.tool_history)
@@ -622,6 +625,7 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             # 只使用当前请求第一次 Planner 决策冻结的值；不能让本轮
             # 最新 PlannerDecision 覆盖此前的 null 或有效原因。
             expense_reason=state.get('request_expense_reason'),
+            expense_request_question=state.get('continuation_original_request'),
             tool_history=tool_history,
         )
         if spec.pre_inject is not None:

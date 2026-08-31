@@ -172,7 +172,8 @@ def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
     assert result['request_expense_reason'] is None
 
 
-def test_new_request_resets_frozen_reason_and_continuation_can_extract():
+def test_new_request_resets_frozen_reason_and_continuation_can_extract(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
     raw = (
         '{"action":"tool","tool_name":"expense_proposal_tool",'
         '"arguments":{},"reason_code":"need_expense_proposal",'
@@ -180,13 +181,17 @@ def test_new_request_resets_frozen_reason_and_continuation_can_extract():
     )
     with patch('app.agents.planner_node.call_llm', return_value=raw):
         result = planner_node(state(
-            question='根据原任务补充信息：客户拜访',
+            question='客户拜访',
             step_count=0,
             request_expense_reason=None,
             memory_context={
                 'taskType': 'EXPENSE_REQUEST',
                 'status': 'ACTIVE',
-                'taskStateJson': '{"missing_fields":["reason"]}',
+                'taskStateJson': (
+                    '{"waiting_for":"reason",'
+                    '"original_request":"根据我最近一次已批准的出差和对应发票，'
+                    '帮我准备差旅报销申请。"}'
+                ),
                 'summary': '等待用户提供本次报销原因',
             },
             allow_business_actions=True,

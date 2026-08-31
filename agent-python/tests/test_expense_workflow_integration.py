@@ -18,6 +18,13 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.agents.langgraph_agent import run_langgraph_agent
+from app.agents.planner_node import (
+    _active_expense_original_request,
+    _is_active_expense_reason_wait,
+    build_planner_prompt,
+    planner_node,
+)
+from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +101,299 @@ def _run_with_history(question, tool_history, *, employee_id="E10001",
         business_date=date(2026, 8, 26),
         memory_context=memory_context,
     )
+
+
+class TestExpenseReasonContinuation:
+    """ACTIVE Expense reason 补槽的 Java Memory contract。"""
+
+    @pytest.mark.parametrize(
+        ("memory_context", "expected"),
+        [
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":"reason"}',
+                },
+                True,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"missing_fields":["reason"]}',
+                },
+                True,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":"invoice_ids"}',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":""}',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":null}',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":"reason"',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "LEAVE_REQUEST",
+                    "status": "ACTIVE",
+                    "taskStateJson": '{"waiting_for":"reason"}',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "COMPLETED",
+                    "taskStateJson": '{"waiting_for":"reason"}',
+                },
+                False,
+            ),
+            (
+                {
+                    "taskType": "EXPENSE_REQUEST",
+                    "status": "ACTIVE",
+                    "summary": "之前出差 purpose=项目验收",
+                },
+                False,
+            ),
+            (None, False),
+        ],
+    )
+    def test_waiting_reason_contract_is_structured_and_fail_closed(
+        self, memory_context, expected,
+    ):
+        assert _is_active_expense_reason_wait(memory_context) is expected
+
+    def test_current_reply_is_planned_as_expense_continuation(self):
+        """ACTIVE waiting_for=reason 允许当前输入成为本轮 Planner 原因。"""
+        memory_context = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": (
+                    "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。"
+                ),
+            }, ensure_ascii=False),
+            "summary": "等待用户提供本次报销原因",
+        }
+        state = {
+            "question": "客户拜访",
+            "step_count": 0,
+            "tool_history": [],
+            "observation": "",
+            "execution_history": [],
+            "memory_context": memory_context,
+            "employee_id": "E10001",
+            "allow_eval": False,
+            "allow_business_actions": True,
+            "business_date": date(2026, 8, 26),
+            "trace_id": "expense-reason-continuation",
+        }
+        with patch(
+            "app.agents.planner_node.call_llm",
+            return_value=_tool(
+                "expense_proposal_tool", {}, "need_expense_proposal",
+                expense_reason="客户拜访",
+            ),
+        ):
+            result = planner_node(
+                checkpoint_safe_state(state), runtime_for_state(state),
+            )
+
+        assert result["planner_decision"]["tool_name"] == "expense_proposal_tool"
+        assert result["planner_decision"]["expense_reason"] == "客户拜访"
+        assert result["request_expense_reason"] == "客户拜访"
+
+    @pytest.mark.parametrize(
+        "summary",
+        [
+            "等待用户提供本次报销原因",
+            "之前出差 purpose=项目验收",
+        ],
+    )
+    def test_current_user_reason_is_frozen_over_memory_or_tool_purpose(self, summary):
+        """Java payload + 当前用户补槽值必须进入同一 Expense Proposal。"""
+        decisions = [
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
+                  "need_invoice_verify", expense_reason="项目验收"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify", expense_reason="项目验收"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="项目验收"),
+            _finish("已生成报销申请草稿，请确认后提交。"),
+        ]
+        active_memory = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": (
+                    "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。"
+                ),
+            }, ensure_ascii=False),
+            "summary": summary,
+        }
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv:
+            travel.invoke.return_value = TRAVEL_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
+
+            result = run_langgraph_agent(
+                "客户拜访",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                memory_context=active_memory,
+            )
+
+        assert result["request_expense_reason"] == "客户拜访"
+        assert result["action_proposal"]["reason"] == "客户拜访"
+
+    def test_original_request_is_read_only_from_structured_task_state(self):
+        original = "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。"
+        memory_context = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": original,
+            }, ensure_ascii=False),
+            "summary": "summary 不应作为原始请求",
+        }
+        assert _active_expense_original_request(memory_context) == original
+        assert _active_expense_original_request({
+            **memory_context,
+            "taskStateJson": '{"waiting_for":"reason"}',
+        }) is None
+
+    def test_missing_original_request_fails_closed_without_planner_call(self):
+        memory_context = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": '{"waiting_for":"reason"}',
+            "summary": "之前请求是根据最近一次已批准出差准备报销",
+        }
+        with patch("app.agents.planner_node.call_llm") as llm:
+            result = run_langgraph_agent(
+                "客户拜访",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                memory_context=memory_context,
+            )
+        llm.assert_not_called()
+        assert result["action_proposal"] is None
+        assert result["route"] == "refuse"
+        assert "报销申请上下文不完整" in result["answer"]
+
+    def test_q2_reason_and_q1_expense_input_stay_separate(self):
+        original = "根据我最近一次已批准的客户拜访出差和对应发票，帮我准备差旅报销申请。"
+        memory_context = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": original,
+            }, ensure_ascii=False),
+        }
+        decisions = [
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户现场项目验收"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
+                  "need_invoice_verify"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户现场项目验收"),
+            _finish("已生成报销申请草稿，请确认后提交。"),
+        ]
+        proposal_payload = json.dumps({
+            "success": True,
+            "kind": "proposal",
+            "action_proposal": {
+                "action_type": "EXPENSE_CLAIM",
+                "trip_id": "TRIP-20260818-001",
+                "claimed_amount": "1830.00",
+                "reimbursable_amount": "1730.00",
+                "cost_center": "COST-DEFAULT",
+                "reason": "客户现场项目验收",
+                "invoice_ids": ["INV-001", "INV-002"],
+                "expense_items": [],
+                "stay_nights": 2,
+            },
+            "missing_fields": [],
+        }, ensure_ascii=False)
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
+             patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
+            travel.invoke.return_value = TRAVEL_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
+            prop.invoke.return_value = proposal_payload
+            result = run_langgraph_agent(
+                "客户现场做项目验收",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                memory_context=memory_context,
+            )
+
+        assert result["request_expense_reason"] == "客户现场项目验收"
+        assert result["action_proposal"]["reason"] == "客户现场项目验收"
+        assert prop.invoke.call_args.args[0]["question"] == original
+        assert prop.invoke.call_args.args[0]["expense_reason"] == "客户现场项目验收"
+        assert inv.invoke.call_count == 2
+
+    def test_continuation_prompt_labels_current_and_original_requests_separately(self):
+        prompt = build_planner_prompt(
+            "客户拜访",
+            ["expense_proposal_tool"],
+            [],
+            "",
+            5,
+            {
+                "taskType": "EXPENSE_REQUEST",
+                "status": "ACTIVE",
+                "taskStateJson": '{"waiting_for":"reason"}',
+            },
+            [],
+            "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。",
+        )
+        assert "current user input（expense_reason 来源）: 客户拜访" in prompt
+        assert "continuation original request（仅用于差旅/发票选择）" in prompt
+        assert "二者不得拼接" in prompt
 
 
 class TestPlannerSelection:
@@ -267,7 +567,10 @@ class TestPlannerSelection:
         active_memory = {
             "taskType": "EXPENSE_REQUEST",
             "status": "ACTIVE",
-            "taskStateJson": '{"missing_fields":["reason"]}',
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": original_task,
+            }, ensure_ascii=False),
             "summary": "等待用户提供本次报销原因",
         }
         with patch("app.agents.planner_node.call_llm") as llm, \
@@ -296,7 +599,7 @@ class TestPlannerSelection:
             llm.reset_mock()
             llm.side_effect = second_decisions
             second = run_langgraph_agent(
-                original_task + "\n补充信息：客户拜访",
+                "客户拜访",
                 use_planner=True,
                 employee_id="E10001",
                 allow_business_actions=True,

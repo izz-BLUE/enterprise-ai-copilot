@@ -6,7 +6,11 @@ from unittest.mock import Mock, patch
 from fastapi import Request
 import pytest
 
-from app.main import app, langgraph_chat
+from app.main import (
+    _attach_expense_original_request,
+    app,
+    langgraph_chat,
+)
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
 from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
@@ -120,6 +124,56 @@ def test_enabled_memory_is_returned_as_non_authoritative_response_proposal():
     assert "conversation_id" not in dumped
     assert "action" not in dumped
     assert "status" not in dumped
+
+
+def test_first_expense_reason_clarification_memory_keeps_raw_original_request():
+    original = "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。"
+    command = MemoryWriteCommand(
+        action="UPSERT",
+        task_type="EXPENSE_REQUEST",
+        status="ACTIVE",
+        task_state={"waiting_for": "reason"},
+        summary="等待用户提供本次报销原因",
+    )
+    result = {
+        "question": original,
+        "action_proposal": None,
+        "missing_fields": ["reason"],
+        "tool_history": [{
+            "tool_name": "expense_proposal_tool",
+            "status": "success",
+            "observation": json.dumps({
+                "success": True,
+                "kind": "clarification",
+                "action_proposal": None,
+                "missing_fields": ["reason"],
+            }, ensure_ascii=False),
+        }],
+    }
+
+    enriched = _attach_expense_original_request(command, result)
+
+    assert enriched.task_state == {
+        "waiting_for": "reason",
+        "original_request": original,
+    }
+
+
+def test_non_expense_memory_command_is_not_enriched_with_original_request():
+    command = MemoryWriteCommand(
+        action="UPSERT",
+        task_type="LEAVE_REQUEST",
+        status="ACTIVE",
+        task_state={"waiting_for": "date"},
+    )
+    result = {
+        "question": "根据最近一次出差帮我报销",
+        "missing_fields": ["reason"],
+        "action_proposal": None,
+        "tool_history": [],
+    }
+
+    assert _attach_expense_original_request(command, result) is command
 
 
 def test_invalid_or_missing_business_date_does_not_use_python_clock():
