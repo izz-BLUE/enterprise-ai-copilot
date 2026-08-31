@@ -148,7 +148,7 @@ Java 收到通知后检查 HMAC 和 300 秒 timestamp window，然后 GET：
 GET http://localhost:8010/api/expense-approvals/<requestId>
 ```
 
-只有 GET 的 `APPROVED/REJECTED` 能更新本地 ExpenseClaim。Webhook 丢失时，打开 reconciliation，等待 due poll；它只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先做 CAS 再在事务外 GET。
+只有 GET 的 `APPROVED/REJECTED` 能更新本地 ExpenseClaim。Webhook 丢失时，reconciliation worker 会按低频、限批策略自动等待 due poll；它只扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先做 CAS 再在事务外 GET。
 
 终态提交后 Java 才调用 Python external resume。成功时 Graph 以 `Command(resume)` 到 END；Python 不重新跑 Planner/Tool，也不触发 Memory proposal pipeline。若 resume 失败，ExpenseClaim 终态仍保留，retry markers 支持重新投递。
 
@@ -202,7 +202,7 @@ Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只
 | Confirm 被拒绝为 stale | trip/invoice 在 Proposal 后发生变化；重新读取当前事实再建 Proposal |
 | OA 状态不变化 | `MOCK_OA_ENABLED`、base URL、webhook secret、Mock OA SQLite volume |
 | webhook 被拒绝 | raw body 签名、timestamp、精确 path 和共享 secret |
-| external resume 没有立即收口 | Java 终态是否已提交、resume enabled、retry markers；不要回滚 ExpenseClaim |
+| external resume 没有立即收口 | Java 终态是否已提交、retry markers；不要回滚 ExpenseClaim |
 | 两次请求互相 busy | 同一 runtime thread 的 process-local guard 正在保护完整 lifecycle |
 
 ## 8. Demo boundary

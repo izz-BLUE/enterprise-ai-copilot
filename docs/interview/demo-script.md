@@ -82,7 +82,7 @@ curl -X POST http://localhost:8010/api/admin/expense-approvals/<requestId>/appro
 GET /api/expense-approvals/{requestId}
 ```
 
-同终态 no-op，禁止回退和反向覆盖。Webhook 丢失时，默认关闭的 bounded reconciliation 共享同一 status-sync service。
+同终态 no-op，禁止回退和反向覆盖。Webhook 丢失时，始终运行的 bounded reconciliation worker 共享同一 status-sync service，provider 关闭时 fail-closed。
 
 ## 7. External resume（60 秒）
 

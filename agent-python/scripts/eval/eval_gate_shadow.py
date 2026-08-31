@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""对现有 38 条数据执行不调用 LLM 的生成前门控 Shadow 评估。"""
+"""对现有 38 条数据执行固定关闭 Gate 的生成前门控回归评估。"""
 
 import json
 import os
@@ -28,7 +28,7 @@ def main() -> int:
     results = []
     for case in cases:
         chunks, signals = retrieve_with_signals(case['question'])
-        decision = evaluate_gate(signals, mode='shadow')
+        decision = evaluate_gate(signals)
         results.append({
             'id': case['id'],
             'label': 'answerable' if case.get('answerable', True) else 'no-answer',
@@ -66,8 +66,8 @@ def main() -> int:
     return 0 if summary == {
         'answerable_pass': 28,
         'answerable_reject': 0,
-        'no_answer_shadow_block': 10,
-        'no_answer_shadow_pass': 0,
+        'no_answer_shadow_block': 0,
+        'no_answer_shadow_pass': 10,
     } else 1
 
 

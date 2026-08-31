@@ -155,7 +155,7 @@ Enforcement 会让 Gate block 真正阻断生成。当前 Holdout 已证明该�
 ## 15. 当前最终状态
 
 - Scored Retrieval、同候选信号合并、Shadow 日志和 evaluator fail-open 已实现。
-- Gate 默认模式为 `off`；`shadow` 只分析不阻断；`enforce` 仅供显式验收后启用。
+- 当前 Gate 固定关闭；`shadow` / `enforce` 不再是生产或运行时路径，相关脚本仅作为历史实验资料保留。
 - 当前没有实现可靠的生成前无答案拦截。
 - 当前没有减少实际 LLM 调用。
 - Shadow 数据不能作为生产准确率。

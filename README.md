@@ -133,7 +133,7 @@ Confirm-time revalidation 在 Java 本地事务外调用 Python narrow adapter�
 
 Mock OA 是独立的 SQLite 模拟外部系统，不是企业业务事实源。提交使用 `Idempotency-Key: expense:<expenseId>`，初始为 `PENDING`；审批端点把它提交为 `APPROVED` 或 `REJECTED`。状态提交后才 best-effort 发送不含 status 的通知。Java 只接受精确 webhook 路径，验证原始 body 的 HMAC-SHA256 和不超过 5 分钟的 timestamp，再通过 Mock OA `GET` 取得权威状态；同终态 no-op，禁止回退到 `PENDING` 或反向覆盖终态。
 
-Webhook 丢失时，默认关闭的 reconciliation 仅扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，按 `external_last_checked_at` 做 due CAS，短事务提交后在事务外 GET，批量和频率均有上限。Java ExpenseClaim 终态提交后才发送 external resume；发送失败不会回滚 Java 终态，`external_resume_last_attempt_at` / `external_resume_completed_at` 支持低频重试。Python 收到严格 payload 后用 `Command(resume)` 收口 `Graph END`。
+Webhook 丢失时，reconciliation worker 始终低频、限批地扫描 `WAITING_APPROVAL + MOCK_OA + external_request_id`，按 `external_last_checked_at` 做 due CAS，短事务提交后在事务外 GET；provider 关闭或查询失败时 fail-closed。Java ExpenseClaim 终态提交后才发送 external resume；发送失败不会回滚 Java 终态，`external_resume_last_attempt_at` / `external_resume_completed_at` 支持低频重试。Python 收到严格 payload 后用 `Command(resume)` 收口 `Graph END`。
 
 ## Memory、history 与 checkpoint
 

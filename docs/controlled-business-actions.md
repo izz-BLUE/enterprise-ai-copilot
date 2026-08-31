@@ -146,7 +146,7 @@ Java webhook 的唯一路径是 `POST /api/webhooks/mock-oa/expense-approval`。
 
 认证失败返回 401，body 不合法返回 400，status sync 失败返回 502。通知本身没有状态 authority，伪造或过期通知不能直接改变 ExpenseClaim。
 
-Reconciliation 默认关闭，默认 60 秒、批量 20（代码限制 1–100）。候选只包含 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先对 `external_last_checked_at` 做 due CAS 并提交，再在事务外 GET；Webhook 与 reconciliation 共用同一 status-sync service。Submission retry 与 external-resume retry 也默认关闭并独立限批。
+Reconciliation worker 始终按默认 60 秒、批量 20（代码限制 1–100）低频运行。候选只包含 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先对 `external_last_checked_at` 做 due CAS 并提交，再在事务外 GET；provider 关闭或查询失败时 fail-closed，Webhook 与 reconciliation 共用同一 status-sync service。Submission retry 与 external-resume retry 也始终运行并独立限批。
 
 ## 8. External resume failure semantics
 
