@@ -166,7 +166,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 1. **评估集规模有限**：当前 38 个 eval cases，覆盖场景不够广泛
 2. **知识库规模较小**：当前知识库仅包含 HR / IT / Banking 样例文档
 3. **公网验证范围有限**：当前是小规格单机演示，不承诺生产 SLA
-4. **无正式用户权限**：Evaluation 只有共享 Admin Token，未接入 JWT/RBAC
+4. **无正式用户目录/RBAC**：Evaluation 已由 Java 验证 JWT 的 `role=ADMIN` 控制；`ADMIN_TOKEN` 仅保留为业务动作的 server-side hardening
 5. **无多轮对话**：当前仅支持单轮问答
 6. **无文档上传**：知识库文档手动管理
 7. **hybrid_rerank 提升不显著**：当前评估集上 Cross Encoder 精排未带来明显收益

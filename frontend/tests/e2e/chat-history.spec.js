@@ -27,6 +27,7 @@ const ZHANGSAN_USER = {
 }
 
 const TEST_CONVERSATION_ID = 'conv-history-e2e-001'
+const TEST_LOGIN_PASSWORD = 'test-only-login-password'
 const ANSWER_TEXT = '这是用于验证历史恢复的测试回答(唯一标识)。'
 const RAG_ANSWER_TEXT = '这是用于验证标准问答历史恢复的测试回答(RAG 标识)。'
 
@@ -109,7 +110,7 @@ async function mockRagChat(page, requests) {
 async function loginViaForm(page, username) {
   await page.goto('/')
   await page.getByRole('textbox', { name: '用户名' }).fill(username)
-  await page.getByRole('textbox', { name: '密码' }).fill('demo123456')
+  await page.getByRole('textbox', { name: '密码' }).fill(TEST_LOGIN_PASSWORD)
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '智能体问答' })).toBeVisible()
 }
@@ -328,7 +329,7 @@ test('admin 退出重登:agent 与 rag 历史分别恢复,认证态被清而历�
 
   // 同一账号重登:恢复上次所在模式(rag),再切 agent 恢复 agent 历史
   await page.getByRole('textbox', { name: '用户名' }).fill('admin')
-  await page.getByRole('textbox', { name: '密码' }).fill('demo123456')
+  await page.getByRole('textbox', { name: '密码' }).fill(TEST_LOGIN_PASSWORD)
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '标准问答' })).toBeVisible()
   await expect(page.locator('.messages-list')).toContainText(ragQuestion)
@@ -353,7 +354,7 @@ test('zhangsan 登录:看不到 admin 任一模式历史(用户隔离)', async (
   // zhangsan 登录:两个模式都看不到 admin 消息
   auth.setUser(ZHANGSAN_USER)
   await page.getByRole('textbox', { name: '用户名' }).fill('zhangsan')
-  await page.getByRole('textbox', { name: '密码' }).fill('demo123456')
+  await page.getByRole('textbox', { name: '密码' }).fill(TEST_LOGIN_PASSWORD)
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '智能体问答' })).toBeVisible()
   await expect(page.getByText(adminAgentQuestion)).toHaveCount(0)

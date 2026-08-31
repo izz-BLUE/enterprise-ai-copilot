@@ -94,9 +94,9 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         when(threadGuard.tryAcquire(THREAD_ID)).thenReturn(true);
         when(actionService.confirm(anyString(), anyString(), anyString(), anyString(),
                 anyString(), any())).thenReturn(committed);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(externalApprovalCoordinator.registerTaskRuntimeAndDispatch(
                 eq(action), eq(committed), eq("trace"))).thenReturn(true);
         when(pythonAgentGateway.post(eq("/agent/langgraph/hitl/resume"), any(),
@@ -142,9 +142,9 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
         when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
                 .thenReturn(THREAD_ID);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
                 any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
                 .thenReturn(new PythonAgentResponse("失败", "action", true,
@@ -206,8 +206,8 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 expenseWait.executionId(), expenseWait.waitId()))
                 .thenReturn(successorPending);
         when(actions.findByHitlWaitId(expenseWait.waitId())).thenReturn(Optional.empty());
-        when(actionService.isAllowed("admin")).thenReturn(true);
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), eq("trace")))
@@ -255,8 +255,8 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 proposal, "trace", "admin", identity, CONVERSATION_ID,
                 wait.executionId(), wait.waitId()))
                 .thenThrow(rejection);
-        when(actionService.isAllowed("admin")).thenReturn(true);
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), eq("trace")))
@@ -299,8 +299,8 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 proposal, "trace", "admin", identity, CONVERSATION_ID,
                 wait.executionId(), wait.waitId()))
                 .thenThrow(rejection);
-        when(actionService.isAllowed("admin")).thenReturn(true);
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), eq("trace")))
@@ -359,8 +359,8 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 expenseProposal, "trace", "admin", identity, CONVERSATION_ID,
                 expenseWait.executionId(), expenseWait.waitId()))
                 .thenThrow(t2Rejection);
-        when(actionService.isAllowed("admin")).thenReturn(true);
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(pythonAgentGateway.post(anyString(), any(), any(HttpHeaders.class),
                 eq(PythonAgentResponse.class), eq("trace")))
@@ -405,9 +405,9 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
         when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
                 .thenReturn(THREAD_ID);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
                 any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
                 .thenReturn(new PythonAgentResponse("请确认", "action", true,
@@ -449,9 +449,9 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         when(taskRuntimeService.startNextRunnable("group-1")).thenReturn(Optional.of(next));
         when(threadIdService.generate(USER_ID, CONVERSATION_ID, "task-2"))
                 .thenReturn(THREAD_ID);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), eq(identity))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
-        when(adminAccessService.isAdmin("admin")).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(identity)).thenReturn(true);
         when(pythonAgentGateway.post(eq("/agent/langgraph/chat"), any(),
                 any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace")))
                 .thenReturn(new PythonAgentResponse("请补充发票", "action", true,

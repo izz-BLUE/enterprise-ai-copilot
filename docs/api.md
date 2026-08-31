@@ -117,7 +117,7 @@ Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附�
 |---|---|---|---|
 | `GET` | `/api/admin/logs` | `ROLE_ADMIN` | 管理员诊断日志缓冲区 |
 
-`X-Admin-Token` 只控制 eval/管理能力，生产必须配置非空 `ADMIN_TOKEN`；它不是普通用户认证替代品。
+浏览器的 eval/管理能力由 Java 已验证 JWT 的 `role=ADMIN` 授权；浏览器不发送 `X-Admin-Token`。`X-Admin-Token` 仅作为内部业务动作 hardening 的兼容 header，`BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 时由 Java 校验匹配的 server-only `ADMIN_TOKEN`；它不是普通用户认证替代品。
 
 ## 3. Java internal read API
 
@@ -223,7 +223,7 @@ Mock OA 不是浏览器 API，是独立模拟外部审批服务。
 | Header | 来源/用途 |
 |---|---|
 | `Authorization: Bearer ...` | Java public authentication |
-| `X-Admin-Token` | Java eval/admin gate；不是身份 |
+| `X-Admin-Token` | 仅内部业务动作 hardening 的兼容 header；浏览器不发送，不是身份 |
 | `Idempotency-Key` | Confirm 必需 UUID；Mock OA 使用 `expense:<expenseId>` |
 | `X-Trace-Id` | Java 生成并透传；客户端值不作为 authority |
 | `X-Conversation-Id` | Java 解析后的 conversation scope |

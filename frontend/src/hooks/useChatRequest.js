@@ -10,7 +10,6 @@ export default function useChatRequest({
   input,
   setInput,
   setMessages,
-  adminToken,
   accessToken,
   conversationIdRef,
   rememberConversationId,
@@ -43,9 +42,6 @@ export default function useChatRequest({
 
     const endpoint = requestMode === 'agent' ? '/api/agent/langgraph/chat' : '/api/chat'
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json' }
-    if (requestMode === 'agent' && adminToken.trim()) {
-      headers['X-Admin-Token'] = adminToken.trim()
-    }
     const requestBody = requestMode === 'agent'
       ? { message: question, conversationId: conversationIdRef.current || undefined }
       : { message: question }

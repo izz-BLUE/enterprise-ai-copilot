@@ -10,7 +10,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Objects;
 
 @Component
 public class DemoAuthAccountInitializer implements ApplicationRunner {
@@ -41,11 +43,24 @@ public class DemoAuthAccountInitializer implements ApplicationRunner {
         if (properties.getDefaultPassword() == null
                 || properties.getDefaultPassword().isBlank()) {
             throw new IllegalStateException(
-                    "DEMO_AUTH_DEFAULT_PASSWORD must be configured when DEMO_AUTH_ENABLED=true");
+                    "DEMO_AUTH_DEFAULT_PASSWORD must be configured for legacy demo accounts when DEMO_AUTH_ENABLED=true");
+        }
+        requirePassword(properties.getPublicPassword(), "DEMO_PUBLIC_PASSWORD");
+        requirePassword(properties.getInterviewPassword(), "DEMO_INTERVIEW_PASSWORD");
+        requirePassword(properties.getAdminPassword(), "DEMO_ADMIN_PASSWORD");
+        if (Objects.equals(properties.getPublicPassword(), properties.getInterviewPassword())
+                || Objects.equals(properties.getPublicPassword(), properties.getAdminPassword())
+                || Objects.equals(properties.getInterviewPassword(), properties.getAdminPassword())) {
+            throw new IllegalStateException(
+                    "DEMO_PUBLIC_PASSWORD, DEMO_INTERVIEW_PASSWORD and DEMO_ADMIN_PASSWORD must be different");
         }
 
         Instant now = clock.instant();
         List<SeedAccount> employees = List.of(
+                new SeedAccount(DemoAuthPolicy.PUBLIC_DEMO_USER_ID,
+                        DemoAuthPolicy.PUBLIC_DEMO_USERNAME,
+                        DemoAuthPolicy.PUBLIC_DEMO_EMPLOYEE_ID, "公开演示账号",
+                        AuthRole.EMPLOYEE, BigDecimal.ZERO),
                 new SeedAccount("U10001", "zhangsan", "E10001", "张三",
                         AuthRole.EMPLOYEE, properties.getZhangsanAnnualBalance()),
                 new SeedAccount("U10002", "lisi", "E10002", "李四",
@@ -59,6 +74,13 @@ public class DemoAuthAccountInitializer implements ApplicationRunner {
         ensureAppUser(new SeedAccount("U90001", "admin", null, "管理员", AuthRole.ADMIN, null), now);
         for (SeedAccount employee : employees) {
             ensureAppUser(employee, now);
+        }
+    }
+
+    private void requirePassword(String value, String environmentVariable) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(environmentVariable
+                    + " must be configured when DEMO_AUTH_ENABLED=true");
         }
     }
 
@@ -82,9 +104,10 @@ public class DemoAuthAccountInitializer implements ApplicationRunner {
                     + seed.username());
         }
         AppUser existing = byId != null ? byId : byUsername;
+        String password = passwordFor(seed);
         if (existing == null) {
             users.insert(new AppUser(seed.userId(), seed.username(),
-                    passwordEncoder.encode(properties.getDefaultPassword()), seed.employeeId(),
+                    passwordEncoder.encode(password), seed.employeeId(),
                     seed.displayName(), seed.role(), true, now));
             return;
         }
@@ -96,7 +119,23 @@ public class DemoAuthAccountInitializer implements ApplicationRunner {
             throw new IllegalStateException("Existing app_user does not match demo auth seed: "
                     + seed.username());
         }
-        // Existing password, enabled flag, and business data are intentionally preserved.
+        // Preserve operator-selected credentials.  Only migrate the old shared
+        // seed password, so an existing deployment cannot keep accepting it for
+        // zhangsan/admin after the dedicated credential boundary is configured.
+        if (!passwordEncoder.matches(password, existing.passwordHash())
+                && passwordEncoder.matches(properties.getDefaultPassword(), existing.passwordHash())) {
+            users.updatePasswordHash(existing.userId(), passwordEncoder.encode(password));
+        }
+        // Existing enabled flag and business data are intentionally preserved.
+    }
+
+    private String passwordFor(SeedAccount seed) {
+        return switch (seed.username()) {
+            case DemoAuthPolicy.PUBLIC_DEMO_USERNAME -> properties.getPublicPassword();
+            case "zhangsan" -> properties.getInterviewPassword();
+            case "admin" -> properties.getAdminPassword();
+            default -> properties.getDefaultPassword();
+        };
     }
 
     private record SeedAccount(String userId, String username, String employeeId,

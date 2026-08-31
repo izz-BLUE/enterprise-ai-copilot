@@ -106,11 +106,11 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | 维度 | main 代码能力（已实装） | 仓库部署默认（`deploy/docker-compose.prod.yml` + `agent-python/.env.example`） | 公网实际状态 |
 |------|------------------------|------------------------------------------------------------------------|--------------|
 | Python Agent 状态图 | 生产入口固定为 `safety → planner ⇄ tool_executor`（Planner-first）；legacy Router-first 仅测试/离线兼容 | Compose 不再注入图选择开关，服务启动后固定走 Planner-first | 仓库无证据 |
-| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；compose 默认未注入 Java read 与 Enterprise OA MCP 配置，因此对应 Tool 不暴露给 Planner。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
+| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；公开 `demo` 由 Java 固定为 `allow_business_actions=false`；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；compose 默认未注入 Java read 与 Enterprise OA MCP 配置，因此对应 Tool 不暴露给 Planner。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
 | `leave_balance_tool` / `leave_request_tool`（Python → Java 只读） | 通过 `JavaReadClient` 调 `/api/internal/leave/*`，依赖受信任 `employee_id`、`JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` | compose **未注入** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` / `JAVA_TIMEOUT_SECONDS` ⇒ 两个 Tool 不暴露给 Planner；若绕过 Planner 直接调用，下游仍返回 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` | 仓库无证据 |
-| `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认开启 ⇒ 请求具备 `allow_business_actions=true` 与受信任 `employee_id` 时可见；即使 Planner-first 启用，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
+| `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认开启 ⇒ 请求具备 `allow_business_actions=true` 与受信任 `employee_id` 时可见；公开 `demo` 永远不可见；即使 Planner-first 启用，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
 | `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
-| Admin Token / Evaluation 权限 | Java 后端校验 `X-Admin-Token`，通过 `X-Allow-Eval` 内部 header 告知 Python | compose `:?` 强制 `ADMIN_TOKEN` 非空 ⇒ 生产必填 | 仓库无证据 |
+| Admin / Evaluation 权限 | 浏览器使用 Java 已验证 JWT 的 `role=ADMIN`；Java 通过 `X-Allow-Eval` 告知 Python | `ADMIN_TOKEN` 仅保留为业务动作的可选 server-side hardening，compose `:?` 强制非空 | 仓库无证据 |
 | LangGraph PostgreSQL 执行快照 | Java 用可信 `userId + conversationId` 计算 `X-Agent-Thread-Id`；Python 启动时固定创建 Pool / `PostgresSaver` / 持久化图，节点以 `sync` 落盘 | Compose 以 `:?` 强制运维显式提供 `LANGGRAPH_CHECKPOINT_DSN`；Python 等待 PostgreSQL health 后启动 | 仓库无证据 |
 | Phoenix/OpenTelemetry | Python 两条 AI 路径建立根 Span，OpenInference 自动插桩 OpenAI SDK 与 LangChain/LangGraph；BatchSpanProcessor、采样、默认正文脱敏、fail-open | `PHOENIX_TRACING=false` 且 Phoenix 服务位于可选 `observability` profile，不随默认 Compose 启动 | 仓库无证据 |
 
@@ -272,10 +272,13 @@ graph LR
 | AUTH_JWT_ISSUER | ${AUTH_JWT_ISSUER:-enterprise-ai-copilot} |
 | AUTH_JWT_AUDIENCE | ${AUTH_JWT_AUDIENCE:-enterprise-ai-copilot} |
 | AUTH_JWT_TTL_SECONDS | ${AUTH_JWT_TTL_SECONDS:-3600} |
-| DEMO_AUTH_ENABLED | compose 默认未注入；受控演示环境显式设置 true 才初始化四个固定账号 |
-| DEMO_AUTH_DEFAULT_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；不写入前端 bundle |
+| DEMO_AUTH_ENABLED | compose 默认 `false`；显式设置 `true` 才初始化五个固定账号 |
+| DEMO_PUBLIC_PASSWORD | compose 默认公开值 `demo-public-2026`；仅用于 `demo`（U10000/E10000），可与前端 `VITE_PUBLIC_DEMO_PASSWORD` 一致 |
+| DEMO_INTERVIEW_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；仅用于 `zhangsan`，server-side only |
+| DEMO_ADMIN_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；仅用于 `admin`，server-side only |
+| DEMO_AUTH_DEFAULT_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；仅用于 lisi/wangwu legacy seed，不写入前端 bundle |
 | BUSINESS_ACTIONS_ENABLED | compose 默认 `${:-false}`；启用后 Java 才接收 Proposal 并创建 PendingAction |
-| BUSINESS_ACTIONS_REQUIRE_ADMIN | compose 默认 `${:-true}`；启用后业务动作确认要求 ADMIN 权限 |
+| BUSINESS_ACTIONS_REQUIRE_ADMIN | compose 默认 `${:-false}`；`true` 时业务动作还要求内部请求提供匹配的 `ADMIN_TOKEN`，浏览器不发送该 Token |
 | JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时只读企业 Tool 不可用 |
 | JAVA_BASE_URL | compose 默认未注入；缺值时只读企业 Tool 返回 `LEAVE_READ_DISABLED` |
 | JAVA_TIMEOUT_SECONDS | compose 默认未注入；Python 端 `.env.example` 默认 5 |
@@ -301,7 +304,7 @@ graph LR
 
 PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
-本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
+本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。其中 public password 是刻意公开的体验凭据，其他三个密码只存在服务端配置；Java 服务端按可信身份计算 `allow_business_actions`，`demo` 永远为 `false`，正常员工按既有员工权限允许；`BUSINESS_ACTIONS_REQUIRE_ADMIN` 默认 `false`，只有显式设为 `true` 才额外要求 server-only `ADMIN_TOKEN`，浏览器不发送该 Token。前端只允许通过 `frontend/.env.example` 注入公开 demo 凭据，`VITE_*` 会进入浏览器 bundle。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
 
 Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；启用后由 Java 当前认证请求持久化响应内提案。
 
@@ -325,7 +328,7 @@ PHOENIX_TRACING=true docker compose \
 
 - `.env` 文件权限 600
 - API Key 不进 Git、不进镜像、不出现在 Compose
-- ADMIN_TOKEN 为非空随机值，仅存于服务器 `.env`
+- ADMIN_TOKEN 如保留，必须是非空随机值，仅存于服务器 `.env`；不进入 VITE、浏览器 bundle 或浏览器请求
 - 不输出到日志
 - 通过 `--env-file` 传入容器
 

@@ -172,12 +172,8 @@ public class LangGraphAgentController {
     }
 
     /**
-     * 判断本次请求是否允许 eval 路由。
-     *
-     * 规则：
-     * - admin.token 为空 → Demo 模式，允许 eval（不代表真实管理员认证）
-     * - admin.token 非空且 X-Admin-Token 匹配 → 允许 eval
-     * - admin.token 非空且 X-Admin-Token 缺失/不匹配 → 不允许 eval
+     * 判断本次浏览器请求是否允许 eval 路由。
+     * 管理能力只由 Java 从已验证 JWT 恢复的 ADMIN 身份授权。
      */
     @PostMapping("/api/agent/langgraph/chat")
     public ResponseEntity<AgentChatResponse> langgraphChat(@Valid @RequestBody ChatRequest request,
@@ -192,11 +188,11 @@ public class LangGraphAgentController {
             return AgentResponseFactory.identityFailure(traceId, exception);
         }
         eventRecorder.record(traceId, "AGENT_REQUEST_RECEIVED", null, started);
-        boolean allowEval = adminAccessService.isAdmin(presentedToken);
+        boolean allowEval = adminAccessService.isAdminIdentity(identity);
         boolean allowBusinessActions = businessActionService != null
                 && identity != null
                 && identity.employeeId() != null
-                && businessActionService.isAllowed(presentedToken);
+                && businessActionService.isAllowed(presentedToken, identity);
 
         // conversationId 由服务端权威解析：identity.userId() 是 trusted userId，
         // 客户端提供 conversationId 时仅作为分组 hint；缺失时服务端生成纯 UUID v4。

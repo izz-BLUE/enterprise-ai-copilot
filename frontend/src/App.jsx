@@ -4,7 +4,6 @@ import InfoPanel from './components/InfoPanel'
 import WelcomeScreen from './components/WelcomeScreen'
 import ChatMessage, { UserMessage, LoadingMessage } from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
-import AdminPanel from './components/AdminPanel'
 import AdminLogConsole from './components/AdminLogConsole'
 import useBusinessActionFlow from './hooks/useBusinessActionFlow'
 import useChatRequest from './hooks/useChatRequest'
@@ -76,7 +75,6 @@ function App({ authState, onLogout }) {
     const restored = readHistoryByMode(baseChatHistoryKey, mode)
     return restored?.messages ?? []
   })
-  const [adminToken, setAdminToken] = useState('')
   const [showAdminLogs, setShowAdminLogs] = useState(false)
   const [clearConfirming, setClearConfirming] = useState(false)
   const chatEndRef = useRef(null)
@@ -118,7 +116,6 @@ function App({ authState, onLogout }) {
   } = useBusinessActionFlow({
     messages,
     setMessages,
-    adminToken,
     accessToken: authState.accessToken,
     clearConversationId,
     onLogout,
@@ -127,7 +124,6 @@ function App({ authState, onLogout }) {
   const handleAuthenticationExpired = () => {
     setMessages([])
     setInput('')
-    setAdminToken('')
     resetActionRuntime()
     clearConversationId()
     onLogout()
@@ -145,7 +141,6 @@ function App({ authState, onLogout }) {
     input,
     setInput,
     setMessages,
-    adminToken,
     accessToken: authState.accessToken,
     conversationIdRef,
     rememberConversationId,
@@ -159,7 +154,6 @@ function App({ authState, onLogout }) {
     // 不删除当前账号的 localStorage 聊天历史——重新登录后再恢复。
     setMessages([])
     setInput('')
-    setAdminToken('')
     resetRequestState()
     resetActionRuntime()
     clearConversationId()
@@ -391,7 +385,6 @@ function App({ authState, onLogout }) {
 
         {!showAdminLogs && (
           <div className="input-section">
-            <AdminPanel adminToken={adminToken} setAdminToken={setAdminToken} />
             <ChatInput
               input={input}
               setInput={setInput}

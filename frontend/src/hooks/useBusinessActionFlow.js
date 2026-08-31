@@ -30,7 +30,6 @@ export function initialActionUi(phase = 'pending', error = null) {
 export default function useBusinessActionFlow({
   messages,
   setMessages,
-  adminToken,
   accessToken,
   clearConversationId,
   onLogout,
@@ -190,13 +189,11 @@ export default function useBusinessActionFlow({
             actionId: action.actionId,
             confirmationNonce: secret.confirmationNonce,
             idempotencyKey,
-            adminToken,
             accessToken,
           })
         : await cancelBusinessAction({
             actionId: action.actionId,
             confirmationNonce: secret.confirmationNonce,
-            adminToken,
             accessToken,
           })
 

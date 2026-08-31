@@ -57,7 +57,7 @@ LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
 ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 ```
 
-Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINESS_ACTIONS_ENABLED` 和 `MOCK_OA_ENABLED`。外部 retry/reconciliation worker 始终低频调度，provider 关闭时 gateway fail-closed；所有功能默认关闭是安全基线。
+Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINESS_ACTIONS_ENABLED` 和 `MOCK_OA_ENABLED`，并为 `demo`、`zhangsan`、`admin` 分别配置 `DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`；`DEMO_AUTH_DEFAULT_PASSWORD` 仅用于 lisi/wangwu legacy seed。前端公开 demo 的 `VITE_PUBLIC_DEMO_USERNAME` / `VITE_PUBLIC_DEMO_PASSWORD` 会进入浏览器构建产物，不能填入 server-side password。外部 retry/reconciliation worker 始终低频调度，provider 关闭时 gateway fail-closed；所有功能默认关闭是安全基线。
 
 ## Troubleshooting
 

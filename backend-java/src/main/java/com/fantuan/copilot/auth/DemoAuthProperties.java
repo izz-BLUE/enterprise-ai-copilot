@@ -8,6 +8,9 @@ import java.math.BigDecimal;
 public class DemoAuthProperties {
     private boolean enabled;
     private String defaultPassword;
+    private String publicPassword;
+    private String interviewPassword;
+    private String adminPassword;
     private BigDecimal zhangsanAnnualBalance = new BigDecimal("10.0");
     private BigDecimal lisiAnnualBalance = new BigDecimal("5.0");
     private BigDecimal wangwuAnnualBalance = new BigDecimal("15.0");
@@ -26,6 +29,30 @@ public class DemoAuthProperties {
 
     public void setDefaultPassword(String defaultPassword) {
         this.defaultPassword = defaultPassword;
+    }
+
+    public String getPublicPassword() {
+        return publicPassword;
+    }
+
+    public void setPublicPassword(String publicPassword) {
+        this.publicPassword = publicPassword;
+    }
+
+    public String getInterviewPassword() {
+        return interviewPassword;
+    }
+
+    public void setInterviewPassword(String interviewPassword) {
+        this.interviewPassword = interviewPassword;
+    }
+
+    public String getAdminPassword() {
+        return adminPassword;
+    }
+
+    public void setAdminPassword(String adminPassword) {
+        this.adminPassword = adminPassword;
     }
 
     public BigDecimal getZhangsanAnnualBalance() {

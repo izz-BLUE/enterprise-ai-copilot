@@ -41,7 +41,7 @@ Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创
 
 Planner-first 是生产唯一入口；Router-first 仅供直接测试/离线对照。两者最终都调用同一 Java control plane。
 
-Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。
+Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。公开 `demo` 身份即使全局业务动作开关开启，也固定为只读，不获得 Proposal Tool。
 
 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个配置只属于 Python → Java 的只读业务 Tool 链路。
 
@@ -165,7 +165,7 @@ Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只�
 | 配置 | 默认值 |
 |---|---|
 | `business.actions.enabled` | `false` |
-| `business.actions.require-admin` | `true` |
+| `business.actions.require-admin` | `false`；`true` 时额外要求内部请求提供 `ADMIN_TOKEN`，浏览器不发送该 Token |
 | `business.actions.ttl-seconds` | `600` |
 | Planner-first Agent graph | 生产固定；Router-first 仅测试/离线兼容 |
 | `LANGGRAPH_CHECKPOINT_DSN` | 必填；PostgreSQL 初始化失败即 fail-closed |

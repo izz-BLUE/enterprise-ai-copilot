@@ -81,7 +81,7 @@ Planner 只有规划权，没有业务执行授权。当前程序限制为最多
 | `leave_balance_tool` / `leave_request_tool` / `expense_status_tool` | 查询 Java 权威业务状态 | 员工身份、Java 内部地址和 token 均可用 |
 | `travel_record_tool` / `invoice_verify_tool` | 通过 Enterprise OA MCP 读取当前差旅、发票事实 | 员工身份和 MCP 地址可用 |
 | `eval_report_tool` | 读取评估报告 | `allow_eval=true` |
-| `leave_proposal_tool` / `expense_proposal_tool` | 生成受控 Proposal，不执行写操作 | `allow_business_actions=true` 且有员工身份 |
+| `leave_proposal_tool` / `expense_proposal_tool` | 生成受控 Proposal，不执行写操作 | `allow_business_actions=true` 且有员工身份；公开 `demo` 身份固定只读 |
 
 Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 Python → Java 的只读业务 Tool 链路。
 
@@ -196,7 +196,7 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 
 本地 Python 启动即要求 `LANGGRAPH_CHECKPOINT_DSN` 并连接 PostgreSQL；按 [Demo Guide](docs/demo-guide.md) 配置 Java/Python/Mock OA。受控动作、Memory 写入和 Mock OA provider 仍默认关闭，按演示范围显式开启。
 
-生产 Compose 默认启用 Planner-first 和 PostgreSQL Checkpoint，但仍要求运维显式提供数据库、JWT、Admin Token、模型密钥及实际的功能开关。详见 [Deployment](docs/deployment.md)。
+生产 Compose 默认启用 Planner-first 和 PostgreSQL Checkpoint，但仍要求运维显式提供数据库、JWT、server-only Admin Token、模型密钥及实际的功能开关。详见 [Deployment](docs/deployment.md)。
 
 ## API quick reference
 

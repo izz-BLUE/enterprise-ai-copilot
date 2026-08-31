@@ -8,4 +8,6 @@ public interface AppUserRepository {
     Optional<AppUser> findByUserId(String userId);
 
     void insert(AppUser user);
+
+    void updatePasswordHash(String userId, String passwordHash);
 }

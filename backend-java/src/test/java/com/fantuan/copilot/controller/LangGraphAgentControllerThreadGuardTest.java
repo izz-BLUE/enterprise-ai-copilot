@@ -81,8 +81,8 @@ class LangGraphAgentControllerThreadGuardTest {
                 USER_ID, "user", "E10001", "Test User",
                 com.fantuan.copilot.auth.AuthRole.EMPLOYEE, true,
                 VerifiedIdentity.Source.JWT));
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(false);
-        when(businessActionService.isAllowed(ADMIN_TOKEN)).thenReturn(false);
+        when(adminAccessService.isAdminIdentity(any(VerifiedIdentity.class))).thenReturn(false);
+        when(businessActionService.isAllowed(eq(ADMIN_TOKEN), any(VerifiedIdentity.class))).thenReturn(false);
         when(businessActionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
 
         controller = new LangGraphAgentController(
@@ -237,7 +237,7 @@ class LangGraphAgentControllerThreadGuardTest {
 
     @Test
     void pendingActionFailureReleasesGuard() {
-        when(businessActionService.isAllowed(ADMIN_TOKEN)).thenReturn(true);
+        when(businessActionService.isAllowed(eq(ADMIN_TOKEN), any(VerifiedIdentity.class))).thenReturn(true);
         AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST,
                 LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 1),
