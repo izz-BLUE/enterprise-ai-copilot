@@ -58,17 +58,24 @@ INVOICE_ANSWER = json.dumps({
     "amount": 1600, "category": "HOTEL", "duplicate": False,
 }, ensure_ascii=False)
 
+INVOICE_2_ANSWER = json.dumps({
+    "success": True, "invoice_id": "INV-002", "valid": True,
+    "amount": 230, "category": "TAXI", "duplicate": False,
+}, ensure_ascii=False)
+
 RAG_ANSWER = json.dumps({
     "success": True, "answer": "酒店每晚最高 750 元。",
     "sources": ["hr/expense-policy.md"],
 }, ensure_ascii=False)
 
 
-def _tool(tool_name, arguments, reason):
-    return json.dumps({
+def _tool(tool_name, arguments, reason, *, expense_reason=None):
+    payload = {
         "action": "tool", "tool_name": tool_name,
         "arguments": arguments, "reason_code": reason,
-    }, ensure_ascii=False)
+        "expense_reason": expense_reason,
+    }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _finish(answer):
@@ -91,6 +98,52 @@ def _run_with_history(question, tool_history, *, employee_id="E10001",
 
 class TestPlannerSelection:
     """V2 §二十九：Planner 必须能区分 4 个新 Tool。"""
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "报销原因应该填什么？",
+            "差旅报销流程是什么？",
+            "报销需要什么材料？",
+        ],
+    )
+    def test_expense_reason_question_routes_to_knowledge_not_proposal(self, question):
+        """报销咨询即使被模型误选 Proposal，也不得进入业务草稿链路。"""
+        decisions = [
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="不应抽取"),
+            _finish("知识库回答。"),
+        ]
+        rag = Mock()
+        rag.invoke.return_value = RAG_ANSWER
+        proposal = Mock()
+        proposal.invoke.return_value = json.dumps({
+            "success": True,
+            "kind": "clarification",
+            "action_proposal": None,
+            "missing_fields": ["reason"],
+            "message": "不应到达 Proposal",
+        }, ensure_ascii=False)
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
+             patch("app.agents.tool_executor_node.rag_answer_tool", rag), \
+             patch("app.agents.tool_executor_node.expense_proposal_tool", proposal):
+            result = run_langgraph_agent(
+                question,
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+            )
+
+        assert rag.invoke.call_count == 1
+        proposal.invoke.assert_not_called()
+        assert [h["tool_name"] for h in result["tool_history"]] == [
+            "rag_answer_tool",
+        ]
+        assert result["route"] == "rag"
+        assert result["missing_fields"] == []
+        assert result["request_expense_reason"] is None
+        assert result["action_proposal"] is None
 
     def test_travel_record_selection(self):
         """Case 1：'我上周有哪些出差？' → travel_record_tool。"""
@@ -148,10 +201,12 @@ class TestPlannerSelection:
     def test_multi_step_expense_chain(self):
         """Case 4：'帮我报销上周上海出差的酒店和打车费用' → travel→invoice→proposal。"""
         decisions = [
-            _tool("travel_record_tool", {}, "need_travel_history"),
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
             _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
                   "need_invoice_verify"),
-            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户拜访"),
             _finish("已生成报销申请草稿，请确认后提交。"),
         ]
         with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
@@ -187,6 +242,94 @@ class TestPlannerSelection:
         assert result["category"] == "business_action"
         assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
         assert result["action_proposal"]["trip_id"] == "TRIP-20260818-001"
+        assert prop.invoke.call_args.args[0]["expense_reason"] == "客户拜访"
+        assert result["tool_history"][-1]["arguments"] == {}
+
+    def test_task_runtime_clarification_callback_supplies_planner_reason(self):
+        """第一次缺原因停在 clarification，Task Runtime 补充回答后可生成草稿。"""
+        original_task = "帮我报销上周上海出差的酒店和打车费用"
+        first_decisions = [
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason=None),
+            _finish("请提供本次报销原因。"),
+        ]
+        second_decisions = [
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
+                  "need_invoice_verify"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="项目验收"),
+            _finish("已生成报销申请草稿，请确认后提交。"),
+        ]
+        active_memory = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": '{"missing_fields":["reason"]}',
+            "summary": "等待用户提供本次报销原因",
+        }
+        with patch("app.agents.planner_node.call_llm") as llm, \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv:
+            travel.invoke.return_value = TRAVEL_ANSWER
+            inv.invoke.side_effect = [
+                INVOICE_ANSWER, INVOICE_2_ANSWER,
+            ]
+
+            llm.side_effect = first_decisions
+            first = run_langgraph_agent(
+                original_task,
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                execution_mode="TASK_RUNTIME",
+            )
+
+            assert first["route"] == "action"
+            assert first["missing_fields"] == ["reason"]
+            assert first["action_proposal"] is None
+            assert first["answer"] == "请提供本次报销原因。"
+
+            llm.reset_mock()
+            llm.side_effect = second_decisions
+            second = run_langgraph_agent(
+                original_task + "\n补充信息：客户拜访",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                memory_context=active_memory,
+                execution_mode="TASK_RUNTIME",
+            )
+
+        assert second["route"] == "action"
+        assert second["missing_fields"] == []
+        assert second["action_proposal"]["reason"] == "客户拜访"
+
+    def test_missing_reason_short_circuits_read_only_tools(self):
+        """首次原因为空时，程序层直接进入 reason-first clarification。"""
+        decisions = [
+            _tool("travel_record_tool", {}, "need_travel_history"),
+            _finish("模型不应覆盖 Tool clarification。"),
+        ]
+        with patch("app.agents.planner_node.call_llm", side_effect=decisions), \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv:
+            result = run_langgraph_agent(
+                "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+            )
+        travel.invoke.assert_not_called()
+        inv.invoke.assert_not_called()
+        assert result["request_expense_reason"] is None
+        assert result["missing_fields"] == ["reason"]
+        assert result["answer"] == "请提供本次报销原因。"
 
     def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self, caplog):
         """只读事实成功后合法但过早 finish，语义修复必须继续报销 Proposal。"""
@@ -198,7 +341,8 @@ class TestPlannerSelection:
         decisions = [
             _tool("rag_answer_tool", {"question": "出差报销政策"}, "need_knowledge"),
             premature_finish,
-            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户拜访"),
             _finish("已生成报销申请草稿，请确认后提交。"),
         ]
         expense_payload = json.dumps({
@@ -251,7 +395,8 @@ class TestStressScenarios:
     def test_stress_a_travel_success_then_invoice_error_no_repeat_travel(self):
         """Stress A：travel 已成功 → invoice 失败 → 不重复执行已成功 travel。"""
         decisions = [
-            _tool("travel_record_tool", {}, "need_travel_history"),
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
             _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
                   "need_invoice_verify"),
             # Planner 再次输出 travel（错误倾向）—— 应被 dedup 阻止
@@ -278,11 +423,14 @@ class TestStressScenarios:
     def test_stress_c_proposal_repeat_planning_blocked(self):
         """Stress C：expense_proposal 已成功 → 相同参数再规划 → already_completed。"""
         decisions = [
-            _tool("travel_record_tool", {}, "need_travel_history"),
+            _tool("travel_record_tool", {}, "need_travel_history",
+                  expense_reason="客户拜访"),
             _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
                   "need_invoice_verify"),
-            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
-            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户拜访"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal",
+                  expense_reason="客户拜访"),
             _finish("已生成报销申请草稿。"),
         ]
         with patch("app.agents.planner_node.call_llm", side_effect=decisions), \

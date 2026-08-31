@@ -130,6 +130,7 @@ class _ExecutorContext:
     trace_id: str
     question: str
     business_date: Any  # date | None
+    expense_reason: str | None = None
     tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
 
 
@@ -286,6 +287,7 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     """expense_proposal_tool 的 pre-inject 钩子。
 
     - 注入 question / business_date / trace_id / context（ExpenseProposalContext）
+      以及独立的 Planner expense_reason
     - 拒绝 LLM 在 arguments 中夹带任何系统字段（V2 §十五：禁止 trusted identity）
     """
     merged = dict(args or {})
@@ -298,6 +300,7 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
     merged['trace_id'] = ctx.trace_id
     merged['context'] = _build_expense_proposal_context(ctx.tool_history)
+    merged['expense_reason'] = ctx.expense_reason
     return merged
 
 
@@ -616,6 +619,9 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             trace_id=trace_id,
             question=state.get('question', ''),
             business_date=runtime.context['business_date'],
+            # 只使用当前请求第一次 Planner 决策冻结的值；不能让本轮
+            # 最新 PlannerDecision 覆盖此前的 null 或有效原因。
+            expense_reason=state.get('request_expense_reason'),
             tool_history=tool_history,
         )
         if spec.pre_inject is not None:

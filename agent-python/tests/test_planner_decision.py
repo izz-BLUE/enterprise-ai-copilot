@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
     RAG_TOOL_NAME,
@@ -86,6 +87,43 @@ def _refuse(**changes):
     }
     value.update(changes)
     return value
+
+
+def _expense_proposal(**changes):
+    value = {
+        'action': 'tool',
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'arguments': {},
+        'answer': None,
+        'reason_code': 'need_expense_proposal',
+    }
+    value.update(changes)
+    return value
+
+
+class TestExpenseReasonField:
+    def test_string_is_preserved_on_expense_proposal_decision(self):
+        decision = PlannerDecision.model_validate(
+            _expense_proposal(expense_reason='去客户现场做项目验收')
+        ).validate_decision()
+        assert decision.expense_reason == '去客户现场做项目验收'
+        assert decision.arguments == {}
+
+    def test_null_is_allowed(self):
+        decision = PlannerDecision.model_validate(
+            _expense_proposal(expense_reason=None)
+        ).validate_decision()
+        assert decision.expense_reason is None
+
+    def test_omitted_defaults_to_null(self):
+        decision = PlannerDecision.model_validate(_expense_proposal()).validate_decision()
+        assert decision.expense_reason is None
+
+    def test_unknown_extra_field_still_rejected(self):
+        with pytest.raises(ValidationError):
+            PlannerDecision.model_validate(
+                _expense_proposal(expense_reason='客户拜访', inferred_from='purpose')
+            )
 
 
 class TestValidDecisions:

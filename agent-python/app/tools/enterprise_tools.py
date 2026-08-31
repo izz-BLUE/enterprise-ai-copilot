@@ -325,7 +325,7 @@ def invoice_verify_tool(
 #
 # Tool 内部**禁止**重新调用 MCP / Java / RAG（V2 §十三 强制修正）——
 # 只做：
-#   - 用户输入解析（ExpenseInputExtraction，规则版确定性）
+#   - 用户输入解析（出差 / 发票引用，规则版确定性）
 #   - 已有 Tool facts 聚合（context.travel_record / invoices / policy_context）
 #   - 确定性 validation + calculation（费用求和 / hotel cap）
 #   - cost center 内部 mock/lookup（COST-DEFAULT）
@@ -334,8 +334,9 @@ def invoice_verify_tool(
 # policy cap）由程序层计算后组装 Proposal，LLM 不得生成这些字段
 # （追加约束 §4）。
 #
-# 【重要：本 Tool 不接受任何 LLM 入参】Planner arguments 必须为 {}；
-# question / business_date / trace_id / context 全部由 Executor 注入。
+# 【重要：本 Tool arguments 不接受任何 LLM 入参】Planner arguments 必须为 {}；
+# question / business_date / trace_id / context 由 Executor 注入，expense_reason
+# 由 Planner 独立语义字段经 Executor 注入。
 
 
 @tool
@@ -344,12 +345,14 @@ def expense_proposal_tool(
     business_date: str = '',
     trace_id: str = '',
     context: dict | None = None,
+    expense_reason: str | None = None,
 ) -> str:
     """生成报销申请草稿(ExpenseActionProposal)供用户确认；不提交任何写操作。
 
-    该 Tool 无 LLM 入参：question / business_date / trace_id / context
+    该 Tool 的 arguments 无 LLM 入参：question / business_date / trace_id / context
     （ExpenseProposalContext，由 Executor 从 tool_history 构造）由 Tool
-    Executor 从 Runtime Context 注入；模型不得在 arguments 中提供这些字段，
+    Executor 从 Runtime Context 注入；expense_reason 则来自 Planner 独立决策字段；
+    模型不得在 arguments 中提供这些字段，
     也不得提供 trip_id / invoice_ids / cost_center / 金额等业务参数。
 
     返回 JSON：proposal 时 kind=proposal + action_proposal + missing_fields=[]；
@@ -361,6 +364,22 @@ def expense_proposal_tool(
         return _payload(False, None, 'QUESTION_REQUIRED', '缺少原始问题，无法生成报销草稿。')
     if not business_date:
         return _payload(False, None, 'BUSINESS_DATE_REQUIRED', '当前业务日期不可用。')
+
+    # 报销原因是 Expense Request 的第一优先补槽字段；不能先用 trip / invoice
+    # 缺失遮蔽它，也不能从 trip.purpose 推断。
+    reason = expense_reason.strip() if isinstance(expense_reason, str) else ''
+    if not reason:
+        return _payload(
+            True,
+            {
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': ['reason'],
+                'message': '请提供本次报销原因。',
+            },
+            None,
+            None,
+        )
 
     ctx_like = expense_input_service.ExpenseProposalContextLike(context or {})
     try:
@@ -396,22 +415,6 @@ def expense_proposal_tool(
                 'action_proposal': None,
                 'missing_fields': ['trip_id'],
                 'message': '未找到匹配的可报销出差记录，请确认 trip_id 或目的地。',
-            },
-            None,
-            None,
-        )
-
-    # 报销原因：用户显式填写优先；否则使用已选中 OA 出差记录的 purpose。
-    # 两者都没有时要求用户补充，绝不把整段 question 当 reason，也不由 LLM 生成。
-    reason = analysis.expense_reason or str(trip.get('purpose') or '').strip()
-    if not reason:
-        return _payload(
-            True,
-            {
-                'kind': 'clarification',
-                'action_proposal': None,
-                'missing_fields': ['reason'],
-                'message': '当前出差记录缺少出差原因，请提供报销原因或报销说明。',
             },
             None,
             None,

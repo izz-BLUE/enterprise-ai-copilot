@@ -11,6 +11,7 @@ from app.agents.tool_executor_node import MAX_TOOL_CALLS
 from app.agents.tool_executor_node import tool_executor_node as _tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
@@ -37,6 +38,7 @@ def state(**changes):
         'employee_id': '',
         'action_proposal': None,
         'missing_fields': [],
+        'request_expense_reason': None,
         'step_count': 0,
         'tool_call_count': 0,
         'tool_history': [],
@@ -68,6 +70,7 @@ def _tool_decision(tool_name, arguments, **changes):
         LEAVE_BALANCE_TOOL_NAME: 'need_balance',
         LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
         LEAVE_PROPOSAL_TOOL_NAME: 'need_proposal',
+        EXPENSE_PROPOSAL_TOOL_NAME: 'need_expense_proposal',
     }
     decision = {
         'action': 'tool',
@@ -111,6 +114,58 @@ class TestToolExecution:
         assert result['stop_reason'] == 'tool_executed'
         assert evl.invoke.call_args.args[0]['report_type'] == 'all'
         assert result['tool_history'][0]['status'] == 'success'
+
+    def test_expense_reason_is_injected_outside_decision_arguments(self):
+        proposal_result = json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请提供本次报销原因。',
+        }, ensure_ascii=False)
+        with patch('app.agents.tool_executor_node.expense_proposal_tool') as proposal:
+            proposal.invoke.return_value = proposal_result
+            result = tool_executor_node(state(
+                employee_id='E10001',
+                allow_business_actions=True,
+                business_date=__import__('datetime').date(2026, 8, 26),
+                request_expense_reason='客户拜访',
+                planner_decision=_tool_decision(
+                    EXPENSE_PROPOSAL_TOOL_NAME,
+                    {},
+                    expense_reason='客户拜访',
+                ),
+            ))
+        assert result['stop_reason'] == 'tool_executed'
+        invoked = proposal.invoke.call_args.args[0]
+        assert invoked['expense_reason'] == '客户拜访'
+        assert invoked['question'] == '公司的年假制度是什么'
+        assert result['tool_history'][0]['arguments'] == {}
+
+    def test_latest_planner_reason_cannot_replace_frozen_null(self):
+        proposal_result = json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请提供本次报销原因。',
+        }, ensure_ascii=False)
+        with patch('app.agents.tool_executor_node.expense_proposal_tool') as proposal:
+            proposal.invoke.return_value = proposal_result
+            result = tool_executor_node(state(
+                question='根据最近一次已批准出差和对应发票准备报销。',
+                employee_id='E10001',
+                allow_business_actions=True,
+                business_date=__import__('datetime').date(2026, 8, 26),
+                request_expense_reason=None,
+                step_count=2,
+                planner_decision=_tool_decision(
+                    EXPENSE_PROPOSAL_TOOL_NAME,
+                    {},
+                    expense_reason='客户拜访',
+                ),
+            ))
+        assert proposal.invoke.call_args.args[0]['expense_reason'] is None
 
     def test_tool_exception_becomes_observation_and_counts(self):
         with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:

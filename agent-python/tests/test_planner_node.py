@@ -1,7 +1,10 @@
 """test_planner_node.py —— planner_node 权限边界、Prompt 输入与失败路径测试"""
 
+import json
 from datetime import date
 from unittest.mock import patch
+
+import pytest
 
 from app.agents.planner_node import (
     MAX_PLANNER_STEPS,
@@ -42,6 +45,7 @@ def state(**changes):
         'employee_id': '',
         'action_proposal': None,
         'missing_fields': [],
+        'request_expense_reason': None,
         'step_count': 0,
         'tool_call_count': 0,
         'tool_history': [],
@@ -74,6 +78,123 @@ PROPOSAL_RAW = (
     '{"action":"tool","tool_name":"leave_proposal_tool",'
     '"arguments":{},"reason_code":"need_proposal"}'
 )
+
+
+@pytest.mark.parametrize(
+    ('question', 'expense_reason'),
+    [
+        ('报销原因为客户拜访，帮我准备差旅报销申请。', '客户拜访'),
+        ('报销原因：项目验收', '项目验收'),
+        ('这次费用主要是去客户现场做项目验收，帮我把差旅报了。',
+         '去客户现场做项目验收'),
+        ('帮我报销最近一次客户拜访的出差。', None),
+        ('最近一次出差目的为客户拜访，帮我报销。', None),
+        ('报销原因应该填什么？', None),
+        ('请提供本次报销原因。\n补充信息：客户拜访', '客户拜访'),
+    ],
+)
+def test_planner_expense_reason_semantics_are_taken_from_mocked_llm(
+    question, expense_reason,
+):
+    raw = (
+        '{"action":"tool","tool_name":"expense_proposal_tool",'
+        f'"arguments":{{}},"reason_code":"need_expense_proposal",'
+        f'"expense_reason":{json.dumps(expense_reason, ensure_ascii=False)}}}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question=question,
+            allow_business_actions=True,
+            employee_id='E10001',
+                business_date=date(2026, 8, 26),
+            ))
+    if question == '报销原因应该填什么？':
+        assert result['planner_decision']['tool_name'] == 'rag_answer_tool'
+        assert result['planner_decision']['arguments'] == {'question': question}
+        assert result['planner_decision']['expense_reason'] is None
+        return
+    assert result['planner_decision']['expense_reason'] == expense_reason
+    assert result['planner_decision']['arguments'] == {}
+
+
+def test_first_planner_reason_is_frozen_for_current_request():
+    raw = (
+        '{"action":"tool","tool_name":"expense_proposal_tool",'
+        '"arguments":{},"reason_code":"need_expense_proposal",'
+        '"expense_reason":"客户拜访"}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='报销原因为客户拜访，帮我准备差旅报销申请。',
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['request_expense_reason'] == '客户拜访'
+    assert result['planner_decision']['expense_reason'] == '客户拜访'
+
+
+def test_null_first_planner_reason_is_frozen_and_cannot_be_replaced():
+    raw = (
+        '{"action":"tool","tool_name":"expense_proposal_tool",'
+        '"arguments":{},"reason_code":"need_expense_proposal",'
+        '"expense_reason":"客户拜访"}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='根据最近一次已批准出差和对应发票准备报销。',
+            step_count=1,
+            request_expense_reason=None,
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['request_expense_reason'] is None
+    assert result['planner_decision']['expense_reason'] is None
+
+
+def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
+    raw = (
+        '{"action":"tool","tool_name":"travel_record_tool",'
+        '"arguments":{},"reason_code":"need_travel_history",'
+        '"expense_reason":null}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='根据最近一次已批准出差和对应发票准备报销。',
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
+    assert result['planner_decision']['arguments'] == {}
+    assert result['request_expense_reason'] is None
+
+
+def test_new_request_resets_frozen_reason_and_continuation_can_extract():
+    raw = (
+        '{"action":"tool","tool_name":"expense_proposal_tool",'
+        '"arguments":{},"reason_code":"need_expense_proposal",'
+        '"expense_reason":"客户拜访"}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='根据原任务补充信息：客户拜访',
+            step_count=0,
+            request_expense_reason=None,
+            memory_context={
+                'taskType': 'EXPENSE_REQUEST',
+                'status': 'ACTIVE',
+                'taskStateJson': '{"missing_fields":["reason"]}',
+                'summary': '等待用户提供本次报销原因',
+            },
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['request_expense_reason'] == '客户拜访'
+    assert result['planner_decision']['expense_reason'] == '客户拜访'
 
 
 class TestPermissionBoundary:

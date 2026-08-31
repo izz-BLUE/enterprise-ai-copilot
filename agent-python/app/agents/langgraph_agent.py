@@ -35,6 +35,7 @@ from app.schemas.external_wait_schema import ExternalResumePayload, ExternalWait
 from app.schemas.hitl_schema import HitlResumePayload, HitlWaitMarker, proposal_action_type
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
 )
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
@@ -55,6 +56,9 @@ class AgentState(TypedDict):
     category: str
     action_proposal: dict | None
     missing_fields: list[str]
+    # 当前 HTTP / Graph request 内第一次通过校验的 Planner expense_reason；
+    # null 也是已完成抽取的冻结结果，不允许后续 Planner step 覆盖。
+    request_expense_reason: str | None
     # Agent Loop P0：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
     # tool_call_count = 通过执行前校验后，实际发起 Tool 执行的次数——
     # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数。
@@ -538,6 +542,26 @@ def build_agent_loop_graph():
 _PROPOSAL_TOOL_NAMES = PROPOSAL_TOOL_NAMES
 
 
+def _expense_clarification_message(state: dict) -> str | None:
+    """读取当前请求最后一次 Expense Proposal clarification 的固定文案。"""
+    for entry in reversed(state.get('tool_history') or []):
+        if (
+            entry.get('tool_name') != EXPENSE_PROPOSAL_TOOL_NAME
+            or entry.get('status') != 'success'
+        ):
+            continue
+        try:
+            payload = json.loads(entry.get('observation', ''))
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if payload.get('kind') != 'clarification':
+            continue
+        message = payload.get('message')
+        if isinstance(message, str) and message:
+            return message
+    return None
+
+
 def _finalize_action_proposal(state: dict) -> dict:
     """最终响应前的确定性 postcondition：防止 stale action_proposal 泄漏。
 
@@ -556,6 +580,10 @@ def _finalize_action_proposal(state: dict) -> dict:
     if state.get('action_proposal') is not None and not is_confirmable_action_proposal(state):
         state['action_proposal'] = None
         state['missing_fields'] = []
+    if state.get('action_proposal') is None and state.get('missing_fields'):
+        message = _expense_clarification_message(state)
+        if message is not None:
+            state['answer'] = message
     return state
 
 
@@ -726,6 +754,7 @@ def run_langgraph_agent(
         "reason": "", "category": "",
         "action_proposal": None,
         "missing_fields": [],
+        "request_expense_reason": None,
         "step_count": 0,
         "tool_call_count": 0,
         "tool_history": [],

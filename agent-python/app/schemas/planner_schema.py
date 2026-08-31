@@ -89,6 +89,9 @@ class PlannerDecision(BaseModel):
     arguments: dict[str, Any] | None = None
     answer: str | None = None
     reason_code: ReasonCode
+    # 仅由 Planner 从用户当前语义中抽取；不是 Tool arguments，也不是 trusted
+    # system field。expense_proposal_tool 执行时由 Executor 单独注入。
+    expense_reason: str | None = None
 
     def validate_decision(self) -> 'PlannerDecision':
         """确定性字段一致性校验;非法结构抛 PlannerDecisionError,不静默修复。"""
@@ -253,9 +256,10 @@ class PlannerDecision(BaseModel):
             )
 
     def _validate_expense_proposal(self) -> None:
-        # expense_proposal_tool 不接受 LLM 入参：trip_id / 费用明细 / cost_center
-        # 等由 Executor 注入的 ExpenseProposalContext 携带（tool_history 中已成功
-        # 完成的 travel/invoice/rag observation 抽取）。
+        # expense_proposal_tool 的 arguments 不接受 LLM 入参：trip_id / 费用明细 /
+        # cost_center 等由 Executor 注入的 ExpenseProposalContext 携带（从
+        # tool_history 中已成功完成的 travel/invoice/rag observation 抽取）；
+        # expense_reason 是独立的 Planner 语义字段，不进入 arguments。
         if not isinstance(self.arguments, dict):
             raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
         if self.answer is not None:
@@ -263,7 +267,7 @@ class PlannerDecision(BaseModel):
         if set(self.arguments) != _EXPENSE_PROPOSAL_ARG_KEYS:
             raise PlannerDecisionError(
                 'expense_proposal_tool 不接受任何 LLM 参数；'
-                '业务事实由 Executor 从 tool_history 注入'
+                '业务事实由 Executor 从 tool_history 注入，expense_reason 由决策字段单独传递'
             )
         if self.reason_code != 'need_expense_proposal':
             raise PlannerDecisionError(

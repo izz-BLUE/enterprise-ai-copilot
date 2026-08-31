@@ -114,8 +114,9 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     EXPENSE_PROPOSAL_TOOL_NAME: (
         '进入受控报销草稿链路:程序层基于 tool_history 中已成功完成的 '
-        'travel / invoice / RAG 事实抽取 ExpenseProposalContext,生成待用户确认的'
-        '报销申请草稿(ExpenseActionProposal),不会提交任何写操作。无 LLM 入参。'
+        'travel / invoice / RAG 事实抽取 ExpenseProposalContext；Planner 仅通过独立的 '
+        'expense_reason 字段提供用户语义上的报销原因，生成待用户确认的报销申请草稿'
+        '(ExpenseActionProposal),不会提交任何写操作。arguments 仍必须为空对象。'
     ),
     EXPENSE_STATUS_TOOL_NAME: (
         '查询当前登录用户自己的报销状态。LLM 可选传 expense_id;身份由程序层'
@@ -182,7 +183,23 @@ PLANNER_SYSTEM_PROMPT = (
     '当前用户输入与可信程序状态（employee_id / business_date / allow flags / '
     'Capability Gate）始终优先于与之冲突的 Memory Context。\n'
     '\n'
-    '输出格式:只输出一个 JSON 对象,且只能包含以下五个字段'
+    'expense_reason 在当前请求中只在第一次通过校验的 Planner decision 中抽取一次；'
+    '程序层会冻结该结果，后续 Planner step 不得根据 Tool History、Observation、'
+    'trip purpose、发票、RAG 或 Memory Context 重新解释或覆盖它。null 也是有效的冻结结果。\n'
+    '\n'
+    'expense_reason 语义抽取规则（仅供报销 Proposal Tool 使用）：\n'
+    '- expense_reason 是可选字符串；没有明确报销原因、语义有歧义或用户只是在询问应填什么时必须为 null。\n'
+    '- 只从用户当前输入中明确表达的报销原因抽取，保留自然语言语义但不要复制整句请求。\n'
+    '- “报销原因为客户拜访”抽取“客户拜访”；“报销原因：项目验收”抽取“项目验收”；\n'
+    '  “去客户现场做项目验收”可抽取为“去客户现场做项目验收”。\n'
+    '- “帮我报销最近一次客户拜访的出差”与“最近一次出差目的为客户拜访，帮我报销”都必须为 null；\n'
+    '  不得使用出差记录的 purpose、目的地、行程描述、发票、Tool History、execution_history 或 Memory Context\n'
+    '  推断或回填报销原因，也不得把整段用户请求概括成原因。\n'
+    '- 如果 Memory Context 或当前任务上下文明确表示系统正在等待报销原因，且用户当前输入是对该问题的直接回答（\n'
+    '  例如“客户拜访”），可以抽取该回答；孤立的一句“客户拜访”没有这样的上下文时必须为 null。\n'
+    '- expense_reason 不属于 arguments；调用报销 Proposal Tool 时 arguments 仍为 {}，由 Executor 从当前决策字段注入。\n'
+    '\n'
+    '输出格式:只输出一个 JSON 对象,且只能包含以下六个字段'
     '(字段名与取值必须与声明完全一致):\n'
     '- action: 必填。取值只能是 "tool"(调用工具)、"finish"(任务完成)、'
     '"refuse"(拒绝)\n'
@@ -193,11 +210,12 @@ PLANNER_SYSTEM_PROMPT = (
     '- answer: action 为 "finish" 或 "refuse" 时必填,必须是非空字符串;'
     'action 为 "tool" 时必须省略\n'
     '- reason_code: 必填。Tool 对应值、finish/refuse 合法值和示例见下方动态能力清单。\n'
+    '- expense_reason: 可选字符串或 null。仅表达用户明确报销原因；非报销流程决策通常为 null。\n'
     'finish 的 reason_code 必须是 "task_complete"; refuse 的 reason_code 必须是'
     '"not_allowed" 或 "cannot_complete"。\n'
     '\n'
     '禁止出现以下任何字段:decision、call_tool、thought、reasoning、plan,'
-    '以及上述五个字段之外的任何其他字段;出现即视为非法输出。\n'
+    '以及上述六个字段之外的任何其他字段;出现即视为非法输出。\n'
     '不要输出思考过程。'
 )
 
@@ -217,7 +235,8 @@ TOOL_ARGUMENT_CONTRACTS: dict[str, str] = {
         '只允许 {"invoice_id": "..."}；employee_id 不得由 LLM 提供（V2 §十一）。'
     ),
     EXPENSE_PROPOSAL_TOOL_NAME: (
-        '必须为空对象 {}；业务事实由程序层从 tool_history 注入。'
+        '必须为空对象 {}；业务事实由程序层从 tool_history 注入；expense_reason '
+        '是独立的 Planner 决策字段，不得放入 arguments。'
     ),
     EXPENSE_STATUS_TOOL_NAME: (
         '可空或 {"expense_id": "..."}；employee_id 由程序层注入。'
@@ -243,30 +262,35 @@ TOOL_EXAMPLES: dict[str, dict] = {
         'tool_name': RAG_TOOL_NAME,
         'arguments': {'question': '公司的年假制度是什么'},
         'reason_code': 'need_knowledge',
+        'expense_reason': None,
     },
     EVAL_TOOL_NAME: {
         'action': 'tool',
         'tool_name': EVAL_TOOL_NAME,
         'arguments': {'report_type': 'all'},
         'reason_code': 'need_eval',
+        'expense_reason': None,
     },
     LEAVE_BALANCE_TOOL_NAME: {
         'action': 'tool',
         'tool_name': LEAVE_BALANCE_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_balance',
+        'expense_reason': None,
     },
     LEAVE_REQUEST_TOOL_NAME: {
         'action': 'tool',
         'tool_name': LEAVE_REQUEST_TOOL_NAME,
         'arguments': {'limit': 10},
         'reason_code': 'need_leave_history',
+        'expense_reason': None,
     },
     LEAVE_PROPOSAL_TOOL_NAME: {
         'action': 'tool',
         'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_proposal',
+        'expense_reason': None,
     },
 # P2-A 报销工作流 V1
     TRAVEL_RECORD_TOOL_NAME: {
@@ -274,24 +298,28 @@ TOOL_EXAMPLES: dict[str, dict] = {
         'tool_name': TRAVEL_RECORD_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_travel_history',
+        'expense_reason': None,
     },
     INVOICE_VERIFY_TOOL_NAME: {
         'action': 'tool',
         'tool_name': INVOICE_VERIFY_TOOL_NAME,
         'arguments': {'invoice_id': 'INV-001'},
         'reason_code': 'need_invoice_verify',
+        'expense_reason': None,
     },
     EXPENSE_PROPOSAL_TOOL_NAME: {
         'action': 'tool',
         'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_expense_proposal',
+        'expense_reason': None,
     },
     EXPENSE_STATUS_TOOL_NAME: {
         'action': 'tool',
         'tool_name': EXPENSE_STATUS_TOOL_NAME,
         'arguments': {},
         'reason_code': 'need_expense_status',
+        'expense_reason': None,
     },
 }
 
@@ -303,6 +331,19 @@ TOOL_USAGE_RULES: dict[str, str] = {
         '- 该 Tool 只生成待用户确认的草稿(Proposal),不会提交任何写操作。\n'
         '- 缺少必要信息(如余额不足或用户未提供日期 / 原因)时,优先 finish '
         '告知用户补充信息或当前不可申请,不要调用该 Tool。'
+    ),
+    EXPENSE_PROPOSAL_TOOL_NAME: (
+        f'{EXPENSE_PROPOSAL_TOOL_NAME} 使用规则:\n'
+        '- 仅当用户明确要求办理、准备、发起或提交报销申请等业务动作时使用；'
+        '“报销流程是什么”“报销需要什么材料”“报销原因应该填什么”等咨询必须调用 '
+        f'{RAG_TOOL_NAME}，不得进入报销 Proposal 或 reason clarification。\n'
+        '- expense_reason 缺失时应优先调用该 Tool 产生 reason clarification；不要先调用 '
+        f'{TRAVEL_RECORD_TOOL_NAME} 或 {INVOICE_VERIFY_TOOL_NAME} 收集其它字段。\n'
+        '- 用户要求“对应发票 / 相关发票 / 全部发票”时，先调用 '
+        f'{TRAVEL_RECORD_TOOL_NAME} 选择目标 trip，再对该 trip 的每个 invoice_id 调用 '
+        f'{INVOICE_VERIFY_TOOL_NAME}；所有需要的发票验真成功后才能调用 '
+        f'{EXPENSE_PROPOSAL_TOOL_NAME}。不得跳过验真直接生成草稿。\n'
+        '- 该 Tool 只生成待用户确认的草稿或 clarification，不会提交任何写操作。'
     ),
 }
 
@@ -357,9 +398,9 @@ def build_planner_system_prompt(tools: list[str]) -> str:
         '合法示例：\n'
         f'{example_lines}\n'
         f'{finish_index}. {{"action": "finish", "answer": "年假制度：入职满1年5天。", '
-        '"reason_code": "task_complete"}\n'
+        '"reason_code": "task_complete", "expense_reason": null}\n'
         f'{refuse_index}. {{"action": "refuse", "answer": "该请求不允许处理。", '
-        '"reason_code": "not_allowed"}'
+        '"reason_code": "not_allowed", "expense_reason": null}'
         + (f'\n\n当前可见查询 Tool 的 freshness 规则（历史摘要不能替代当前查询）：\n{freshness_rules}'
            if freshness_rules else '')
         + (f'\n\n{usage_rules}' if usage_rules else '')
@@ -551,7 +592,105 @@ def _refuse_decision(answer: str, reason_code: str) -> dict:
         'arguments': None,
         'answer': answer,
         'reason_code': reason_code,
+        'expense_reason': None,
     }
+
+
+def _normalize_expense_reason(value: object) -> str | None:
+    """把 Planner 的可选原因归一化；空白字符串等价于缺失。"""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _should_force_expense_reason_first(
+    question: str,
+    decision: PlannerDecision,
+    *,
+    tools: list[str],
+    step_count: int,
+) -> bool:
+    """对明确报销请求执行 reason-first 的程序层护栏。"""
+    return (
+        step_count == 0
+        and decision.action == 'tool'
+        and decision.tool_name in (TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME)
+        and _normalize_expense_reason(decision.expense_reason) is None
+        and EXPENSE_PROPOSAL_TOOL_NAME in tools
+        and is_expense_claim_intent(question)
+    )
+
+
+def _is_active_expense_reason_wait(memory_context: object) -> bool:
+    """识别 Java 传入的 ACTIVE Expense reason 补槽上下文。"""
+    if not isinstance(memory_context, dict):
+        return False
+    task_type = memory_context.get('taskType') or memory_context.get('task_type')
+    if task_type != 'EXPENSE_REQUEST' or memory_context.get('status') != 'ACTIVE':
+        return False
+    task_state = memory_context.get('taskStateJson') or memory_context.get('task_state_json')
+    if isinstance(task_state, str):
+        try:
+            task_state = json.loads(task_state)
+        except json.JSONDecodeError:
+            return False
+    return (
+        isinstance(task_state, dict)
+        and 'reason' in (task_state.get('missing_fields') or [])
+    )
+
+
+def _redirect_non_action_expense_proposal(
+    question: str,
+    decision: PlannerDecision,
+    *,
+    tools: list[str],
+    memory_context: object,
+) -> PlannerDecision:
+    """阻止非报销动作请求被模型误路由到受控 Expense Proposal。"""
+    if (
+        decision.action != 'tool'
+        or decision.tool_name != EXPENSE_PROPOSAL_TOOL_NAME
+        or is_expense_claim_intent(question)
+        or _is_active_expense_reason_wait(memory_context)
+        or RAG_TOOL_NAME not in tools
+    ):
+        return decision
+    return PlannerDecision.model_validate({
+        'action': 'tool',
+        'tool_name': RAG_TOOL_NAME,
+        'arguments': {'question': question},
+        'answer': None,
+        'reason_code': 'need_knowledge',
+        'expense_reason': None,
+    }).validate_decision()
+
+
+def _reason_first_decision() -> PlannerDecision:
+    """构造唯一的 reason-first Proposal Tool 决策。"""
+    return PlannerDecision.model_validate({
+        'action': 'tool',
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'arguments': {},
+        'answer': None,
+        'reason_code': 'need_expense_proposal',
+        'expense_reason': None,
+    }).validate_decision()
+
+
+def _freeze_request_expense_reason(
+    state: dict,
+    decision: PlannerDecision,
+) -> tuple[PlannerDecision, str | None]:
+    """在当前请求第一次通过校验后冻结 expense_reason。"""
+    if state.get('step_count', 0) == 0:
+        frozen = _normalize_expense_reason(decision.expense_reason)
+    else:
+        frozen = _normalize_expense_reason(state.get('request_expense_reason'))
+    payload = decision.model_dump()
+    payload['expense_reason'] = frozen
+    return PlannerDecision.model_validate(payload).validate_decision(), frozen
 
 
 def _decision_result(state: dict, decision: dict, stop_reason: str, category: str = '') -> dict:
@@ -566,6 +705,8 @@ def _decision_result(state: dict, decision: dict, stop_reason: str, category: st
         'stop_reason': stop_reason,
         'step_count': state.get('step_count', 0) + 1,
     }
+    if 'request_expense_reason' in state:
+        result['request_expense_reason'] = state.get('request_expense_reason')
     if decision.get('action') in ('finish', 'refuse'):
         result['answer'] = decision.get('answer', '')
     if category:
@@ -748,6 +889,8 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
       step_count       — Planner 已完成决策次数 + 1（Finish/Refuse 也算一次）；
                          预算耗尽终止时不增加，保持 MAX_PLANNER_STEPS
       answer           — finish/refuse 决策时同步的最终回答
+      request_expense_reason — 当前请求第一次通过校验的 expense_reason 冻结值；
+                               null 也表示已完成首次抽取
     """
     trace_id = runtime.context['trace_id']
     question = state.get('question', '')
@@ -900,6 +1043,31 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
 
     # 循环要么在失败时返回，要么在此处留下已通过校验的决策。
     assert decision is not None
+
+    # Proposal 只服务于明确的报销业务动作；咨询型文本即使被模型直接
+    # 选择 Proposal，也必须回到现有知识问答链路。
+    decision = _redirect_non_action_expense_proposal(
+        question,
+        decision,
+        tools=current_visible_tools,
+        memory_context=state.get('memory_context'),
+    )
+
+    # 明确报销请求缺少原因时，先进入 Proposal Tool 的 reason clarification，
+    # 不浪费只读 trip / invoice 查询步骤。
+    if _should_force_expense_reason_first(
+        question,
+        decision,
+        tools=current_visible_tools,
+        step_count=step_count,
+    ):
+        decision = _reason_first_decision()
+
+    # 只在当前请求第一次通过校验的 Planner decision 中捕获原因；后续
+    # Tool → Planner 回环即使输出了其它值，也只能复用当前请求冻结值。
+    decision, frozen_expense_reason = _freeze_request_expense_reason(state, decision)
+    state = dict(state)
+    state['request_expense_reason'] = frozen_expense_reason
 
     # Capability Gate 后置校验：Prompt 只是能力描述，模型不得通过直接输出隐藏
     # Tool 名称扩大本次请求的可用能力范围；隐藏 Tool 视为 Planner contract violation。
