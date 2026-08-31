@@ -168,7 +168,7 @@ AGENT_EVAL_CASES: list[AgentEvalCase] = [
         ),
         tool_stubs={'eval_report_tool': EVAL_ALL, 'rag_answer_tool': RAG_ANSWER},
     ),
-    # ── finish / refuse ───────────────────────────────────────
+    # ── finish / refuse（完成 / 拒绝）──────────────────────────
     AgentEvalCase(
         case_id='007-direct-finish',
         question='你好',

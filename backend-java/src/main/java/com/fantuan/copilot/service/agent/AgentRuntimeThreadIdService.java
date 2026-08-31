@@ -23,7 +23,7 @@ public class AgentRuntimeThreadIdService {
         return generate(trustedUserId, resolvedConversationId, null);
     }
 
-    /** Task Runtime namespace: one checkpoint thread per trusted task. */
+    /** Task Runtime 命名空间：每个可信任务对应一个 checkpoint thread。 */
     public String generate(String trustedUserId, String resolvedConversationId,
                            String taskId) {
         Objects.requireNonNull(trustedUserId, "trustedUserId 不能为空");

@@ -1,12 +1,12 @@
 """app.capabilities —— Memory Capability Registration Boundary（P1-B）
 
-本包承载"Workflow Capability Registration"边界：
+本包承载“工作流 Capability 注册”边界：
 
   Business Module  →  MemoryCapability  →  MemoryCapabilityRegistry  →  MemoryTaskTypePolicy
 
 设计纪律：
 
-  * 本包 **不 import** 任何业务 / Tool / Agent / LangGraph / Database / HTTP 模块；
+  * 本包**不 import**任何业务 / Tool / Agent / LangGraph / Database / HTTP 模块；
   * 仅承载纯 Python 数据结构（Pydantic frozen BaseModel）；
   * Memory Core（app/memory/*）仅通过 ``MemoryCapabilityRegistry`` 间接消费本包，
     不直接依赖业务模块。

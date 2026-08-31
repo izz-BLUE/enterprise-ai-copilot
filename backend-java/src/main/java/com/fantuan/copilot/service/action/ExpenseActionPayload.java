@@ -5,7 +5,7 @@ import com.fantuan.copilot.model.action.ExpenseItem;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Focused immutable value object for the canonical EXPENSE_CLAIM payload. */
+/** canonical EXPENSE_CLAIM payload 的聚焦不可变值对象。 */
 public record ExpenseActionPayload(
         int schemaVersion,
         String tripId,

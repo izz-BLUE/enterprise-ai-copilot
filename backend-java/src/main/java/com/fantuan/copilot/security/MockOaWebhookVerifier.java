@@ -11,7 +11,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Clock;
 
-/** Verifies the exact Mock OA webhook bytes before JSON parsing or business work. */
+/** 在 JSON 解析或业务处理前校验精确的 Mock OA webhook 字节。 */
 @Component
 public class MockOaWebhookVerifier {
     private static final long MAX_REPLAY_WINDOW_SECONDS = 300;

@@ -10,8 +10,8 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
- * Internal-only Python -> Java correlation for the durable external expense wait.
- * It is deliberately not part of either browser response DTO.
+ * 仅供内部使用的 Python -> Java 持久化外部报销等待关联信息。
+ * 它有意不属于任一浏览器响应 DTO。
  */
 public record ExternalWaitMarker(
         @JsonAlias("schema_version") Integer schemaVersion,

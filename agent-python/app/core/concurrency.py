@@ -1,4 +1,4 @@
-"""Bounded admission control for expensive AI request paths."""
+"""昂贵 AI 请求路径的有界准入控制。"""
 
 import asyncio
 from time import perf_counter
@@ -11,15 +11,14 @@ from app.core.config import (
 
 
 class ConcurrencyLimitExceeded(RuntimeError):
-    """Raised when an AI request cannot obtain a slot before the deadline."""
+    """AI 请求在截止时间前无法获得槽位时抛出。"""
 
 
 class RequestConcurrencyLimiter:
-    """Single-process async admission controller.
+    """单进程异步准入控制器。
 
-    FastAPI sync handlers run in a worker thread, so limiting at middleware
-    level prevents excess requests from occupying that thread pool before the
-    retrieval and LLM work starts.
+    FastAPI sync handler 运行在 worker thread 中，因此在 middleware 层限制请求，
+    可以避免过量请求在检索和 LLM 工作开始前占满 thread pool。
     """
 
     def __init__(self, max_concurrent: int, queue_timeout_ms: int):
@@ -35,7 +34,7 @@ class RequestConcurrencyLimiter:
         self._rejected = 0
 
     async def acquire(self, trace_id: str) -> float:
-        """Acquire one slot and return queue wait time in milliseconds."""
+        """获取一个槽位，并返回排队等待时间（毫秒）。"""
         started = perf_counter()
         try:
             await asyncio.wait_for(

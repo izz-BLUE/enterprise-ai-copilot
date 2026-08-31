@@ -74,9 +74,7 @@ class AgentResponse(BaseModel):
     action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
     memory_proposal: AgentMemoryProposal | None = None
-    # Internal Java-only field.  It is deliberately not copied into the
-    # public AgentChatResponse DTO.
+    # Java 内部字段。它不会复制到公开的 AgentChatResponse DTO。
     hitl_wait: HitlWaitMarker | None = None
-    # Internal Java-only external approval correlation.  P3-5B will decide
-    # how Java stores it and keeps it out of the browser contract.
+    # Java 内部使用的外部审批关联信息。P3-5B 决定其存储方式，并确保它不进入浏览器契约。
     external_wait: ExternalWaitMarker | None = None

@@ -230,7 +230,7 @@ TOOL_REASON_CODES: dict[str, str] = {
     LEAVE_BALANCE_TOOL_NAME: 'need_balance',
     LEAVE_REQUEST_TOOL_NAME: 'need_leave_history',
     LEAVE_PROPOSAL_TOOL_NAME: 'need_proposal',
-    # P2-A Expense Workflow V1
+# P2-A 报销工作流 V1
     TRAVEL_RECORD_TOOL_NAME: 'need_travel_history',
     INVOICE_VERIFY_TOOL_NAME: 'need_invoice_verify',
     EXPENSE_PROPOSAL_TOOL_NAME: 'need_expense_proposal',
@@ -268,7 +268,7 @@ TOOL_EXAMPLES: dict[str, dict] = {
         'arguments': {},
         'reason_code': 'need_proposal',
     },
-    # P2-A Expense Workflow V1
+# P2-A 报销工作流 V1
     TRAVEL_RECORD_TOOL_NAME: {
         'action': 'tool',
         'tool_name': TRAVEL_RECORD_TOOL_NAME,
@@ -898,7 +898,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             )
         break
 
-    # The loop either returns on failure or leaves a validated decision here.
+    # 循环要么在失败时返回，要么在此处留下已通过校验的决策。
     assert decision is not None
 
     # Capability Gate 后置校验：Prompt 只是能力描述，模型不得通过直接输出隐藏

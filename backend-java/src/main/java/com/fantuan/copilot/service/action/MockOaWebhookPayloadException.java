@@ -1,6 +1,6 @@
 package com.fantuan.copilot.service.action;
 
-/** Raised when an authenticated Mock OA webhook is not a supported strict envelope. */
+/** 已认证的 Mock OA webhook 不是受支持的严格封装时抛出。 */
 public class MockOaWebhookPayloadException extends RuntimeException {
     public MockOaWebhookPayloadException(String message, Throwable cause) {
         super(message, cause);

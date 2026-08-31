@@ -1,4 +1,4 @@
-# Roadmap
+# 路线图
 
 路线图只保留真正尚未完成的工作。已经在当前代码和验收基线中实现的能力列在“已完成”，不再以未来计划措辞重复描述。
 
@@ -12,11 +12,11 @@
 - `ANNUAL_LEAVE_REQUEST` 与 `EXPENSE_CLAIM` Proposal；
 - Java PendingAction：nonce digest、owner、TTL、幂等、事务、状态机和 Memory terminal lifecycle；
 - Expense Claim 与 Expense Item 持久化、确定性金额计算和 confirm-time revalidation；
-- PostgreSQL `PostgresSaver` execution checkpoint、crash recovery、`graph.invoke(None)`；
+- PostgreSQL `PostgresSaver` execution checkpoint、崩溃恢复、`graph.invoke(None)`；
 - 独立的 `WAITING_USER` 与 `WAITING_EXTERNAL`，Java-authoritative `Command(resume)`；
 - Mock OA SQLite、PENDING→APPROVED/REJECTED、HMAC webhook、authoritative GET、bounded reconciliation 和 external resume retry markers；
-- Scoped Conversation Memory：ACTIVE read、trigger/extractor/write policy、Java owner/lifecycle；
-- Enterprise OA MCP read-only travel/invoice integration；
+- 作用域会话记忆（Scoped Conversation Memory）：ACTIVE 读取、trigger/extractor/write policy、Java owner/lifecycle；
+- Enterprise OA MCP 只读 travel/invoice 集成；
 - React confirmation UI、Playwright browser baseline、CI、Gitleaks、CodeQL 和 Dependabot；
 - 小规格单机部署、短时受控验证和最终项目/面试文档。
 

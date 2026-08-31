@@ -22,8 +22,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Minimal Java-owned runtime for the bounded Leave/Expense multi-task case.
- * It owns ordering and lifecycle only; domain handlers remain authoritative.
+ * 面向有界 Leave/Expense 多任务场景的最小 Java 负责 runtime。
+ * 它只负责顺序和生命周期；领域 handler 仍是权威来源。
  */
 @Service
 public class TaskRuntimeService {
@@ -45,13 +45,11 @@ public class TaskRuntimeService {
     }
 
     /**
-     * Java-owned admission and recovery point for a conversation.
+     * conversation 的 Java 负责准入与恢复点。
      *
-     * The order is deliberately deterministic: an existing WAITING_USER or
-     * WAITING_CLARIFICATION wins over RUNNING recovery, then an existing
-     * RUNNING task is retried on its stable task thread, and only then may a
-     * non-blocked PENDING task be promoted.  No model output participates in
-     * this decision.
+     * 顺序有意保持确定性：已有 WAITING_USER 或 WAITING_CLARIFICATION 优先于
+     * RUNNING recovery；随后在稳定 task thread 上重试已有 RUNNING task；只有这
+     * 之后才能提升未阻断的 PENDING task。模型输出不参与该决策。
      */
     @Transactional
     public Optional<TaskExecution> reconcile(String ownerUserId, String conversationId) {
@@ -95,10 +93,9 @@ public class TaskRuntimeService {
     }
 
     /**
-     * Synchronizes orchestration state with a committed Java business action.
-     * MANDATORY makes an accidental post-commit invocation fail fast instead
-     * of creating the exact half-committed state this runtime is avoiding.
-     * Missing task rows are the intentional legacy-single path.
+     * 将编排状态与已提交的 Java 业务动作同步。
+     * MANDATORY 会让意外的提交后调用快速失败，避免产生本 runtime 正在规避的
+     * 半提交状态。缺少 task 记录时走有意保留的 legacy-single 路径。
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean synchronizeBusinessStatus(String actionId, TaskExecutionStatus target) {
@@ -122,9 +119,8 @@ public class TaskRuntimeService {
     }
 
     /**
-     * Replay-only status check.  A replay must not rewrite a task that has
-     * already advanced beyond the original confirmation target, such as an
-     * Expense task completed by the external approval callback.
+     * 仅供重放使用的 status 检查。重放不得重写已经超过原始确认目标的 task，
+     * 例如已经由外部审批 callback 完成的 Expense task。
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean synchronizeReplayStatus(String actionId, TaskExecutionStatus target) {
@@ -142,14 +138,14 @@ public class TaskRuntimeService {
                 || status == TaskExecutionStatus.FAILED));
     }
 
-    /** Re-queue only a task that failed before its next durable wait was registered. */
+    /** 仅重新排入在注册下一持久化 wait 前失败的 task。 */
     public boolean requeueAfterLaunchFailure(String taskId) {
         Instant now = clock.instant();
         return executions.updateStatus(taskId, TaskExecutionStatus.RUNNING,
                 TaskExecutionStatus.PENDING, now, null);
     }
 
-    /** Cheap admission hint; Python remains the only decomposition parser. */
+    /** 廉价的准入提示；Python 仍是唯一的分解解析器。 */
     public boolean isCompositeWriteCandidate(String message) {
         if (message == null) {
             return false;

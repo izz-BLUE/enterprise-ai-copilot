@@ -7,7 +7,7 @@ DecompositionKind = Literal["single", "multi", "unsupported"]
 
 
 class TaskSpec(BaseModel):
-    """Pure decomposition output; lifecycle belongs to the Java Task Runtime."""
+    """纯分解输出；生命周期归 Java Task Runtime 负责。"""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -24,7 +24,7 @@ class TaskSpec(BaseModel):
 
 
 class TaskDecompositionResult(BaseModel):
-    """Deterministic parser result with no queue or execution state."""
+    """不包含队列或执行状态的确定性解析结果。"""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 

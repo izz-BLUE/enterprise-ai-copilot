@@ -173,8 +173,7 @@ def test_hitl_wait_survives_restart_confirm_cancel_and_completed_replay():
     finally:
         runtime_c.shutdown()
 
-    # Keep this assertion outside the runtime lifecycle so a refactor cannot
-    # accidentally lose the immutable execution correlation during replay.
+# 将此断言放在运行时生命周期之外，避免重构时意外丢失不可变的执行关联信息。
     assert payload.execution_id == marker
 
 

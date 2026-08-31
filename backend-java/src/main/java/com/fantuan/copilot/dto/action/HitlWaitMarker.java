@@ -6,7 +6,7 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 
 import java.util.regex.Pattern;
 
-/** Python checkpoint marker used only by the Java internal registration path. */
+/** 仅由 Java 内部注册路径使用的 Python checkpoint marker。 */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record HitlWaitMarker(
         @JsonAlias("schema_version") Integer schemaVersion,

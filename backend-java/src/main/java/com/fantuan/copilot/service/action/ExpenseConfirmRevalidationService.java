@@ -16,11 +16,10 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Confirm-time authoritative expense check.
+ * 确认时的报销权威检查。
  *
- * <p>This service has no transaction boundary. It only transports current OA
- * facts and makes the deterministic Java decision; local state is finalized
- * by {@link BusinessActionService} in a separate short transaction.</p>
+ * <p>本 service 没有事务边界，只传输当前 OA 事实并作出确定性的 Java 决策；
+ * 本地状态由 {@link BusinessActionService} 在独立的短事务中收口。</p>
  */
 @Service
 public class ExpenseConfirmRevalidationService {
@@ -44,7 +43,7 @@ public class ExpenseConfirmRevalidationService {
         this.calculation = calculation;
     }
 
-    /** Returns a bounded stale code, or null when current facts still match. */
+    /** 返回有界 stale code；当前事实仍匹配时返回 null。 */
     public String revalidate(PendingAction action, String traceId) {
         if (action == null || action.actionType() != BusinessActionType.EXPENSE_CLAIM) {
             return null;
@@ -59,8 +58,8 @@ public class ExpenseConfirmRevalidationService {
 
         ExpenseRevalidationRequest request;
         try {
-            // employeeId and all business identifiers come from the persisted
-            // PendingAction payload, never from the browser or Memory.
+            // employeeId 和所有业务标识均来自持久化 PendingAction payload，
+            // 绝不来自浏览器或 Memory。
             request = new ExpenseRevalidationRequest(1, action.employeeId(),
                     payload.tripId(), payload.invoiceIds());
         } catch (RuntimeException exception) {

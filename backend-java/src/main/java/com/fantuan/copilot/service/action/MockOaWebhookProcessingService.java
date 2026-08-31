@@ -3,7 +3,7 @@ package com.fantuan.copilot.service.action;
 import com.fantuan.copilot.dto.webhook.MockOaExpenseApprovalWebhook;
 import org.springframework.stereotype.Service;
 
-/** Treats the webhook as a refresh notification for the shared Mock OA status path. */
+/** 将 webhook 作为共享 Mock OA status 路径的刷新通知处理。 */
 @Service
 public class MockOaWebhookProcessingService {
     private final ExpenseExternalApprovalStatusSyncService statusSyncService;

@@ -37,15 +37,15 @@ from app.schemas.planner_schema import (
     PlannerDecisionError,
 )
 from app.tools.enterprise_tools import (
-    expense_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
-    expense_status_tool,  # noqa: F401 - registry resolves tools through globals().
-    invoice_verify_tool,  # noqa: F401 - registry resolves tools through globals().
-    leave_balance_tool,  # noqa: F401 - registry resolves tools through globals().
-    leave_proposal_tool,  # noqa: F401 - registry resolves tools through globals().
-    leave_request_tool,  # noqa: F401 - registry resolves tools through globals().
-    travel_record_tool,  # noqa: F401 - registry resolves tools through globals().
+    expense_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    expense_status_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    invoice_verify_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    leave_balance_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    leave_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    leave_request_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    travel_record_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
 )
-from app.tools.rag_tools import eval_report_tool, rag_answer_tool  # noqa: F401 - see registry lookup above.
+from app.tools.rag_tools import eval_report_tool, rag_answer_tool  # noqa: F401 - 见上方 registry 查找。
 
 # 单次任务允许的最大 Tool 执行次数（真正发起执行的次数，成功/失败都计数）。
 # P2-A Expense Workflow V1: 提升到 5 以容纳 travel/rag/invoice/proposal/status
@@ -94,7 +94,7 @@ def _error_code(exc: Exception) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool Registry
+# Tool 注册表
 # ---------------------------------------------------------------------------
 # ToolSpec 把"身份要求 / 系统字段集 / 执行前注入 / Proposal 解析"从 executor
 # 主流程里抽出来，每加一个 Tool 只在 _TOOL_REGISTRY 注册一行，executor
@@ -136,7 +136,7 @@ class _ExecutorContext:
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    executable_ref: str  # module-global name; resolved via globals() at call time
+    executable_ref: str  # 模块全局名称；调用时通过 globals() 解析
     identity_required: bool = False
     system_arg_keys: frozenset = field(default_factory=frozenset)
     no_employee_blocked_category: str = 'access_control'
@@ -146,7 +146,7 @@ class ToolSpec:
     resume_safe: bool = False
 
 
-# --- Pre-inject hooks ------------------------------------------------------
+# --- Pre-inject hooks（预注入钩子） ----------------------------------------
 
 def _inject_rag(args: dict, ctx: _ExecutorContext) -> dict:
     # 系统字段由 Executor 注入，不经过模型
@@ -186,7 +186,7 @@ def _inject_leave_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     return merged
 
 
-# ── P2-A Expense Workflow V1: 共享 MCP read pre-inject 钩子 ─────────────
+# ── P2-A Expense Workflow V1：共享 MCP read 预注入钩子 ─────────────────────
 # travel_record_tool 与 invoice_verify_tool 都要求 identity_required=true
 # 且 executor 注入 employee_id / trace_id；LLM 不得传 employee_id（V2 §十一）。
 # limit 不属于 LLM 必填字段，Executor 注入默认值。
@@ -213,7 +213,7 @@ def _inject_oamcp_read(args: dict, ctx: _ExecutorContext) -> dict:
     return merged
 
 
-# ── P2-A Expense Workflow V1: expense_proposal_tool 的 context 注入 ───────
+# ── P2-A Expense Workflow V1：expense_proposal_tool 的 context 注入 ────────
 # 追加约束 §1/§2：ExpenseProposalContext 必须由程序层从当前请求成功
 # tool_history 确定性构造（不允许把 raw tool_history 交给 LLM 解析）。
 # 从 tool_history 中抽取：
@@ -301,7 +301,7 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     return merged
 
 
-# --- Proposal post-hooks ---------------------------------------------------
+# --- Proposal 后置钩子 ------------------------------------------------------
 
 def _leave_proposal_post(parsed: dict, tool_name: str) -> dict:
     # ISO -> date 还原(详见 _restore_iso_date_fields 注释)。
@@ -331,7 +331,7 @@ _PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
 })
 
 
-# --- Registry --------------------------------------------------------------
+# --- 注册表 -----------------------------------------------------------------
 
 def _build_registry() -> dict[str, ToolSpec]:
     return {
@@ -425,7 +425,7 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = _build_registry()
 
 
 def is_tool_resume_safe(tool_name: str) -> bool:
-    """Return the explicit replay policy; unknown tools fail closed."""
+    """返回明确的重放策略；未知 Tool 采用 fail-closed。"""
     spec = _TOOL_REGISTRY.get(tool_name)
     return bool(spec is not None and spec.resume_safe)
 

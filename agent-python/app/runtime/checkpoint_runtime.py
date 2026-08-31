@@ -159,7 +159,7 @@ class CheckpointRuntime:
         allow_eval: bool,
         allow_business_actions: bool,
     ) -> RecoveryDecision:
-        """Inspect only the latest head and classify automatic crash recovery."""
+        """只检查最新 head，并对自动崩溃恢复进行分类。"""
         snapshot = graph.get_state({'configurable': {'thread_id': thread_id}})
         return inspect_recovery_snapshot(
             snapshot,

@@ -1,8 +1,8 @@
-# API Contract Audit
+# API 契约审计
 
 本文按当前 Controller、FastAPI route 和 Mock OA app 审计接口。公网调用只应使用 Java；Python、Java `/api/internal/**` 和 Mock OA admin 端点是服务间/演示内部接口。
 
-## 1. Service addresses
+## 1. 服务地址
 
 | 服务 | 本地地址 | 暴露边界 |
 |---|---|---|
@@ -13,9 +13,9 @@
 
 Java 入口为可信边界：它解析 JWT、生成 `trace_id`、决定 Admin/capability、解析 conversation scope，并向 Python 注入可信 runtime headers。客户端不能通过 body 或 LLM arguments 覆盖 employee、权限、业务日期或 trace。
 
-## 2. Java public API
+## 2. Java 公共 API
 
-### Authentication
+### 认证
 
 | Method | Path | Auth | 说明 |
 |---|---|---|---|
@@ -25,17 +25,17 @@ Java 入口为可信边界：它解析 JWT、生成 `trace_id`、决定 Admin/ca
 
 生产和本地 Demo 均使用 JWT；Demo Auth 只负责初始化固定演示账号。
 
-### Health and version
+### 健康检查与版本
 
 | Method | Path | Auth | 说明 |
 |---|---|---|---|
-| `GET` | `/api/health` | public | Java liveness |
-| `GET` | `/api/ready` | public | Java readiness |
-| `GET` | `/api/agent/health` | public | Java 代理查询 Python health |
-| `GET` | `/api/agent/ready` | public | Java 代理查询 Python readiness |
-| `GET` | `/api/version` | public | build/version metadata |
+| `GET` | `/api/health` | public | Java 存活状态 |
+| `GET` | `/api/ready` | public | Java 就绪状态 |
+| `GET` | `/api/agent/health` | public | Java 代理查询 Python 健康状态 |
+| `GET` | `/api/agent/ready` | public | Java 代理查询 Python 就绪状态 |
+| `GET` | `/api/version` | public | 构建/版本元数据 |
 
-### Chat
+### Chat 接口
 
 | Method | Path | Auth | 说明 |
 |---|---|---|---|
@@ -83,7 +83,7 @@ Agent 响应核心字段：
 
 完整 Proposal 会产生 `pendingAction`；内部 `action_proposal`、`hitl_wait`、`external_wait` 不复制到浏览器响应。缺字段只返回 `missing_fields` 所表达的 Clarification，不创建 PendingAction。
 
-### Controlled actions
+### 受控业务动作
 
 | Method | Path | Auth | Headers/body |
 |---|---|---|---|
@@ -111,7 +111,7 @@ Confirm 响应：
 
 Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附带下一任务的 `nextPendingAction`。该字段仍是 Java PendingAction 视图；不存在时为 `null`。Task Runtime 的 Expense 确认会先让当前 Python task graph `END`，再由 Java 绑定 ExpenseClaim 的外部关联并提交 OA，不进入 Python `/agent/langgraph/external/resume`。
 
-### Admin and demo endpoints
+### 管理与 Demo 端点
 
 | Method | Path | Auth | 说明 |
 |---|---|---|---|
@@ -119,7 +119,7 @@ Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附�
 
 浏览器的 eval/管理能力由 Java 已验证 JWT 的 `role=ADMIN` 授权；浏览器不发送 `X-Admin-Token`。`X-Admin-Token` 仅作为内部业务动作 hardening 的兼容 header，`BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 时由 Java 校验匹配的 server-only `ADMIN_TOKEN`；它不是普通用户认证替代品。
 
-## 3. Java internal read API
+## 3. Java 内部读取 API
 
 这些端点在 Spring Security 中以内部链路 permit，但必须同时提供 Java 侧配置的 `X-Internal-Token` 和可信上游注入的 `X-Employee-Id`。它们按 employee ownership 查询，不能用浏览器输入的身份。
 
@@ -159,25 +159,25 @@ X-Mock-OA-Signature: v1=<hex-hmac>
 
 body 不包含 status。Java 验签和解析成功后，以 `requestId` 调 Mock OA GET 查询权威状态，再幂等更新 ExpenseClaim。状态 sync 成功返回 204；签名失败 401；body/schema/event 失败 400；权威查询或处理失败 502。
 
-## 5. Python internal API
+## 5. Python 内部 API
 
 Python 不对公网提供业务入口；这些接口由 Java 或运行时内部调用。
 
 | Method | Path | 说明 | 成功/错误语义 |
 |---|---|---|---|
-| `GET` | `/agent/health` | Python liveness | 200 |
-| `GET` | `/agent/ready` | Python readiness，含 Checkpoint availability | 不可用时非 2xx |
-| `GET` | `/agent/version` | build/version metadata | 200 |
+| `GET` | `/agent/health` | Python 存活状态 | 200 |
+| `GET` | `/agent/ready` | Python 就绪状态，含 Checkpoint 可用性 | 不可用时非 2xx |
+| `GET` | `/agent/version` | 构建/版本元数据 | 200 |
 | `POST` | `/agent/chat` | Java → Python 稳定 RAG | `ChatResponse` |
 | `POST` | `/agent/tasks/decompose` | Java → Python 的无状态确定性双任务分解 | 只返回 `single`、`multi` 或 `unsupported`；不写 Checkpoint/业务状态 |
 | `POST` | `/agent/langgraph/chat` | Java → Python Agent | 200；busy 429；recovery conflict 409；checkpoint unavailable 503；运行失败 502 |
-| `POST` | `/agent/internal/expense/revalidate` | Java confirm-time 窄适配器 | 成功返回当前 trip/invoice facts；不可以时 fail-closed |
-| `POST` | `/agent/langgraph/hitl/resume` | Java-authoritative 用户确认恢复 | 只接受严格 HITL payload |
-| `POST` | `/agent/langgraph/external/resume` | Java-authoritative 外部审批恢复 | 只接受严格 external payload |
+| `POST` | `/agent/internal/expense/revalidate` | Java 确认时窄适配器 | 成功返回当前 trip/invoice facts；不可用时 fail-closed |
+| `POST` | `/agent/langgraph/hitl/resume` | Java 权威的用户确认恢复 | 只接受严格 HITL payload |
+| `POST` | `/agent/langgraph/external/resume` | Java 权威的外部审批恢复 | 只接受严格 external payload |
 
 内部 Agent 请求使用 Java 注入的 `X-Agent-Thread-Id`、`X-Employee-Id`、`X-Conversation-Id`、`X-Business-Date`、`X-Allow-Eval` 和 `X-Allow-Business-Actions`。Task Runtime 另外使用 `X-Agent-Execution-Mode: TASK_RUNTIME` 与 Java 生成的 `X-Agent-Task-Id`；单业务兼容路径使用 `LEGACY_SINGLE`。Python 只把 execution mode 放在 trusted Runtime Context，LLM 和 AgentState 不能选择 external lifecycle。Python 以 schema、latest checkpoint 和 correlation 再校验，不信任 payload 中可伪造的 owner/permission。
 
-### Confirm-time revalidation payload
+### 确认时重新校验 payload
 
 请求体由 Java 从持久化 Action 生成：
 
@@ -232,11 +232,11 @@ Mock OA 不是浏览器 API，是独立模拟外部审批服务。
 
 Java Facade 将 Mock OA 的不存在、状态冲突、不可用和超时分别映射为 404、409、502/503；超时提示结果未知，前端不会把它渲染成业务失败终态。Mock OA 未启用时返回 503，不静默成功。
 
-## 7. Common headers and errors
+## 7. 常用请求头与错误
 
 | Header | 来源/用途 |
 |---|---|
-| `Authorization: Bearer ...` | Java public authentication |
+| `Authorization: Bearer ...` | Java 公共认证 |
 | `X-Admin-Token` | 仅内部业务动作 hardening 的兼容 header；浏览器不发送，不是身份 |
 | `Idempotency-Key` | Confirm 必需 UUID；Mock OA 使用 `expense:<expenseId>` |
 | `X-Trace-Id` | Java 生成并透传；客户端值不作为 authority |
@@ -246,11 +246,11 @@ Java Facade 将 Mock OA 的不存在、状态冲突、不可用和超时分别�
 
 公共错误响应使用稳定的 `success=false`/错误 code/traceId 语义，不返回 Python/Java exception message、secret、nonce digest 或原始 webhook body。业务 action 的具体错误码以 Java `ActionErrorResponse` 为准；文档不声称不存在的路由或旧的状态 endpoint。
 
-## 8. Contract audit notes
+## 8. 契约审计说明
 
-- Java `/api/chat` 与 `/api/agent/langgraph/chat` 是浏览器/外部客户端的业务入口；Python 对应路由是内部 gateway contract。
+- Java `/api/chat` 与 `/api/agent/langgraph/chat` 是浏览器/外部客户端的业务入口；Python 对应路由是内部 gateway 契约。
 - `/api/internal/leave/**`、`/api/internal/expense/**` 是 Python read tools 的内部读取接口，不是公网业务 API。
-- `/agent/internal/expense/revalidate` 是 Java confirm-time adapter，不是前端验证接口。
+- `/agent/internal/expense/revalidate` 是 Java 确认时 adapter，不是前端验证接口。
 - `/agent/tasks/decompose` 是无状态、程序层确定性 decomposition；Java 校验 `task_text` 必须是原文有序连续 span，并负责 TaskExecution 生命周期。
 - `/api/webhooks/mock-oa/expense-approval` 是唯一 Mock OA webhook receiver；通知没有 status authority。
 - `WAITING_USER` 与 `WAITING_EXTERNAL` 使用不同的 Python resume endpoint；普通 chat 不跨 active wait。

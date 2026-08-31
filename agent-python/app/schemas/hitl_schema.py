@@ -1,4 +1,4 @@
-"""Strict checkpoint correlation and Java-authoritative HITL contracts."""
+"""严格的 checkpoint correlation 与 Java 权威 HITL 契约。"""
 
 from hashlib import sha256
 from typing import Literal
@@ -13,7 +13,7 @@ _WAIT_DOMAIN = b'enterprise-ai-copilot:hitl-wait:v1\0'
 
 
 class HitlWaitMarker(BaseModel):
-    """The only HITL data persisted in the LangGraph checkpoint state."""
+    """LangGraph checkpoint state 中唯一持久化的 HITL 数据。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -36,7 +36,7 @@ class HitlWaitMarker(BaseModel):
 
 
 class HitlResumePayload(BaseModel):
-    """Java BusinessAction authority result used to resume the graph."""
+    """用于恢复 graph 的 Java BusinessAction 权威结果。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -66,7 +66,7 @@ class HitlResumePayload(BaseModel):
 
 
 def proposal_action_type(value: dict | None) -> ActionType | None:
-    """Return the supported action discriminator without trusting extra fields."""
+    """不信任额外字段，返回受支持的 action discriminator。"""
     if not isinstance(value, dict):
         return None
     action_type = value.get('action_type')

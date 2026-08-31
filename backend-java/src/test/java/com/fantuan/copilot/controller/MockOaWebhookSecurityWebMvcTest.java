@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Verifies that only the exact webhook POST bypasses browser JWT authentication. */
+/** 验证只有精确的 webhook POST 可以绕过浏览器 JWT 认证。 */
 @WebMvcTest(controllers = MockOaWebhookController.class)
 @Import({SecurityConfig.class, SecurityErrorHandlers.class, AdminLogBuffer.class})
 @TestPropertySource(properties = {

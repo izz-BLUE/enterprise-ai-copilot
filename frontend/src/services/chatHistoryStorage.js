@@ -1,4 +1,4 @@
-// Local chat-history persistence (per authenticated user, browser-only).
+// 本地聊天历史持久化（按已认证用户隔离，仅限浏览器）。
 import { AUTHORITATIVE_TERMINAL_STATUSES, phaseForTerminalStatus } from '../domain/actionState.js'
 //
 // 目标：在同一浏览器同一账号下，刷新 / 关闭重开 / 退出后重新登录后，

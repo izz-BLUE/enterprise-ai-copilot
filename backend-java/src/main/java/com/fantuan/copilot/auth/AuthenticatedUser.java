@@ -1,8 +1,8 @@
 package com.fantuan.copilot.auth;
 
 /**
- * Trusted request principal built from a verified JWT.
- * enabled is the login-time verification result; it is intentionally not a JWT claim.
+ * 基于已验证 JWT 构建的可信请求主体。
+ * enabled 是登录时的校验结果，有意不作为 JWT claim。
  */
 public record AuthenticatedUser(
         String userId,

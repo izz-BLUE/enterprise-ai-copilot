@@ -13,7 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 
-/** Low-frequency fallback for approval notifications lost after external submission. */
+/** 外部提交后审批通知丢失时的低频兜底。 */
 @Component
 public class ExpenseExternalApprovalReconciliationWorker {
     private static final Logger log = LoggerFactory.getLogger(ExpenseExternalApprovalReconciliationWorker.class);

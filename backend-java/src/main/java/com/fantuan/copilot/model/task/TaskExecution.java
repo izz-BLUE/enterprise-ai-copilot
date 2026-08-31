@@ -2,7 +2,7 @@ package com.fantuan.copilot.model.task;
 
 import java.time.Instant;
 
-/** Java-owned lifecycle row for one decomposed business task. */
+/** 一个已分解业务任务的 Java 所有生命周期记录。 */
 public record TaskExecution(
         String taskGroupId,
         String taskId,

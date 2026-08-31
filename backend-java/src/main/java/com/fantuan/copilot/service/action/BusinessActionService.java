@@ -59,7 +59,7 @@ public class BusinessActionService {
     private final TaskRuntimeService taskRuntimeService;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    /** Compatibility constructor for focused tests that do not use Task Runtime. */
+    /** 兼容不使用 Task Runtime 的聚焦测试的构造方法。 */
     public BusinessActionService(BusinessActionProperties properties,
                                  AdminAccessService adminAccessService,
                                  PendingActionRepository actions,
@@ -101,17 +101,16 @@ public class BusinessActionService {
     }
 
     /**
-     * Trusted capability boundary for an authenticated Agent request.
-     * The public demo is intentionally read-only even when the global action
-     * switch and Admin Token gate are both enabled.
+     * 已认证 Agent 请求的可信 capability 边界。
+     * 即使全局动作开关和 Admin Token gate 都启用，公开 Demo 仍有意保持只读。
      */
     public boolean isAllowed(String presentedToken, VerifiedIdentity identity) {
         return isAllowed(presentedToken) && DemoAuthPolicy.mayUseBusinessActions(identity);
     }
 
     /**
-     * Admission guard shared by legacy single actions and Task Runtime.
-     * The caller supplies only the trusted Java owner and resolved conversation.
+     * legacy single actions 和 Task Runtime 共用的准入 guard。
+     * 调用方只能提供可信的 Java owner 和已解析的 conversation。
      */
     @Transactional(readOnly = true)
     public boolean hasBlockingAction(String ownerUserId, String conversationId) {
@@ -143,8 +142,8 @@ public class BusinessActionService {
     }
 
     /**
-     * P3-4 registration path.  The wait correlation is immutable and is
-     * checked under the same global action control row as new action creation.
+     * P3-4 注册路径。wait correlation 不可变，并在与新 action 创建相同的全局
+     * action control row 下检查。
      */
     @Transactional
     public PendingActionView createHitlPending(BusinessActionProposal proposal,
@@ -158,17 +157,16 @@ public class BusinessActionService {
                 conversationId, agentExecutionId, hitlWaitId);
     }
 
-    /** Preserve the service's authorization ordering before coordinator routing. */
+    /** 在 coordinator 路由前保留 service 的授权顺序。 */
     void authorizeForAction(String presentedToken, VerifiedIdentity identity) {
         requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
     }
 
     /**
-     * Close the Java-owned task memory when a durable HITL Proposal is
-     * deterministically rejected before a PendingAction can be created.
-     * This is intentionally package-private: Python never controls this
-     * lifecycle transition.
+     * 当持久化 HITL Proposal 在创建 PendingAction 前被确定性拒绝时，关闭由 Java
+     * 负责的 task memory。本方法有意使用 package-private；Python 永远不控制该
+     * 生命周期转换。
      */
     void abandonMemoryAfterHitlRejection(VerifiedIdentity identity, String conversationId) {
         if (identity == null || identity.userId() == null || conversationId == null) {
@@ -178,15 +176,11 @@ public class BusinessActionService {
     }
 
     /**
-     * Reconcile the Java-owned expiration boundary before a new Chat is sent
-     * to Python. The database row is locked only for this short transaction;
-     * Python continuation is deliberately performed by the coordinator after
-     * this method has committed.
+     * 在向 Python 发送新 Chat 前收口由 Java 负责的过期边界。数据库记录只在该
+     * 短事务中锁定；Python continuation 有意由 coordinator 在本方法提交后执行。
      *
-     * An unexpired pending action returns empty so the existing WAITING_USER
-     * behavior remains unchanged. An already terminal HITL action is returned
-     * only to support a deterministic resume retry after a previous delivery
-     * failure.
+     * 未过期的 pending action 返回 empty，以保持现有 WAITING_USER 行为不变。
+     * 已终态的 HITL action 仅用于支持上一次投递失败后的确定性 resume 重试。
      */
     @Transactional
     public Optional<PendingAction> reconcileExpiredForChat(String ownerUserId,
@@ -213,9 +207,8 @@ public class BusinessActionService {
             closeMemory(action, TaskStatus.ABANDONED);
             return actions.find(action.actionId());
         }
-        // If the previous request committed EXPIRED but Python was
-        // unavailable, retry the same authoritative continuation before
-        // allowing a new request to inspect the checkpoint.
+         // 如果上一次请求已提交 EXPIRED 但 Python 不可用，在允许新请求检查
+         // checkpoint 前，先重试同一个权威 continuation。
         Optional<PendingAction> expired = actions.findLatestExpiredHitlByOwnerAndConversation(
                 ownerUserId, conversationId);
         expired.ifPresent(action -> synchronizeTaskRuntime(action, TaskExecutionStatus.EXPIRED));
@@ -253,9 +246,9 @@ public class BusinessActionService {
                         "INVALID_REQUEST",
                         "暂不支持的 action subtype: " + actionType, null, null));
         if (hitlWaitId != null) {
-            // Terminal HITL rows only need trusted identity/correlation for
-            // checkpoint reconciliation.  Business capability is checked
-            // below for every new or still-actionable row.
+                    // 终态 HITL 记录只需要可信身份/关联信息来执行 checkpoint
+                    // reconciliation。每个新记录或仍可操作的记录都会在下方检查
+                    // 业务 capability。
             requireIdentity(identity);
             actions.lockControl();
             Optional<PendingAction> existingResult = actions.findByHitlWaitIdForUpdate(hitlWaitId);
@@ -264,8 +257,7 @@ public class BusinessActionService {
                 verifyHitlCorrelation(existing, proposal.actionType(), identity,
                         conversationId, agentExecutionId, hitlWaitId);
                 if (isTerminal(existing.status())) {
-                    // A Java terminal result must be able to finish the
-                    // approval checkpoint after capability revocation.
+                    // Java 终态结果必须能够在 capability 撤销后完成审批 checkpoint。
                     return handler.buildSummary(existing, null);
                 }
                 requireEnabledAndAdmin(presentedToken, identity);
@@ -404,9 +396,8 @@ public class BusinessActionService {
     }
 
     /**
-     * Finalize a deterministic stale expense confirmation after the external
-     * check completed outside a transaction.  The short transaction rechecks
-     * all local authority and never overwrites another terminal state.
+     * 外部检查在事务外完成后，收口确定性的 stale 报销确认。短事务会重新检查
+     * 所有本地权威信息，且永远不会覆盖另一个终态。
      */
     @Transactional(noRollbackFor = ActionStaleException.class)
     public void failStaleConfirmation(String actionId, String confirmationNonce,

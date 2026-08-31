@@ -1,8 +1,8 @@
-# Scoped Conversation Memory Architecture
+# 作用域会话记忆架构
 
 Memory 在本项目中的准确含义是 **Conversation Scoped Task State Persistence**：保存同一用户、同一 conversation 中的当前任务连续性。它不是 Profile/Preference/Vector Memory，也不是业务事实、权限缓存或自动化触发器。
 
-## 1. Scope and authority
+## 1. 作用域与权威
 
 Memory key 是：
 
@@ -14,7 +14,7 @@ Memory key 是：
 
 Java PostgreSQL `ai_task_memory` 是 Memory lifecycle 的唯一 authority。Python 只返回非权威提案；Java 只在当前认证请求中决定 owner、scope、生命周期和持久化。
 
-## 2. Read path
+## 2. 读取路径
 
 ```text
 React conversationId hint
@@ -24,9 +24,9 @@ React conversationId hint
   → Planner receives untrusted task context
 ```
 
-Read path 只注入 `ACTIVE` Memory；`COMPLETED`/`ABANDONED` 不进入新的 Planner context。Memory 内容按不可信历史处理，不能覆盖 `employee_id`、`business_date`、`trace_id`、权限或 Tool capability。
+读取路径只注入 `ACTIVE` Memory；`COMPLETED`/`ABANDONED` 不进入新的 Planner context。Memory 内容按不可信历史处理，不能覆盖 `employee_id`、`business_date`、`trace_id`、权限或 Tool capability。
 
-## 3. Trigger and write path
+## 3. 触发与写入路径
 
 ```text
 Agent result
@@ -58,7 +58,7 @@ Python write policy 只允许 `UPSERT + ACTIVE` 的提案；Python 不提交 `CO
 
 Multi Task Runtime 的 task1 terminal 后，Java 先按既有 terminal authority 收口 task1 Memory；只有 Java Task Runtime 推进 task2 时，才可通过显式的“下一 task 激活”入口把同一 `(user_id, conversation_id)` 记录置为 `ACTIVE` 并写入 task2 proposal。该入口不放宽普通 Agent proposal 的终态保护，不新增 Memory 表结构，也不改变 TaskExecution 的状态权威。external callback / child execution 不得调用该入口。
 
-## 4. State comparison
+## 4. 状态对比
 
 | 状态 | 作用域/生命周期 | 权威来源 | 明确禁止 |
 |---|---|---|---|
@@ -70,7 +70,7 @@ Multi Task Runtime 的 task1 terminal 后，Java 先按既有 terminal authority
 
 `execution_history` 只在读取到 ACTIVE Memory 且 task type 匹配时 hydrate，所有条目都归一为 `CONTEXT_ONLY`。它可以帮助 Planner 理解已完成的 travel/invoice 步骤，但当前决策仍必须刷新业务事实，不能直接复用历史 `valid`、`duplicate` 或 trip status。
 
-## 5. Checkpoint relationship
+## 5. Checkpoint 关系
 
 Checkpoint 记录 Agent execution state，包括 `tool_history`、bounded `execution_history`、planner counters、execution marker 和 interrupt marker。它支持 crash recovery/HITL/external approval，但不拥有业务授权。
 
@@ -78,7 +78,7 @@ LangGraph 固定使用 `ConnectionPool + PostgresSaver` 持久化 execution snap
 
 Memory proposal pipeline 不在 HITL resume、external resume 或普通 `WAITING_EXTERNAL` response 中运行。这样避免外部 webhook、resume replay 或单纯业务查询产生意外 Memory trigger。
 
-## 6. Security invariants
+## 6. 安全不变量
 
 - owner 从 `VerifiedIdentity` 派生，不能从请求体、Memory 或模型输出派生；
 - Java 是 Memory lifecycle authority，Python 只能提出 `UPSERT + ACTIVE`；Task Runtime 的下一 task 激活是 Java 控制的显式生命周期操作；

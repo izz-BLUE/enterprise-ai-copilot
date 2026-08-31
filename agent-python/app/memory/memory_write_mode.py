@@ -1,7 +1,7 @@
-"""memory_write_mode.py —— Memory Write Execution Mode（Phase 4E）
+"""memory_write_mode.py —— Memory 写入执行模式（Phase 4E）
 
 职责：
-  控制 Memory Write Path 是否实际向 Java 返回提案（Disabled / Audit only / Enabled）。
+  控制 Memory 写入路径是否实际向 Java 返回提案（Disabled / Audit only / Enabled）。
   在生产启用 Memory Proposal 前，应先以 AUDIT_ONLY 模式观察 Pipeline 触发率与
   提案质量，确认无误触发 / 数据合规后再切到 ENABLED。
 
@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.memory.memory_write_policy import MemoryWriteCommand
 
 # ---------------------------------------------------------------------------
-# Mode enum
+# Mode 枚举
 # ---------------------------------------------------------------------------
 
 
@@ -53,7 +53,7 @@ class MemoryWriteModeError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# Execution policy
+# 执行策略
 # ---------------------------------------------------------------------------
 
 

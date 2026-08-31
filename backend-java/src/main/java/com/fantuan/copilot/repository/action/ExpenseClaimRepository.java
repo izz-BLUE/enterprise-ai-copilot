@@ -20,16 +20,16 @@ public interface ExpenseClaimRepository {
 
     Optional<ExpenseClaim> findByExternalRequestId(String requestId);
 
-    /** Binds the immutable durable external wait; same value is an idempotent replay. */
+    /** 绑定不可变的持久化外部等待；相同值视为幂等重放。 */
     void bindExternalWait(String expenseId, String waitId);
 
-    /** Binds provider correlation and performs the B1 SUBMITTED -> WAITING_APPROVAL transition. */
+    /** 绑定 provider 关联，并执行 B1 SUBMITTED -> WAITING_APPROVAL 转换。 */
     void bindExternalRequest(String expenseId, String provider, String externalRequestId);
 
-    /** Applies only an authoritative terminal OA status; same-terminal replay is a no-op. */
+    /** 只应用权威的 OA 终态 status；相同终态重放时为 no-op。 */
     void applyExternalApprovalStatus(String externalRequestId, ExpenseStatus status);
 
-    /** Bounded retry candidates only; this is deliberately not approval-status polling. */
+    /** 仅返回有界重试候选；有意不执行审批 status 轮询。 */
     List<ExpenseClaim> findPendingExternalSubmissions(int limit);
 
     List<ExpenseClaim> findExternalApprovalReconciliationCandidates(Instant cutoff, int limit);

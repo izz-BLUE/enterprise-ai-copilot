@@ -1,18 +1,18 @@
-# Local Demo Guide (Quick Start)
+# 本地 Demo 指南（快速开始）
 
 这里保留最短的本地启动路径；完整的差旅报销、Mock OA、HITL/external resume 和故障排查见 [demo-guide.md](demo-guide.md)。
 
-## Prerequisites
+## 前置条件
 
 Java 17、Python 3.11、uv、Node 20、npm、Docker Compose、PostgreSQL 和可用的 DeepSeek API key。需要外部报销演示时，还需要 Enterprise OA MCP fixture/service 和 LangGraph checkpoint PostgreSQL。
 
-## Start infrastructure
+## 启动基础设施
 
 ```bash
 docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 ```
 
-## Start services
+## 启动服务
 
 ```bash
 # Terminal 1
@@ -34,7 +34,7 @@ Windows PowerShell 的 Java wrapper 可使用 `.\mvnw.cmd spring-boot:run`。
 
 地址：React `http://localhost:5173`，Java `http://localhost:8080`，Python `http://localhost:8000`，Mock OA `http://localhost:8010`。
 
-## Health and RAG smoke
+## 健康检查与 RAG smoke
 
 ```bash
 curl http://localhost:8080/api/ready
@@ -48,7 +48,7 @@ curl -X POST http://localhost:8080/api/chat \
 
 普通用户和浏览器只访问 Java；生产 Compose 不把 Python 8000 映射到宿主机公网。
 
-## Durable workflow prerequisites
+## 持久化工作流前置条件
 
 Python 本地启动即要求 PostgreSQL 执行快照 DSN；演示可恢复用户确认和外部审批时设置：
 
@@ -70,7 +70,7 @@ bash deploy/reset-demo-state.sh --yes
 
 不带 `--yes` 时，脚本会要求交互输入 `RESET`；`--dry-run` 只执行 PostgreSQL `SELECT` 和严格只读 SQLite 查询。Mock OA 通过 `ExpenseClaim.external_request_id -> expense_approval.request_id` 精确关联；Enterprise OA 的 `TRIP-20260818-001`、`INV-001`、`INV-002` 属于外部 fixture，脚本会输出 `EXTERNAL_FIXTURE_VERIFICATION = NOT_APPLICABLE`，由后续 Smoke 验证可用性。脚本不访问或修改 Flyway migration 和 sequence。
 
-## Troubleshooting
+## 故障排查
 
 | 现象 | 优先检查 |
 |---|---|
@@ -82,8 +82,8 @@ bash deploy/reset-demo-state.sh --yes
 
 ## 相关文档
 
-- [完整 Demo Guide](demo-guide.md)
+- [完整 Demo 指南](demo-guide.md)
 - [API](api.md)
-- [Deployment](deployment.md)
-- [Quality Assurance](quality-assurance.md)
+- [部署](deployment.md)
+- [质量保证](quality-assurance.md)
 - [README](../README.md)

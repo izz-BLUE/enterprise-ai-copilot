@@ -1,4 +1,4 @@
-"""agent_eval_runner.py —— Agent Eval Runner
+"""agent_eval_runner.py —— Agent Eval 运行器
 
 确定性回归：注入 mock/stub Planner 响应与 Tool 结果驱动 Agent Loop，
 验证"Agent 是否正确完成任务、正确选择 Tool、遵守权限与预算"。
@@ -27,7 +27,7 @@ _ALL_TOOL_NAMES = (
     'leave_balance_tool',
     'leave_request_tool',
     'leave_proposal_tool',
-    # P2-A Expense Workflow V1
+    # P2-A 报销工作流 V1
     'travel_record_tool',
     'invoice_verify_tool',
     'expense_proposal_tool',

@@ -2,7 +2,7 @@ package com.fantuan.copilot.gateway.expense;
 
 import com.fantuan.copilot.model.action.ExpenseClaim;
 
-/** Java boundary for submitting a locally committed expense to an approval provider. */
+/** 将本地已提交报销提交给审批 provider 的 Java 边界。 */
 public interface ExpenseApprovalGateway {
     ExternalApprovalSubmissionResult submit(ExpenseClaim claim);
 

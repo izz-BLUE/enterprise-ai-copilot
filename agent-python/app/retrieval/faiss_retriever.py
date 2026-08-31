@@ -5,7 +5,7 @@ import numpy as np
 
 from app.core.config import FAISS_INDEX_FILE, FAISS_META_FILE, logger
 
-# Module-level state
+# 模块级状态
 _index = None
 _metadata: list[dict] = []
 _available = False

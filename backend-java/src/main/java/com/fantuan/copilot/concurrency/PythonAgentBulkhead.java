@@ -13,10 +13,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Bounds the number of Java requests that may call the Python AI service.
+ * 限制可以调用 Python AI 服务的 Java 请求数量。
  *
- * <p>The semaphore is intentionally non-fair: this demo favors throughput and
- * keeps the queue deadline short instead of maintaining a long request queue.</p>
+ * <p>信号量有意采用非公平模式：本 Demo 优先保证吞吐，并保持较短的排队截止时间，
+ * 而不是维护长请求队列。</p>
  */
 @Component
 public class PythonAgentBulkhead {
@@ -45,7 +45,7 @@ public class PythonAgentBulkhead {
     }
 
     /**
-     * Returns a closeable permit, or {@code null} when the short queue deadline expires.
+     * 返回可关闭的许可；短排队截止时间到期时返回 {@code null}。
      */
     public Permit tryAcquire(String traceId) {
         long started = System.nanoTime();

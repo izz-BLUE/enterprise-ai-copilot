@@ -86,7 +86,7 @@ RestClient
 ↓
 Python /agent/chat
 ↓
-Mock AI Response
+模拟 AI 响应
 ↓
 Java 返回结果
 
@@ -131,7 +131,7 @@ jdk-17.0.19.10-hotspot
 
 重新配置 JAVA_HOME。
 
-3. Git LF / CRLF warning
+3. Git LF / CRLF 警告
 
 出现 Git 换行符 warning。
 
@@ -258,7 +258,7 @@ RestClient 请求体解析异常
 ·Embedding
 ·RAG 基础
 
-Day5 – Daily Log
+第 5 天——每日记录
 
 日期：2026-05-18
 
@@ -314,7 +314,7 @@ Day6：第一版知识库构建
 Prompt 拼接测试
 保持 Git 工程化，提交阶段性成果
 
-Day6 - Daily Log
+第 6 天——每日记录
 
 日期：2026-05-19
 

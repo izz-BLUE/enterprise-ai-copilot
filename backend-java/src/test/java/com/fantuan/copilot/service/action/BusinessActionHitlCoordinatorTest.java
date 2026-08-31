@@ -257,7 +257,7 @@ class BusinessActionHitlCoordinatorTest {
                 .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
                         any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
         org.mockito.Mockito.doAnswer(invocation -> {
-            // T1 has handed off the guard; T2 must be able to own it now.
+            // T1 已移交 guard；此时 T2 必须能够取得所有权。
             assertTrue(realGuard.tryAcquire(RUNTIME_THREAD_ID));
             return null;
         }).when(externalApprovalCoordinator).registerExternalWaitAndDispatch(
@@ -265,7 +265,7 @@ class BusinessActionHitlCoordinatorTest {
 
         coordinator.confirm(ACTION_ID, "nonce", "idem", ADMIN_TOKEN, "trace", IDENTITY);
 
-        // T1's finally must not remove T2's ownership.
+        // T1 的 finally 不得移除 T2 的所有权。
         assertFalse(realGuard.tryAcquire(RUNTIME_THREAD_ID));
         realGuard.release(RUNTIME_THREAD_ID);
         assertTrue(realGuard.tryAcquire(RUNTIME_THREAD_ID));

@@ -33,11 +33,11 @@ def _load_phoenix_settings(
         raise ValueError('PHOENIX_TRACING=true 时 PHOENIX_PROJECT_NAME 不能为空')
     return tracing, endpoint, project_name, sample_rate, capture_content
 
-# Logger
+# 日志器
 logger = logging.getLogger('agent')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
 
-# DeepSeek env
+# DeepSeek 环境变量
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 DEEPSEEK_BASE_URL = os.getenv('DEEPSEEK_BASE_URL')
 DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL')
@@ -46,18 +46,18 @@ DEEPSEEK_TEMPERATURE = float(os.getenv('DEEPSEEK_TEMPERATURE', '0'))
 if not DEEPSEEK_API_KEY:
     logger.warning('环境变量 DEEPSEEK_API_KEY 未配置，LLM 调用将不可用（retrieval eval 仍可运行）')
 
-# Paths (project root = enterprise-ai-copilot/)
+# 路径（项目根目录 = enterprise-ai-copilot/）
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))          # app/core/
 PROJECT_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', '..', '..'))
 CHUNKS_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'chunks.json')
 FAISS_INDEX_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss.index')
 FAISS_META_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss_metadata.json')
 
-# Cross Encoder Re-ranker
+# Cross Encoder 重排序器
 RERANK_MODEL = os.getenv('RERANK_MODEL', 'BAAI/bge-reranker-base')
 RERANK_CANDIDATE_K = int(os.getenv('RERANK_CANDIDATE_K', '10'))
 
-# LLM Timeout (seconds)
+# LLM 超时（秒）
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
 LLM_MAX_RETRIES = int(os.getenv('LLM_MAX_RETRIES', '0'))
 LLM_MAX_OUTPUT_TOKENS = int(os.getenv('LLM_MAX_OUTPUT_TOKENS', '1024'))
@@ -78,8 +78,8 @@ if not 64 <= LLM_MAX_OUTPUT_TOKENS <= 8192:
     PHOENIX_CAPTURE_CONTENT,
 ) = _load_phoenix_settings(os.environ)
 
-# Bounded concurrency for AI endpoints. This protects the single-worker demo
-# from admitting more retrieval / LLM work than the small host can sustain.
+# AI 端点的有界并发。保护单 worker Demo，避免接纳超出小型主机承载能力的
+# 检索/LLM 工作量。
 AI_MAX_CONCURRENT_REQUESTS = int(os.getenv('AI_MAX_CONCURRENT_REQUESTS', '3'))
 AI_QUEUE_TIMEOUT_MS = int(os.getenv('AI_QUEUE_TIMEOUT_MS', '500'))
 
@@ -106,7 +106,7 @@ AGENT_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AGENT_REQUEST_TIMEOUT_SECONDS', '
 if AGENT_REQUEST_TIMEOUT_SECONDS < 5:
     raise ValueError('AGENT_REQUEST_TIMEOUT_SECONDS 必须大于等于 5')
 
-# Input Validation
+# 输入校验
 MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '2000'))
 
 # 企业只读 Tool：Python → Java 内部 HTTP 客户端配置。
@@ -126,5 +126,5 @@ if JAVA_TIMEOUT_SECONDS < 1:
 # Extractor LLM 成本或 Memory 提案。模式合法性在 Runtime Hook 构造时再次校验。
 MEMORY_WRITE_MODE = os.getenv('MEMORY_WRITE_MODE', 'DISABLED').strip()
 
-# Constants
+# 常量
 TOP_K = 3

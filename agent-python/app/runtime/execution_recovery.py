@@ -1,4 +1,4 @@
-"""Deterministic eligibility checks for Planner-first crash resume."""
+"""Planner-first 崩溃恢复的确定性资格检查。"""
 
 from dataclasses import dataclass
 from datetime import date
@@ -73,7 +73,7 @@ class RecoveryDecision:
 
 
 def _pending_interrupts(snapshot: Any) -> list[Any]:
-    """Return unique interrupt objects; StateSnapshot exposes each twice."""
+    """返回唯一的 interrupt 对象；StateSnapshot 会将每个对象暴露两次。"""
     found: list[Any] = []
     seen: set[str] = set()
     candidates = list(getattr(snapshot, 'interrupts', ()) or ())
@@ -97,7 +97,7 @@ def _validate_external_wait_state(
     interrupts: list[Any],
     next_nodes: tuple,
 ) -> tuple[ExecutionRecoveryMarker, ExternalWaitMarker] | None:
-    """Strictly validate the one active external interrupt and its provenance."""
+    """严格校验唯一的活跃 external interrupt 及其来源。"""
     if len(interrupts) != 1 or next_nodes != ('external_wait_node',):
         return None
     try:
@@ -144,7 +144,7 @@ def _capability_residue_reason(
     allow_eval: bool,
     allow_business_actions: bool,
 ) -> str | None:
-    """Reject persisted privileged material after its current capability is revoked."""
+    """当前 capability 撤销后，拒绝持久化的特权材料。"""
     tool_history = values.get('tool_history', [])
     if not allow_eval and _has_successful_tool(tool_history, frozenset({EVAL_TOOL_NAME})):
         return 'eval_capability_revoked'
@@ -170,7 +170,7 @@ def inspect_recovery(
     allow_eval: bool,
     allow_business_actions: bool,
 ) -> RecoveryDecision:
-    """Classify the latest head without mutating or scanning checkpoint history."""
+    """不修改或扫描 checkpoint 历史，仅对最新 head 分类。"""
     if snapshot is None:
         return RecoveryDecision(RecoveryMode.NEW_EXECUTION, reason='no_snapshot')
 
@@ -238,12 +238,10 @@ def inspect_recovery(
                 reason='actor_scope_changed',
                 execution_id=marker.execution_id,
             )
-        # A durable HITL wait is already at the approval boundary.  Returning
-        # it to Java is side-effect free; Java still decides whether a new
-        # PendingAction may be created.  In particular, a terminal Java action
-        # may need to reconcile this wait after the current capability has
-        # been revoked.  Do not apply the automatic Planner/Tool recovery
-        # capability-residue gate to this approval-only checkpoint.
+        # 持久化 HITL wait 已经处于审批边界。将它返回 Java 不产生副作用；是否可以
+        # 创建新的 PendingAction 仍由 Java 决定。特别是，终态 Java action 可能需要
+        # 在当前 capability 撤销后收口该 wait。不要把自动 Planner/Tool 恢复的
+        # capability-residue gate 应用到这个仅用于审批的 checkpoint。
         return RecoveryDecision(
             RecoveryMode.WAITING_USER,
             reason='business_action_confirmation_pending',
@@ -342,7 +340,7 @@ def inspect_recovery(
 
 
 def _is_confirmable_action_proposal(values: dict) -> bool:
-    """Keep recovery independent from the graph module while sharing policy."""
+    """在共享策略的同时，让恢复逻辑独立于 graph 模块。"""
     from app.agents.action_proposal_policy import is_confirmable_action_proposal
 
     return is_confirmable_action_proposal(values)
@@ -355,7 +353,7 @@ def inspect_hitl_resume(
     employee_id: str,
     allow_business_actions: bool,
 ) -> RecoveryDecision:
-    """Validate an authoritative HITL resume against only the latest checkpoint."""
+    """仅根据最新 checkpoint 校验权威 HITL resume。"""
     if snapshot is None:
         return RecoveryDecision(RecoveryMode.INCOMPATIBLE_CHECKPOINT, reason='no_snapshot')
     values = getattr(snapshot, 'values', None)
@@ -379,11 +377,10 @@ def inspect_hitl_resume(
             reason='actor_scope_changed',
             execution_id=marker.execution_id,
         )
-    # `allow_business_actions` is intentionally not a gate here.  The payload
-    # is an authoritative terminal decision produced by Java after its own
-    # feature/admin/identity/nonce/TTL/owner/idempotency checks.  The flag is
-    # still re-injected into the Runtime Context by the caller, so any
-    # accidental Planner/Tool re-entry remains capability-gated.
+    # `allow_business_actions` 有意不是这里的 gate。payload 是 Java 在完成自身的
+    # feature/admin/identity/nonce/TTL/owner/idempotency 检查后产生的权威终态决定。
+    # 调用方仍会将该标记重新注入 Runtime Context，因此任何意外的 Planner/Tool
+    # 重新进入仍受 capability gate 控制。
     if (
         payload.wait_id != wait.wait_id
         or payload.execution_id != marker.execution_id
@@ -506,7 +503,7 @@ def inspect_external_resume(
     *,
     employee_id: str,
 ) -> RecoveryDecision:
-    """Validate one authoritative external resume against the latest head only."""
+    """仅根据最新 head 校验一个权威 external resume。"""
     if snapshot is None:
         return RecoveryDecision(RecoveryMode.INCOMPATIBLE_CHECKPOINT, reason='no_snapshot')
     values = getattr(snapshot, 'values', None)

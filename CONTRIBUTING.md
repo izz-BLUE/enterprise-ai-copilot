@@ -1,10 +1,10 @@
-# Contributing
+# 参与贡献
 
-Thanks for taking the time to improve Enterprise AI Copilot. Keep changes focused, document behavior changes, and avoid describing experimental features as production-ready.
+感谢你投入时间改进 Enterprise AI Copilot。请保持变更聚焦，记录行为变化，不要把实验性功能描述为已达到生产可用状态。
 
-## Local checks
+## 本地检查
 
-Run the checks that match the files you changed:
+请根据修改的文件执行相应检查：
 
 ```bash
 # Java
@@ -31,27 +31,27 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Knowledge-base or prompt changes require a fresh retrieval evaluation. If source documents change, rebuild chunks, embeddings, and the FAISS index before evaluating.
+知识库或 Prompt 发生变化时，需要重新执行检索评估。如果源文档发生变化，评估前请重新构建分块、向量和 FAISS index。
 
-## Change guidelines
+## 变更规范
 
-- Keep the Java and Python request/response contracts aligned; update `docs/api.md` when the public contract changes.
-- Update `docs/architecture.md` when service boundaries or request flow change.
-- Preserve `/agent/chat` as the stable RAG path. Treat LangGraph and reranking features as experimental unless their status changes explicitly.
-- Evaluate both answerable and no-answer cases when changing retrieval, prompts, routing, or evaluation code.
-- Keep deployment claims bounded by the documented test environment and duration.
+- 保持 Java 与 Python 的请求/响应契约一致；公共契约变化时更新 `docs/api.md`。
+- 服务边界或请求流变化时更新 `docs/architecture.md`。
+- 保留 `/agent/chat` 作为稳定 RAG 路径。除非明确改变其状态，否则将 LangGraph 和 reranking 功能视为实验性功能。
+- 修改检索、Prompt、路由或评估代码时，同时评估可回答和无答案场景。
+- 部署相关表述必须限定在文档记录的测试环境和持续时间内。
 
-## Security and repository hygiene
+## 安全与仓库整洁
 
-Never commit `.env` files, credentials, tokens, private keys, local evaluation reports, or generated directories such as `.venv/`, `target/`, `node_modules/`, and `dist/`.
+绝不要提交 `.env` 文件、凭据、token、私钥、本地评估报告，或 `.venv/`、`target/`、`node_modules/`、`dist/` 等生成目录。
 
-Treat user input and model output as untrusted. Do not pass either directly to commands or privileged tools. The current Safety Guard is deterministic keyword filtering, not a complete semantic security system.
+将用户输入和模型输出视为不可信内容。不要把任一内容直接传给命令或特权工具。当前 Safety Guard 是确定性的关键词过滤器，不是完整的语义安全系统。
 
-## Pull request checklist
+## Pull request 检查清单
 
-- [ ] The change has a clear scope and rationale.
-- [ ] Relevant local tests and evaluations pass, or the PR explains why they were not run.
-- [ ] API, architecture, deployment, and roadmap documents are updated where needed.
-- [ ] `git diff --check` passes.
-- [ ] The diff contains no credentials, local reports, or generated artifacts.
-- [ ] New claims are supported by code or reproducible test evidence.
+- [ ] 变更范围和理由清晰。
+- [ ] 相关本地测试和评估通过，或在 PR 中说明未执行的原因。
+- [ ] 按需更新 API、架构、部署和 roadmap 文档。
+- [ ] `git diff --check` 通过。
+- [ ] diff 不包含凭据、本地报告或生成产物。
+- [ ] 新增结论有代码或可复现测试证据支持。

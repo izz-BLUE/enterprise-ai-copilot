@@ -22,8 +22,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Post-commit orchestration only: validates Java-owned correlation, records it,
- * then makes a best-effort external submission outside the local action transaction.
+ * 仅负责提交后的编排：校验 Java 负责的 correlation、记录它，然后在本地 action
+ * 事务之外尽力提交到外部系统。
  */
 @Service
 public class ExpenseExternalApprovalCoordinator {
@@ -48,14 +48,14 @@ public class ExpenseExternalApprovalCoordinator {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** Compatibility constructor for focused B2a unit tests without B3 wiring. */
+    /** 兼容不包含 B3 wiring 的聚焦 B2a 单元测试的构造方法。 */
     public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
                                               ExpenseApprovalGateway approvalGateway,
                                               TransactionOperations transactions) {
         this(claims, approvalGateway, transactions, null, null);
     }
 
-    /** Compatibility constructor for tests that provide the legacy resume coordinator. */
+    /** 兼容提供 legacy resume coordinator 的测试的构造方法。 */
     public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
                                               ExpenseApprovalGateway approvalGateway,
                                               TransactionOperations transactions,
@@ -80,8 +80,8 @@ public class ExpenseExternalApprovalCoordinator {
                     exception.getClass().getSimpleName());
             return;
         }
-        // The action and Memory terminal state are authoritative and already committed.
-        // Do not turn an external issue into a business-action failure or a graph resume.
+        // action 和 Memory 终态是权威状态，且已经提交。
+        // 不要把外部问题转化为业务动作失败或 graph resume。
         try {
             dispatchByExpenseId(response.requestId(), traceId);
         } catch (RuntimeException exception) {
@@ -92,10 +92,9 @@ public class ExpenseExternalApprovalCoordinator {
     }
 
     /**
-     * Task Runtime external handoff.  The Python graph has already ended after
-     * Java HITL confirmation, so this path binds only a Java-owned correlation
-     * value before submitting to OA; it never creates or resumes a Python
-     * external interrupt.
+     * Task Runtime 外部 handoff。Python graph 在 Java HITL 确认后已经结束，
+     * 因此该路径只在提交 OA 前绑定 Java 负责的 correlation value；永远不会创建
+     * 或恢复 Python external interrupt。
      */
     public boolean registerTaskRuntimeAndDispatch(PendingAction action,
                                                   ActionExecutionResponse response,
@@ -205,8 +204,8 @@ public class ExpenseExternalApprovalCoordinator {
                 }
             });
             if (terminal != null && !taskRuntimeClaim && resumeCoordinator != null) {
-                // The terminal ExpenseClaim transaction has committed; legacy
-                // Python continuation is a separate best-effort operation.
+                // ExpenseClaim 终态事务已经提交；legacy Python continuation 是独立的
+                // 尽力而为操作。
                 resumeCoordinator.tryResume(claim.expenseId());
             }
         } catch (RuntimeException exception) {

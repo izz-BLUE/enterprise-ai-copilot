@@ -1,8 +1,8 @@
-# Local Demo Guide
+# 本地 Demo 指南
 
 本手册按当前实现准备本地演示。推荐主线是差旅报销外部审批闭环；年假申请作为较短的第二条受控动作。所有演示都应使用本地或专用 Demo 数据，不要把 Demo header、共享 token 或 Mock OA 当作生产认证方案。
 
-## 1. Demo scope
+## 1. Demo 范围
 
 主线展示：
 
@@ -21,7 +21,7 @@ RAG/Planner
 
 次线展示：`leave_proposal_tool → PendingAction → confirm/cancel → LeaveRequest`。
 
-## 2. Prerequisites
+## 2. 前置条件
 
 - Java 17、Maven wrapper；
 - Python 3.11、uv；
@@ -29,7 +29,7 @@ RAG/Planner
 - Docker Compose 和可用 PostgreSQL；
 - DeepSeek API key；
 - Enterprise OA MCP fixture/service（默认 URL `http://127.0.0.1:8100/mcp`）；
-- 如果演示 durable HITL/external approval：独立 LangGraph checkpoint PostgreSQL DSN。
+- 如果演示持久化 HITL/external approval：独立 LangGraph checkpoint PostgreSQL DSN。
 
 启动基础设施：
 
@@ -56,7 +56,7 @@ DEMO_AUTH_DEFAULT_PASSWORD=<server-side-only> # 仅 lisi/wangwu legacy seed
 
 前端可复制 `frontend/.env.example`；其中 `VITE_PUBLIC_DEMO_USERNAME` / `VITE_PUBLIC_DEMO_PASSWORD` 会进入浏览器构建产物，只能填写公开 demo 凭据。`demo`（U10000/E10000）保留普通 Agent/RAG 与安全只读能力，即使 `BUSINESS_ACTIONS_ENABLED=true` 也不会获得业务写能力；`zhangsan`（U10001/E10001）继续按 Java trusted identity policy 演示 Leave/Expense，浏览器不需要 Admin Token。若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`。外部审批 retry/reconciliation worker 会按间隔和批量参数低频运行，provider 关闭时 gateway fail-closed。
 
-## 3. Start services
+## 3. 启动服务
 
 ```bash
 # Terminal 1: Python
@@ -84,13 +84,13 @@ curl http://localhost:8000/agent/ready
 
 浏览器打开 `http://localhost:5173`。普通用户请求走 Java；不要把浏览器请求直接改到 Python 8000。
 
-## 4. Primary demo: expense approval
+## 4. 主 Demo：报销审批
 
-### Step A — Prepare source facts
+### 步骤 A——准备源事实
 
 确保 Enterprise OA MCP fixture 中存在当前 Demo employee 可访问的 `APPROVED` trip 和有效、未重复的 invoices。需要检查的事实包括 trip ID、日期、cost center、invoice ID、金额和 category。演示前先确认 fixture 与 employee scope 一致。
 
-### Step B — Create a proposal
+### 步骤 B——创建 Proposal
 
 在 Agent 模式输入类似：
 
@@ -109,7 +109,7 @@ curl http://localhost:8000/agent/ready
 
 > AI 只负责把已读事实整理成 Proposal。Proposal 不是授权，Java 还会做一次权威校验并生成一次性 nonce。
 
-### Step C — Confirm
+### 步骤 C——Confirm
 
 点击确认。前端只在页面内存保存 nonce 和幂等 key；Java 会：
 
@@ -121,7 +121,7 @@ curl http://localhost:8000/agent/ready
 
 预期：确认成功不会直接把 OA 状态当作已批准；页面进入等待外部审批语义。
 
-### Step D — Show WAITING_EXTERNAL
+### 步骤 D——展示 WAITING_EXTERNAL
 
 说明两个等待点的区别：
 
@@ -130,7 +130,7 @@ curl http://localhost:8000/agent/ready
 
 普通 Chat 不能穿过 `WAITING_EXTERNAL` 重新规划同一个 execution。
 
-### Step E — Submit and decide in Mock OA
+### 步骤 E——在 Mock OA 中提交并决定
 
 D2 公网 Demo 由 `admin` 登录 Copilot 后打开“模拟 OA 审批”页面完成审批。页面只调用 Java `/api/admin/mock-oa/**`，不会直接访问 Mock OA；下面的 Mock OA 管理端点仅保留给本地服务间调试使用。
 
@@ -151,7 +151,7 @@ curl -X POST http://localhost:8010/api/admin/expense-approvals/<requestId>/rejec
 
 Mock OA 先提交自己的 SQLite 终态，再 best-effort 发送 webhook。webhook 只有 event/request correlation，没有 status。
 
-### Step F — Verify Java authority and resume
+### 步骤 F——验证 Java 权威并恢复
 
 Java 收到通知后检查 HMAC 和 300 秒 timestamp window，然后 GET：
 
@@ -163,7 +163,7 @@ GET http://localhost:8010/api/expense-approvals/<requestId>
 
 终态提交后 Java 才调用 Python external resume。成功时 Graph 以 `Command(resume)` 到 END；Python 不重新跑 Planner/Tool，也不触发 Memory proposal pipeline。若 resume 失败，ExpenseClaim 终态仍保留，retry markers 支持重新投递。
 
-## 5. Secondary demo: annual leave
+## 5. 次要 Demo：年假
 
 在 Agent 模式输入包含明确日期、原因和申请意图的请求，例如：
 
@@ -183,7 +183,7 @@ leave_proposal_tool
 
 展示重点：Proposal 阶段不扣余额；Confirm 做 owner/nonce/TTL/幂等/业务规则校验；重复 Confirm 重放同一 requestId；Cancel 或过期不会写 LeaveRequest。当前 Demo 不处理法定节假日和调休。
 
-## 6. Safety and RAG fallback
+## 6. Safety 与 RAG fallback
 
 ### 普通 RAG
 
@@ -195,20 +195,20 @@ curl -X POST http://localhost:8080/api/chat `
 
 预期有 `answer`、`sources`、`traceId`。知识库没有证据时回答明确拒答，不编造。
 
-### Safety Guard
+### Safety Guard（安全防护）
 
 在 Agent 模式输入“怎么伪造病假证明？”。预期 `safe=false` 或 `route=refuse`，不进入 Planner/RAG。说明 Safety Guard Lite 是规则型纵深防御，不是完整授权或内容安全系统。
 
-### Eval gate
+### Eval gate（评估门禁）
 
 评估与管理员日志能力由 Java 已验证 JWT 的 `role=ADMIN` 授权；EMPLOYEE 不能访问。浏览器不提供或发送 Admin Token。`ADMIN_TOKEN` 如配置，仅作为 `BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 时内部业务动作的 server-side hardening，Python 只消费 Java 的 `allow_eval` 结果。
 
-## 7. Troubleshooting
+## 7. 故障排查
 
 | 现象 | 检查 |
 |---|---|
-| Agent 返回 checkpoint unavailable | DSN、PostgreSQL health、`PostgresSaver.setup()` |
-| Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture employee ownership、trip/invoice 状态 |
+| Agent 返回 checkpoint unavailable | DSN、PostgreSQL 健康状态、`PostgresSaver.setup()` |
+| Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture 的员工归属、trip/invoice 状态 |
 | Confirm 返回 503 | Python revalidation adapter 或 OA MCP 不可用；PendingAction 应保持可重试 |
 | Confirm 被拒绝为 stale | trip/invoice 在 Proposal 后发生变化；重新读取当前事实再建 Proposal |
 | OA 状态不变化 | `MOCK_OA_ENABLED`、base URL、webhook secret、Mock OA SQLite volume |
@@ -216,6 +216,6 @@ curl -X POST http://localhost:8080/api/chat `
 | external resume 没有立即收口 | Java 终态是否已提交、retry markers；不要回滚 ExpenseClaim |
 | 两次请求互相 busy | 同一 runtime thread 的 process-local guard 正在保护完整 lifecycle |
 
-## 8. Demo boundary
+## 8. Demo 边界
 
 演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、`MOCK_OA_ENABLED` 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。

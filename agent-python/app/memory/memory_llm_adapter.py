@@ -1,4 +1,4 @@
-"""memory_llm_adapter.py —— MemoryExtractor LLM Runtime Adapter（Phase 3D）
+"""memory_llm_adapter.py —— MemoryExtractor LLM 运行时适配器（Phase 3D）
 
 职责：
   将\"任意 LLM client\"包装为 MemoryExtractor.extract() 期望的
@@ -34,7 +34,7 @@ class MemoryLLMAdapterEmptyResponseError(MemoryLLMAdapterError):
     """
 
 
-# ---- Adapter ----
+# ---- Adapter（适配器） ----
 
 # LLM client 调用形态：可以是：
 #   - 函数对象 callable(system_prompt, user_prompt) -> str
@@ -43,7 +43,7 @@ LLMClientCallable = Callable[[str, str], str]
 
 
 class MemoryLLMAdapter:
-    """MemoryExtractor  LLM runtime adapter。
+    """MemoryExtractor 的 LLM 运行时适配器。
 
     用法：
       adapter = MemoryLLMAdapter(llm_client)

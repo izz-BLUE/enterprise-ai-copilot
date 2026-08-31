@@ -10,8 +10,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 /**
- * Resolves the one trusted identity for the current request from the verified
- * Spring Security principal.
+ * 从已验证的 Spring Security principal 解析当前请求唯一的可信身份。
  */
 @Service
 public class IdentityContext {

@@ -9,7 +9,7 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。年假申请是较短的第二条受控动作链路。
 
 - 在线演示：<https://copilot.jintianchi.cn>
-- Latest tagged release: [v0.4.1](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v0.4.1)；current mainline includes newer Agent workflow capabilities documented here；本次 accuracy fix 不创建新的 tag/release。
+- 最新 tagged release：[v0.4.1](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v0.4.1)；当前主线包含本文记录的更新版 Agent 工作流能力；本次 accuracy fix 不创建新的 tag/release。
 - 项目定位：小规格单机部署与受控演示验证；不承诺生产 SLA。
 
 ## 项目定位
@@ -22,30 +22,30 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 | 外部审批会跨进程、跨服务、跨时间 | Java ExpenseClaim 持久化 correlation，Mock OA 权威状态 + webhook/reconciliation + external resume |
 | 对话连续性容易与业务事实混淆 | Scoped Conversation Memory、execution_history、tool_history、Checkpoint 和 Java DB 分层 |
 
-## Final architecture
+## 最终架构
 
 ```mermaid
 flowchart LR
     UI[React / API Client] --> J[Java Spring Boot :8080]
     J -->|/api/chat or /api/agent/langgraph/chat| P[Python FastAPI :8000]
     J --> AUTH[JWT DemoAuth / Admin gate]
-    J --> DB[(PostgreSQL business DB)]
-    P --> PL[Planner-first Graph]
-    P -.->|test/offline compatibility only| RT[Legacy Router-first Graph]
+    J --> DB[(PostgreSQL 业务数据库)]
+    P --> PL[Planner-first 图]
+    P -.->|仅测试/离线兼容| RT[Legacy Router-first 图]
     PL --> EX[Tool Executor]
-    EX --> RAG[Hybrid RAG]
-    EX --> MCP[Enterprise OA MCP read tools]
-    EX --> PROP[Action Proposal only]
-    RAG --> IDX[(FAISS + BM25 indexes)]
+    EX --> RAG[混合 RAG]
+    EX --> MCP[Enterprise OA MCP 读取 Tool]
+    EX --> PROP[仅生成 Action Proposal]
+    RAG --> IDX[(FAISS + BM25 索引)]
     RAG --> LLM[DeepSeek LLM]
     PROP --> J
     J -->|confirm-time authority| PA[PendingAction / ExpenseClaim]
     PA --> DB
-    PA -->|expense submission| OA[Mock OA :8010 / SQLite]
-    OA -->|signed notification only; no status| J
-    J -->|authoritative GET status| OA
-    J -->|Java-authoritative external resume| P
-    P --> CP[(LangGraph PostgresSaver checkpoint)]
+    PA -->|报销提交| OA[Mock OA :8010 / SQLite]
+    OA -->|仅发送签名通知；不含 status| J
+    J -->|权威 GET status| OA
+    J -->|Java 权威 external resume| P
+    P --> CP[(LangGraph PostgresSaver 检查点)]
     LLM --> P
     J --> UI
 ```
@@ -85,7 +85,7 @@ Planner 只有规划权，没有业务执行授权。当前程序限制为最多
 
 Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 Python → Java 的只读业务 Tool 链路。
 
-## Durable workflows
+## 持久化工作流
 
 ### 受控业务动作与 Java authority
 
@@ -103,7 +103,7 @@ TTL     → EXPIRED
 
 Proposal 阶段没有副作用。Java 创建 PendingAction 时重新校验 action type、字段、业务日期、权限、容量和业务规则，生成一次性 `confirmationNonce`（数据库只存摘要），并返回脱敏确认视图。Confirm 必须通过 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key` 校验；重复确认重放原结果，不重复写业务表。Cancel/expire/失败也由 Java 结束对应 Memory 生命周期。
 
-### Expense primary workflow
+### 报销主流程
 
 ```text
 用户问题
@@ -153,7 +153,7 @@ Python 固定使用 `ConnectionPool + PostgresSaver` 持久化执行快照；`LA
 
 Java 和 Python 都有 process-local runtime-thread guard。Java guard 覆盖从 Memory Read 到 Python 调用、PendingAction/Memory 写入和响应结束的生命周期；Python guard 覆盖 recovery inspection 到最终 Checkpoint。单实例内按 exact-one owner release/handoff 规则工作，不是分布式锁。
 
-## RAG pipeline
+## RAG 管道
 
 ```text
 data/hr|bank|it/*.md
@@ -166,7 +166,7 @@ data/hr|bank|it/*.md
 
 `hybrid` 是默认检索模式；`vector` 和 `hybrid_rerank` 可用于比较。生产 RAG 固定不做 Query Rewrite，原始问题直接进入检索和最终 Prompt；`rule` 仅用于离线对照评估。无证据时明确拒答，不把检索结果当作业务授权。38 个固定用例覆盖来源/关键词命中和生成回归，并区分 answerable 与 no-answer。
 
-## Quick start
+## 快速开始
 
 ### 本地三服务
 
@@ -198,7 +198,7 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 
 生产 Compose 默认启用 Planner-first 和 PostgreSQL Checkpoint，但仍要求运维显式提供数据库、JWT、server-only Admin Token、模型密钥及实际的功能开关。详见 [Deployment](docs/deployment.md)。
 
-## API quick reference
+## API 快速参考
 
 | 服务 | 路径 | 说明 |
 |---|---|---|
@@ -216,23 +216,23 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 
 完整请求体、响应字段、错误码、内部 header 和 Mock OA 管理端点见 [API](docs/api.md)。
 
-## Verification baseline
+## 验证基线
 
 这是本项目当前接受的文档基线，不等价于生产容量承诺：
 
 | 范围 | 结果 |
 |---|---:|
-| Java backend | 334 passed |
-| Python full suite | 1402 passed + 34 expected skips |
-| PostgreSQL checkpoint / crash resume / HITL / external resume | 34 passed, 0 skipped（17 + 7 + 5 + 5） |
-| Enterprise OA MCP | 24 passed |
-| Mock OA | 17 passed |
-| Frontend | 44 passed |
-| Lint/build | pass |
+| Java 后端 | 334 通过 |
+| Python 完整套件 | 1402 通过 + 34 个预期跳过 |
+| PostgreSQL checkpoint / crash resume / HITL / external resume | 34 通过，0 跳过（17 + 7 + 5 + 5） |
+| Enterprise OA MCP | 24 通过 |
+| Mock OA | 17 通过 |
+| 前端 | 44 通过 |
+| Lint/build | 通过 |
 
 Repository automation 包含 CI（Java Backend、Mock OA Webhook、Python RAG Evaluation、Frontend Build、Frontend Browser Tests）、Gitleaks、CodeQL 和 Dependabot；Dependabot 是独立的依赖自动化，不是 CI job。质量边界与命令见 [Quality Assurance](docs/quality-assurance.md)。
 
-## Design trade-offs and accepted limitations
+## 设计权衡与已接受限制
 
 | 选择 | 原因 | 接受的代价 |
 |---|---|---|
@@ -245,20 +245,20 @@ Repository automation 包含 CI（Java Backend、Mock OA Webhook、Python RAG Ev
 
 明确接受的边界：小规格单机、规则 Safety Guard、有限评估集、fixture-backed Enterprise OA MCP、Mock OA 模拟服务、没有真实 OA 分布式事务、没有生产凭据/正式集成验收、没有 SLA，也没有新增的分布式锁、消息总线或工作流引擎。
 
-## Documentation map
+## 文档导航
 
-- [Architecture](docs/architecture.md)：当前端到端架构、权威边界、恢复和接受限制
-- [Controlled Business Actions](docs/controlled-business-actions.md)：年假/报销 Proposal、HITL、confirm-time revalidation、外部审批
+- [架构](docs/architecture.md)：当前端到端架构、权威边界、恢复和接受限制
+- [受控业务动作](docs/controlled-business-actions.md)：年假/报销 Proposal、HITL、confirm-time revalidation、外部审批
 - [API](docs/api.md)：公开、内部、Python 和 Mock OA 接口审计
-- [Memory Architecture](docs/memory-architecture.md)：Memory、history、Checkpoint 分层
-- [Memory Security](docs/memory-security.md)：身份、终态写入和数据边界
-- [Memory Acceptance](docs/memory-p0-acceptance.md)：Memory 验收清单
-- [Deployment](docs/deployment.md)：Compose、配置和网络边界
-- [Demo Guide](docs/demo-guide.md)：报销主演示与年假次演示
-- [Quality Assurance](docs/quality-assurance.md)：测试、CI、评估与限制
-- [Roadmap](docs/roadmap.md)：已完成能力与真正未来项
-- [Interview Materials](docs/interview/project-introduction.md)：项目介绍、架构走读、Demo 脚本、FAQ
+- [记忆架构](docs/memory-architecture.md)：Memory、history、Checkpoint 分层
+- [记忆安全](docs/memory-security.md)：身份、终态写入和数据边界
+- [记忆验收](docs/memory-p0-acceptance.md)：Memory 验收清单
+- [部署](docs/deployment.md)：Compose、配置和网络边界
+- [Demo 指南](docs/demo-guide.md)：报销主 Demo 与年假次 Demo
+- [质量保证](docs/quality-assurance.md)：测试、CI、评估与限制
+- [路线图](docs/roadmap.md)：已完成能力与真正未来项
+- [面试材料](docs/interview/project-introduction.md)：项目介绍、架构走读、Demo 脚本、FAQ
 
-## License
+## 许可证
 
 本项目用于工程实践、技术展示和面试交流，详见 [LICENSE](LICENSE)。

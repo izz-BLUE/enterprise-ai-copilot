@@ -1,4 +1,4 @@
-// Frontend unit tests for chatHistoryStorage (uses Node's built-in test runner).
+// chatHistoryStorage 的前端单元测试（使用 Node 内置测试运行器）。
 // 运行：`cd frontend && node --test src/services/chatHistoryStorage.test.mjs`
 //
 // 覆盖任务审计点：

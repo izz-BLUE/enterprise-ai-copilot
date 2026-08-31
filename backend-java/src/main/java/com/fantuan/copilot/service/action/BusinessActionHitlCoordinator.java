@@ -34,10 +34,9 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 /**
- * Coordinates Java's action authority with the Python checkpoint continuation.
- * BusinessActionService remains the only owner of state transitions and side
- * effects; this class only performs trusted routing, guard ownership and
- * best-effort graph reconciliation after the Java transaction has committed.
+ * 协调 Java 的动作权威与 Python checkpoint continuation。
+ * BusinessActionService 仍是状态转换和副作用的唯一 owner；本类只负责可信路由、
+ * guard 所有权，以及 Java 事务提交后的尽力而为图 reconciliation。
  */
 @Service
 public class BusinessActionHitlCoordinator {
@@ -80,7 +79,7 @@ public class BusinessActionHitlCoordinator {
         this.memoryCoordinator = memoryService == null ? null : new AgentMemoryCoordinator(memoryService);
     }
 
-    /** Compatibility constructor for focused tests that do not exercise expense revalidation. */
+    /** 兼容不执行报销重新校验的聚焦测试的构造方法。 */
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
                                          PendingActionRepository actions,
                                          PythonAgentGateway pythonAgentGateway,
@@ -92,7 +91,7 @@ public class BusinessActionHitlCoordinator {
                 adminAccessService, externalApprovalCoordinator, null, null, null);
     }
 
-    /** Compatibility constructor for tests that exercise expense revalidation. */
+    /** 兼容执行报销重新校验的测试的构造方法。 */
     public BusinessActionHitlCoordinator(BusinessActionService actionService,
                                          PendingActionRepository actions,
                                          PythonAgentGateway pythonAgentGateway,
@@ -107,10 +106,9 @@ public class BusinessActionHitlCoordinator {
     }
 
     /**
-     * Reconcile an expired approval before ordinary Chat reaches Python.
-     * The caller must already own the Java runtime-thread guard for the
-     * resolved (user, conversation) thread; this method never acquires or
-     * releases that guard around the resume and the following Chat call.
+     * 在普通 Chat 到达 Python 前收口已过期的审批。
+     * 调用方必须已经拥有解析后的（user、conversation）线程对应的 Java
+     * runtime-thread guard；本方法不会围绕 resume 和后续 Chat 调用获取或释放该 guard。
      */
     public boolean reconcileExpiredBeforeChat(String traceId, String presentedToken,
                                               VerifiedIdentity identity,
@@ -132,9 +130,8 @@ public class BusinessActionHitlCoordinator {
         TaskExecution task = taskRuntimeService == null ? null
                 : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
         if (task != null) {
-            // Expiration and TaskExecution terminalization are committed by
-            // BusinessActionService together.  Python is only a best-effort
-            // checkpoint cleanup and must not gate the next task.
+            // 过期处理和 TaskExecution 终态化由 BusinessActionService 一起提交。
+            // Python 只负责尽力而为的 checkpoint 清理，不能阻断下一任务。
             tryResume(action, identity, presentedToken, traceId);
             startNextTask(task, identity, presentedToken, traceId);
             return true;
@@ -142,7 +139,7 @@ public class BusinessActionHitlCoordinator {
         return tryResume(action, identity, presentedToken, traceId);
     }
 
-    /** Register the wait after Python has durably checkpointed the interrupt. */
+    /** Python 已将 interrupt 持久化到 checkpoint 后注册 wait。 */
     public PendingActionView registerWait(BusinessActionProposal proposal,
                                           HitlWaitMarker wait,
                                           String originTraceId,
@@ -166,8 +163,8 @@ public class BusinessActionHitlCoordinator {
                     proposal, originTraceId, presentedToken, identity, conversationId,
                     wait.executionId(), wait.waitId());
 
-            // A Java commit may have succeeded before the HTTP response was lost.
-            // Reconcile that terminal row without creating a second action.
+            // HTTP 响应丢失前，Java commit 可能已经成功。
+            // 收口该终态记录，不创建第二个 action。
             Optional<PendingAction> terminal = actions.findByHitlWaitId(wait.waitId());
             if (terminal != null && terminal.isPresent() && isTerminal(terminal.get().status())) {
                 tryResume(terminal.get(), identity, presentedToken, originTraceId);
@@ -175,12 +172,10 @@ public class BusinessActionHitlCoordinator {
             return view;
         } catch (ActionException exception) {
             if (isDeterministicRegistrationRejection(exception)) {
-                // No PendingAction exists on this path.  Close only Java's
-                // existing ACTIVE task memory and reject the durable wait;
-                // never manufacture a fake action row for correlation.
-                // Memory is the Java-owned lifecycle predecessor of Graph
-                // terminalization.  If it fails, keep the checkpoint waiting
-                // so a retry can perform Memory -> Graph in that order.
+                // 此路径不存在 PendingAction。只关闭 Java 已有的 ACTIVE task memory，
+                // 并拒绝持久化 wait；绝不为了关联而伪造 action 记录。
+                // Memory 是 Graph 终态化之前由 Java 负责的生命周期前置步骤。
+                // 如果该步骤失败，保持 checkpoint 等待，以便重试按 Memory -> Graph 顺序执行。
                 actionService.abandonMemoryAfterHitlRejection(
                         identity, conversationId);
                 PendingActionView successorPendingAction = null;
@@ -212,9 +207,8 @@ public class BusinessActionHitlCoordinator {
         boolean guardReleased = false;
         try {
             try {
-                // The pre-guard row only identifies the runtime thread.  The
-                // status used for all confirmation decisions must be refreshed
-                // after this thread owns the guard.
+                // guard 之前读取的记录只用于识别 runtime thread。
+                // 所有确认决策使用的 status，都必须在线程获得 guard 后重新读取。
                 routing = refreshRouting(actionId, identity);
                 revalidateExpenseOutsideTransaction(routing, actionId, confirmationNonce,
                         presentedToken, traceId, identity);
@@ -243,10 +237,8 @@ public class BusinessActionHitlCoordinator {
                             EXPIRED_MESSAGE, null);
                 } else if (routing.status() == ActionStatus.FAILED
                         && "ACTION_STATE_CONFLICT".equals(exception.errorCode())) {
-                    // A stale commit may have succeeded while the first
-                    // rejection resume was unavailable.  A repeated confirm
-                    // retries only that deterministic continuation; Java's
-                    // terminal state remains authoritative.
+                    // 第一次 rejection resume 不可用期间，stale commit 可能已经成功。
+                    // 重复 confirm 只重试该确定性 continuation；Java 终态仍是权威状态。
                     reconcileTerminal(actionId, routing, identity, presentedToken, traceId,
                             HitlResumePayload.HitlDecision.REJECTED, ActionStatus.FAILED,
                             REJECTED_MESSAGE, null);
@@ -271,12 +263,11 @@ public class BusinessActionHitlCoordinator {
         }
         String staleCode = expenseRevalidation.revalidate(routing, traceId);
         if (staleCode != null) {
-            // The service locks and rechecks the action in a separate short
-            // transaction.  It throws ActionStaleException after committing.
+            // service 在独立的短事务中锁定并重新检查 action，并在提交后抛出
+            // 抛出 ActionStaleException。
             actionService.failStaleConfirmation(actionId, confirmationNonce,
                     presentedToken, traceId, identity, staleCode);
-            // Keep compatibility with mocked services: a stale result must
-            // never fall through to the normal execute path.
+            // 兼容 mock service：stale 结果绝不能继续进入普通执行路径。
             throw new ActionStaleException(actionId);
         }
     }
@@ -356,11 +347,11 @@ public class BusinessActionHitlCoordinator {
 
     private String guardKey(PendingAction action, VerifiedIdentity identity) {
         if (action.ownerUserId() != null && action.conversationId() != null) {
-            // owner was checked against the current VerifiedIdentity above.
+            // owner 已在上方根据当前 VerifiedIdentity 完成检查。
             return threadIdService.generate(identity.userId(), action.conversationId());
         }
-        // Legacy rows have no immutable conversation correlation.  They still
-        // use this singleton guard, but cannot collide with a Chat thread.
+        // Legacy 记录没有不可变的 conversation 关联。它们仍使用这个 singleton guard，
+        // 但不会与 Chat thread 冲突。
         return "legacy-action:" + action.actionId();
     }
 
@@ -411,12 +402,10 @@ public class BusinessActionHitlCoordinator {
             return new ReconcileResult(false, null);
         }
         if (task.status().isTerminal()) {
-            // The Java transaction may already have committed the current
-            // task's terminal state before this continuation is entered.  That
-            // state is not a reason to stop the queue: deterministically
-            // reconcile the next runnable task as well.  WAITING_EXTERNAL is
-            // intentionally handled by the Expense branch below so its
-            // task-specific Python graph can still be closed first.
+            // 进入该 continuation 前，Java 事务可能已经提交当前任务的终态。
+            // 该状态不构成停止队列的理由：还要确定性地收口下一可运行任务。
+            // WAITING_EXTERNAL 有意由下方 Expense 分支处理，以便先关闭其任务专属的
+            // Python 图。
             return new ReconcileResult(false, startNextTask(task, identity,
                     presentedToken, traceId));
         }
@@ -440,9 +429,8 @@ public class BusinessActionHitlCoordinator {
                         exception.getClass().getSimpleName());
             }
             try {
-                // The Java transaction already made this task WAITING_EXTERNAL.
-                // External handoff and next-task startup are independent of
-                // Python checkpoint cleanup.
+                // Java 事务已经将该任务置为 WAITING_EXTERNAL。
+                // 外部 handoff 和下一任务启动独立于 Python checkpoint 清理。
                 if (!externalApprovalCoordinator.registerTaskRuntimeAndDispatch(
                         action, response, traceId)) {
                     log.warn("[{}] TASK_RUNTIME_EXTERNAL_HANDOFF_PENDING actionIdPrefix={}",
@@ -480,7 +468,7 @@ public class BusinessActionHitlCoordinator {
                     traceId, BusinessActionService.auditRef(action.actionId()),
                     exception.getClass().getSimpleName());
         }
-        // The Java transaction already terminalized the action and task.
+        // Java 事务已经将 action 和 task 置为终态。
         return new ReconcileResult(false, startNextTask(task, identity,
                 presentedToken, traceId));
     }
@@ -546,14 +534,12 @@ public class BusinessActionHitlCoordinator {
             }
             return null;
         } catch (TaskRuntimeRegistrationRejectionException exception) {
-            // The successor has already been deterministically terminalized;
-            // requeueing it would turn a business rejection into a launch
-            // failure and could cause a duplicate proposal on the next Chat.
+            // successor 已经被确定性地置为终态；重新入队会把业务拒绝变成启动
+            // 失败，并可能在下一次 Chat 中产生重复 Proposal。
             return exception.successorPendingAction();
         } catch (RuntimeException exception) {
-            // The prior Java business fact is already authoritative.  A
-            // launch failure leaves this task PENDING so the next guarded Chat
-            // can deterministically retry the same task-specific thread.
+            // 之前的 Java 业务事实已经是权威状态。启动失败时保留该 task 为 PENDING，
+            // 使下一次受 guard 保护的 Chat 可以在同一个任务专属线程上确定性重试。
             taskRuntimeService.requeueAfterLaunchFailure(task.taskId());
             log.warn("[{}] TASK_RUNTIME_NEXT_TASK_FAILED taskIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(task.taskId()),
@@ -562,7 +548,7 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    /** Continue a Task Runtime group after a task ended without PendingAction. */
+    /** 任务在没有 PendingAction 的情况下结束后，继续 Task Runtime 分组。 */
     public PendingActionView startNextTaskAfterTerminal(TaskExecution current,
                                                         VerifiedIdentity identity,
                                                         String presentedToken,
@@ -650,9 +636,9 @@ public class BusinessActionHitlCoordinator {
         try {
             PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity,
                     action.conversationId(), presentedToken, traceId, payload);
-            // The HITL resume has returned and the graph is now durably waiting
-            // for OA.  Hand the same runtime thread boundary to the external
-            // resume coordinator before it performs its own guard acquisition.
+            // HITL resume 已返回，图现在持久化等待 OA。
+            // 在 external resume coordinator 自行获取 guard 前，将同一 runtime thread
+            // 边界交给它。
             threadGuard.release(guardKey);
             guardReleased = true;
             externalApprovalCoordinator.registerExternalWaitAndDispatch(action, response,
@@ -690,9 +676,8 @@ public class BusinessActionHitlCoordinator {
                 : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
         if (task != null) {
             tryResume(action, identity, presentedToken, traceId, payload);
-            // The action service committed the corresponding TaskExecution
-            // terminal state in the same transaction.  Resume failure cannot
-            // block deterministic next-task progression.
+            // action service 已在同一事务中提交对应的 TaskExecution 终态。
+            // resume 失败不能阻断确定性的下一任务推进。
             startNextTask(task, identity, presentedToken, traceId);
             return;
         }
@@ -825,9 +810,8 @@ public class BusinessActionHitlCoordinator {
     }
 
     /**
-     * Only explicit, deterministic proposal validation failures may close the
-     * durable wait.  New business error codes must be reviewed and added here
-     * deliberately; HTTP status alone is never sufficient classification.
+     * 只有明确且确定性的 Proposal 校验失败才可以关闭持久化 wait。
+     * 新业务错误码必须经过审查后有意加入；仅凭 HTTP status 永远不足以完成分类。
      */
     private static boolean isDeterministicRegistrationRejection(ActionException exception) {
         if (exception == null || exception.errorCode() == null) {

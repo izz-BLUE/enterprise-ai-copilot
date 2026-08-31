@@ -1,8 +1,8 @@
-# Scoped Conversation Memory Security Boundary
+# 作用域会话记忆安全边界
 
 这份清单记录 Memory 的安全边界。Memory 是任务连续性层，不是身份系统、权限系统或业务数据库。
 
-## Identity and scope
+## 身份与作用域
 
 - [x] owner 只取 Java `VerifiedIdentity.userId()`。
 - [x] Memory key 固定为 `(user_id, conversation_id)`。
@@ -10,7 +10,7 @@
 - [x] Python、LLM、前端 body、Tool arguments 和 Memory 内容不能覆盖 owner。
 - [x] Java 生成 `employee_id`、`business_date`、`trace_id` 和 runtime thread；这些值不进入 LLM arguments。
 
-## Read isolation
+## 读取隔离
 
 - [x] Read path 只读取 `status=ACTIVE`。
 - [x] 终态 Memory 不 hydrate 到新请求。
@@ -18,7 +18,7 @@
 - [x] `execution_history` 只有在 ACTIVE Memory + matching task type 时 hydrate。
 - [x] 历史摘要标记为 `CONTEXT_ONLY`，不能成为当前业务事实、权限、PendingAction 查询源或金额依据。
 
-## Trigger and write isolation
+## 触发与写入隔离
 
 - [x] 现有 ACTIVE Memory 不会单独触发 Extractor。
 - [x] Pure RAG、eval、余额/记录查询、travel/invoice read 不触发 Memory。
@@ -28,7 +28,7 @@
 - [x] Java 当前认证请求负责落库、terminal transition、owner 和 conversation scope。
 - [x] Memory proposal 不得绕过 PendingAction 直接产生 LeaveRequest/ExpenseClaim。
 
-## Action and external safety
+## 动作与外部安全
 
 - [x] `confirmationNonce` 由 Java 生成，数据库只保存 digest。
 - [x] Confirm 使用 owner、nonce、TTL、状态和 UUID idempotency key。
@@ -38,7 +38,7 @@
 - [x] webhook body 不作为 OA status authority；Java HMAC 验证后仍 GET authoritative status。
 - [x] Java ExpenseClaim terminal commit 先于 external resume；resume 失败不回滚业务终态。
 
-## Operational boundary
+## 运维边界
 
 默认策略：`MEMORY_WRITE_MODE=DISABLED`、`business.actions.enabled=false`、Mock OA provider disabled。外部 reconciliation/external-resume retry worker 仍按低频边界调度，但 provider 不可用时 fail-closed。打开功能必须同时理解 Java authority、数据库、内部 token、Checkpoint 和外部回调边界。
 

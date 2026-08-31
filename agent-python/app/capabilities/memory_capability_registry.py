@@ -1,6 +1,6 @@
 """memory_capability_registry.py —— Memory Capability Registry（P1-B）
 
-P1-B 引入 Workflow Capability Registration Boundary。
+P1-B 引入工作流 Capability 注册边界。
 
   Business Module
         |
@@ -23,8 +23,8 @@ P1-B 引入 Workflow Capability Registration Boundary。
 
 不实现：
 
-  * Plugin System / Service Discovery / Remote Registry / DB Registry /
-    Dynamic Runtime Loading —— 本 Registry 是显式构造的纯 Python 数据结构，
+  * 插件系统 / 服务发现 / 远程 Registry / DB Registry /
+    动态运行时加载 —— 本 Registry 是显式构造的纯 Python 数据结构，
     业务方通过 ``register(capability)`` 显式登记，禁止隐式发现。
 
 可审计：

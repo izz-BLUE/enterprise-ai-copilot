@@ -1,4 +1,4 @@
-"""Independent, durable Mock OA expense-submission boundary for P3-5B2a."""
+"""P3-5B2a 的独立、持久化 Mock OA 报销提交边界。"""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class ExpenseApprovalListResponse(BaseModel):
 
 
 class MockOaStore:
-    """SQLite gives idempotency a process-restart boundary without a workflow engine."""
+    """SQLite 在不引入工作流引擎的情况下，为幂等性提供进程重启边界。"""
 
     def __init__(self, path: str):
         self._path = path
@@ -320,7 +320,7 @@ def _decide_expense_approval(request_id: str, decision: str) -> ExpenseApprovalR
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval request not found")
 
-    # Mock OA commits the terminal state before this best-effort notification.
+    # Mock OA 先提交终态，再执行此次尽力通知。
     send_approval_webhook(record.requestId)
     return record
 

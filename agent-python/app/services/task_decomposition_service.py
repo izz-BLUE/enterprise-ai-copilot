@@ -1,4 +1,4 @@
-"""Deterministic decomposition for the first two write-task contract."""
+"""第一版两个写业务任务契约的确定性分解。"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from app.schemas.task_decomposition_schema import TaskDecompositionResult, TaskS
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
 from app.services.expense_input_service import is_expense_claim_intent
 
-# ``请个假`` is intentionally supported for the queue's clarification flow,
-# while the existing annual-leave single-task router remains unchanged.
+# 有意支持 ``请个假`` 以服务队列的 clarification 流程，同时保持现有年假单任务
+# router 不变。
 _GENERIC_LEAVE_ACTION_PATTERN = re.compile(
     r"(?:申请|我要|我想|帮我|请|休)[^，。；,\n]{0,12}(?:请假|请个假|休假)"
 )
@@ -36,10 +36,9 @@ _UNSUPPORTED_WRITE_MARKERS = (
     "转账",
 )
 
-# Split only at a program-recognized coordination boundary.  These fixed
-# literal candidates keep scanning linear in the user input length.  The
-# matched connector belongs to neither task, so each returned task_text
-# remains an exact contiguous span of the original user message.
+# 只在程序识别的协调边界处分割。这些固定字面候选使扫描复杂度保持为用户输入
+# 长度的线性关系。匹配到的连接词不属于任一任务，因此每个返回的 task_text
+# 都是原始用户消息中的精确连续片段。
 _TASK_BOUNDARY_PUNCTUATION = frozenset("，,。；;\n")
 _PUNCTUATION_CONNECTORS = (
     "然后",
@@ -117,7 +116,7 @@ def _skip_whitespace(text: str, index: int) -> int:
 
 
 def _iter_task_boundaries(question: str):
-    """Yield recognized boundary spans with a linear scan over ``question``."""
+    """在线性扫描 ``question`` 的过程中产出已识别的边界区间。"""
     index = 0
     while index < len(question):
         if question[index] in _TASK_BOUNDARY_PUNCTUATION:
@@ -129,9 +128,8 @@ def _iter_task_boundaries(question: str):
                 yield index, boundary_end
                 index = boundary_end
                 continue
-            # Do not rescan a long whitespace run from every newline.  No
-            # later whitespace character can start a different match when
-            # the suffix after the run has no punctuation connector.
+            # 不要从每个换行处重新扫描长空白段。当空白段之后没有标点连接词时，
+            # 后续空白字符不可能开始另一个匹配。
             if connector_start > index + 1:
                 index = connector_start
                 continue
@@ -148,7 +146,7 @@ def _iter_task_boundaries(question: str):
 
 
 def _split_segments(question: str) -> list[str]:
-    """Split all recognized coordination boundaries for global validation."""
+    """按所有已识别的协调边界分割，供全局校验使用。"""
     segments: list[str] = []
     start = 0
     for boundary_start, boundary_end in _iter_task_boundaries(question):
@@ -163,13 +161,11 @@ def _split_segments(question: str) -> list[str]:
 
 
 def decompose_write_tasks(question: str) -> TaskDecompositionResult:
-    """Detect exactly two supported write tasks without asking the LLM.
+    """不询问 LLM，识别恰好两个受支持的写业务任务。
 
-    A single supported intent, a read-only request, or an ordinary mixed
-    request remains on the existing path.  If a coordination boundary clearly
-    contains more than the two supported write tasks, or cannot be safely
-    classified into two task-local spans, the result is ``unsupported`` and
-    the caller must not execute a business Tool.
+    单个受支持意图、只读请求或普通混合请求继续走现有路径。如果某个协调边界
+    明确包含超过两个受支持的写业务任务，或无法安全地分类成两个任务局部片段，
+    结果为 ``unsupported``，调用方不得执行业务 Tool。
     """
 
     normalized = question.strip()

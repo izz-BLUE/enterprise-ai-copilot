@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Current facts returned by the deterministic Python Enterprise OA adapter. */
+/** 由确定性的 Python Enterprise OA adapter 返回的当前事实。 */
 public record ExpenseRevalidationResponse(
         @JsonProperty("schema_version") int schemaVersion,
         boolean success,

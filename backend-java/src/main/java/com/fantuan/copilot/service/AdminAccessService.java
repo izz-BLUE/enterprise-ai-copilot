@@ -17,10 +17,8 @@ public class AdminAccessService {
     }
 
     /**
-     * Validates the optional server-side hardening credential.  An empty
-     * configuration is not a valid token when the hardening gate is enabled;
-     * the caller may explicitly disable that gate and use identity policy
-     * instead.
+     * 校验可选的服务端 hardening 凭据。启用 hardening gate 时，空配置不是有效
+     * token；调用方可以明确关闭该 gate，改用身份策略。
      */
     public boolean isAdmin(String presentedToken) {
         if (configuredToken == null || configuredToken.isBlank()) {
@@ -35,9 +33,8 @@ public class AdminAccessService {
     }
 
     /**
-     * Browser-facing administration is authorized from the verified JWT
-     * identity.  The role is reconstructed by Java's JWT converter and is not
-     * read from request parameters, localStorage, or a client-supplied role.
+     * 面向浏览器的管理能力根据已验证 JWT 身份授权。role 由 Java 的 JWT
+     * converter 重新构建，不从请求参数、localStorage 或客户端提供的 role 读取。
      */
     public boolean isAdminIdentity(VerifiedIdentity identity) {
         return identity != null && identity.enabled() && identity.role() == AuthRole.ADMIN;

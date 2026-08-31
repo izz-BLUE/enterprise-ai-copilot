@@ -119,14 +119,13 @@ public class DemoAuthAccountInitializer implements ApplicationRunner {
             throw new IllegalStateException("Existing app_user does not match demo auth seed: "
                     + seed.username());
         }
-        // Preserve operator-selected credentials.  Only migrate the old shared
-        // seed password, so an existing deployment cannot keep accepting it for
-        // zhangsan/admin after the dedicated credential boundary is configured.
+        // 保留运维人员选择的凭据。仅迁移旧的共享 seed password，避免配置独立
+        // 凭据边界后，已有部署仍能接受 zhangsan/admin 使用旧密码。
         if (!passwordEncoder.matches(password, existing.passwordHash())
                 && passwordEncoder.matches(properties.getDefaultPassword(), existing.passwordHash())) {
             users.updatePasswordHash(existing.userId(), passwordEncoder.encode(password));
         }
-        // Existing enabled flag and business data are intentionally preserved.
+        // 有意保留已有的 enabled 标记和业务数据。
     }
 
     private String passwordFor(SeedAccount seed) {

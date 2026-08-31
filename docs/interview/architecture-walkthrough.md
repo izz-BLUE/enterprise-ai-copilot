@@ -1,4 +1,4 @@
-# Architecture Walkthrough
+# 架构走读
 
 目标：用 5 分钟让面试官听懂“谁负责什么、状态在哪里、为什么不会让 LLM 直接写业务”。
 

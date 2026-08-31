@@ -1,21 +1,21 @@
-# Enterprise AI Copilot Architecture
+# Enterprise AI Copilot 架构
 
 本文是当前实现的 canonical architecture source。它描述 Java Spring Boot、Python FastAPI、PostgreSQL、Enterprise OA MCP、Mock OA 和 React 之间的真实责任边界；业务状态和权限以 Java/数据库实现为准，Checkpoint 与 Memory 都不是业务事实源。
 
-## 1. System boundary
+## 1. 系统边界
 
 ```mermaid
 flowchart TB
-    B[Browser / React :5173] --> N[Nginx HTTPS ingress]
+    B[浏览器 / React :5173] --> N[Nginx HTTPS 入口]
     N --> J[Java Spring Boot :8080]
     J --> P[Python FastAPI :8000]
-    J --> DB[(PostgreSQL: business tables)]
-    P --> IDX[(Processed chunks / FAISS / BM25)]
+    J --> DB[(PostgreSQL：业务表)]
+    P --> IDX[(已处理分块 / FAISS / BM25)]
     P --> LLM[DeepSeek API]
-    P --> MCP[Enterprise OA MCP<br/>read-only travel/invoice]
-    J --> OA[Mock OA :8010<br/>SQLite approval simulator]
-    OA -->|HMAC notification without status| J
-    P --> CP[(PostgreSQL: LangGraph checkpoints)]
+    P --> MCP[Enterprise OA MCP<br/>只读差旅/发票]
+    J --> OA[Mock OA :8010<br/>SQLite 审批模拟器]
+    OA -->|不含 status 的 HMAC 通知| J
+    P --> CP[(PostgreSQL：LangGraph 检查点)]
 ```
 
 生产 Compose 只把 Java 绑定到宿主机入口；Python 使用 Docker 网络内的 `expose 8000`，不能绕过 Java 访问公网。开发环境可以直接访问各服务端口，但内部端点仍按内部契约使用。
@@ -23,13 +23,13 @@ flowchart TB
 | 层 | 责任 | 不负责 |
 |---|---|---|
 | React | 登录、conversationId、普通聊天、Proposal 确认 UI | 认证事实、权限判断、业务状态 |
-| Java | JWT/身份、Admin gate、trace、超时/并发、PendingAction、业务事务、Memory 生命周期、外部状态 authority | LLM 推理、RAG 召回、Planner 决策 |
-| Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume | 最终业务授权、业务数据库写入、Memory terminal lifecycle |
-| Enterprise OA MCP | 读取当前 trip/invoice 事实 | 报销写入、审批状态 authority |
-| Mock OA | 独立 SQLite 的模拟外部审批服务 | Enterprise AI Copilot 的业务事实、Java action authority |
+| Java | JWT/身份、Admin gate、trace、超时/并发、PendingAction、业务事务、Memory 生命周期、外部状态权威 | LLM 推理、RAG 召回、Planner 决策 |
+| Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume | 最终业务授权、业务数据库写入、Memory 终态生命周期 |
+| Enterprise OA MCP | 读取当前 trip/invoice 事实 | 报销写入、审批状态权威 |
+| Mock OA | 独立 SQLite 的模拟外部审批服务 | Enterprise AI Copilot 的业务事实、Java action 权威 |
 | PostgreSQL | Java 业务表和 LangGraph checkpoint | 让 LLM 获得权限或替代 Java 状态机 |
 
-## 2. Trusted runtime context
+## 2. 可信运行时上下文
 
 每次请求由 Java 注入并在 Python Runtime Context 中使用：
 
@@ -44,7 +44,7 @@ flowchart TB
 
 这些字段不进入保存的 AgentState，也不进入 LLM 的 `arguments`。PlannerDecision 使用严格 Pydantic schema；Tool Executor 在实际执行前再次校验结构、员工身份、能力、Tool 预算、成功签名和 retry policy。
 
-## 3. Agent graph
+## 3. Agent 图
 
 ### Planner-first（生产唯一入口）
 
@@ -72,7 +72,7 @@ START → safety → router → rag | eval | action | refuse → END
 
 它不属于生产运行时选择；两套图都必须汇入同一个 Java authority boundary。
 
-## 4. RAG data path
+## 4. RAG 数据路径
 
 ```text
 data/hr|bank|it/*.md
@@ -87,7 +87,7 @@ data/hr|bank|it/*.md
 
 `hybrid` 是默认模式；`vector` 和 `hybrid_rerank` 用于比较。规则 Query Rewrite 只改变检索 query，原始用户问题仍用于最终 Prompt。RAG 的知识证据不能转化为业务授权；缺少证据时必须明确拒答。
 
-## 5. Java authority and action state
+## 5. Java 权威与动作状态
 
 受控动作当前支持 `ANNUAL_LEAVE_REQUEST` 和 `EXPENSE_CLAIM`。Python 只提交内部 Proposal；Java `BusinessActionService` 在创建时重新校验 action type、owner、日期/字段、权限、容量和业务规则。
 
@@ -108,7 +108,7 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 - `ExpenseClaim` / `ExpenseItem`：报销金额、trip/invoice 摘要、外部 provider/request、wait 和 resume markers；
 - `source_action_id` 唯一约束防止一个动作生成多个业务写入。
 
-### Multi Task Runtime（Phase 2）
+### 多任务 Runtime（Phase 2）
 
 第一版只接受程序层确定性识别出的两个有序写任务。Python `/agent/tasks/decompose` 无状态返回原文连续片段；Java 校验片段顺序、任务类型和数量后创建 `TaskExecution`。`TaskExecution` 只拥有编排顺序和生命周期，不取代 LeaveRequest、ExpenseClaim 或 PendingAction 的业务权威。
 
@@ -116,7 +116,7 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 
 Task Runtime 的关联链为 `ExpenseClaim.source_action_id → business_action.action_id ← task_execution.action_id`。`task_execution.action_id` 是可选的一对一关联字段，只用于精确定位 TaskExecution，不承载 ExpenseClaim、PendingAction 或 TaskExecution 的业务状态权威。
 
-## 6. Expense durable workflow
+## 6. 报销持久化工作流
 
 下面的时序图是 `LEGACY_SINGLE` 兼容路径。它保留 Python `prepare_external_wait → interrupt` 和 Java `/agent/langgraph/external/resume`。
 
@@ -150,39 +150,39 @@ sequenceDiagram
     P-->>J: Graph END response
 ```
 
-The two waits have deliberately different meanings:
+这两个 wait 的含义有意区分：
 
-| Wait | Trigger | Authority | Resume |
+| 等待状态 | 触发条件 | 权威来源 | 恢复方式 |
 |---|---|---|---|
-| `WAITING_USER` | complete Proposal needs explicit user decision | Java PendingAction | `POST /agent/langgraph/hitl/resume`, `Command(resume)` |
-| `WAITING_EXTERNAL`（LEGACY_SINGLE） | Java ExpenseClaim is already written and awaits OA | Java ExpenseClaim + OA authoritative GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
+| `WAITING_USER` | 完整 Proposal 需要用户明确决定 | Java PendingAction | `POST /agent/langgraph/hitl/resume`, `Command(resume)` |
+| `WAITING_EXTERNAL`（LEGACY_SINGLE） | Java ExpenseClaim 已写入，等待 OA 决定 | Java ExpenseClaim + OA 权威 GET | `POST /agent/langgraph/external/resume`, `Command(resume)` |
 | `WAITING_EXTERNAL`（TASK_RUNTIME） | Java ExpenseClaim is already written and awaits OA；当前 Python task 已经 END | Java ExpenseClaim + OA authoritative GET；TaskExecution 只记录生命周期 | 不调用 Python external resume；callback 只更新 ExpenseClaim/对应 TaskExecution |
 
 TASK_RUNTIME 的 Expense confirm 顺序是：Java PendingAction 成功 → Python 当前 task 使用 trusted `TASK_RUNTIME` context resume 并 END → Java 绑定 external correlation、将 TaskExecution 置为 `WAITING_EXTERNAL` 并提交 OA → 同组下一 Task 可由 Java 启动。OA callback/reconciliation 只通过 `ExpenseClaim.source_action_id` 定位并更新业务结果及对应 TaskExecution，禁止回写 parent queue/checkpoint、下一 task checkpoint、PendingAction 或 Memory。
 
 普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，事务提交后复用 `EXPIRED` `Command(resume)` 收口旧 Graph，再继续当前 Chat；未过期 wait 仍保持阻断。TASK_RUNTIME 的 external callback 不关闭整个 `(user_id, conversation_id)` Memory，因为此时 ACTIVE Memory 可能属于下一 Task；普通 Java terminal authority 的 task memory 收口和下一 Task 的新 ACTIVE Memory 仍按各自 Java 生命周期执行。
 
-## 7. Confirm-time revalidation and TOCTOU
+## 7. 确认时重新校验与 TOCTOU
 
-The revalidation adapter is a narrow Java → Python internal endpoint. It reads persisted Action payload, not browser fields or Memory, and checks:
+重新校验 adapter 是一个窄范围的 Java → Python 内部端点。它读取持久化的 Action payload，而不是浏览器字段或 Memory，并检查：
 
-1. trip ID exists, belongs to the employee, is `APPROVED`, and current start/end dates are valid and produce a current stay-night count;
-2. the current invoice set exactly matches the persisted invoice IDs, with ownership accepted, `valid=true`, `duplicate=false`, amount and category unchanged;
-3. Java recalculates deterministic reimbursable amount and compares it with the Proposal before opening the local write transaction.
+1. trip ID 存在、属于该员工、状态为 `APPROVED`，且当前 start/end 日期有效并能得到当前住宿夜数；
+2. 当前 invoice 集合与持久化的 invoice IDs 精确匹配，归属校验通过，`valid=true`、`duplicate=false`，金额和 category 未变化；
+3. Java 在开启本地写事务前重新确定性计算可报销金额，并与 Proposal 比较。
 
-If the facts are stale, Java marks Action `FAILED`, Memory `ABANDONED`, and the HITL decision `REJECTED`; no ExpenseClaim is created and the graph is closed safely. The normal path continues with the Java-authoritative rejected HITL resume to Graph `END`. If that resume is unavailable after the Java stale terminal commit, Java `FAILED` is not rolled back; a later Confirm against the same failed Action does not re-query OA or mutate Java state, and only retries the same deterministic `REJECTED` continuation. There is no autonomous stale-HITL worker. If the adapter is unavailable, Java keeps `PENDING_CONFIRMATION` and returns 503 so the user can retry. A small residual window remains between remote read and local commit; this is explicitly accepted for this small-scale design. Closing it requires a provider-side version/ETag, CAS, lease, execute-if-version, or transactional provider API, not a local Outbox.
+如果事实已过期，Java 将 Action 标记为 `FAILED`、Memory 标记为 `ABANDONED`，并将 HITL decision 设为 `REJECTED`；不创建 ExpenseClaim，并安全关闭图。正常路径继续通过 Java 权威的 rejected HITL resume 到达 Graph `END`。如果 Java 提交 stale 终态后该 resume 不可用，Java 的 `FAILED` 不回滚；之后针对同一个失败 Action 的 Confirm 不会再次查询 OA，也不会改变 Java 状态，只重试同一个确定性的 `REJECTED` continuation。不存在 autonomous stale-HITL worker。如果 adapter 不可用，Java 保持 `PENDING_CONFIRMATION` 并返回 503，以便用户重试。远程读取与本地提交之间仍存在一个小的残余窗口，这是该小规格设计明确接受的限制。要关闭它，需要 provider-side version/ETag、CAS、lease、execute-if-version 或 transactional provider API，而不是本地 Outbox。
 
-## 8. External approval authority
+## 8. 外部审批权威
 
-Mock OA is independent from Java and uses SQLite. Submission is idempotent by `expense:<expenseId>` and starts `PENDING`. Approve/reject transitions are terminal and idempotent; opposite decisions conflict. The webhook contains `eventId`, `eventType` and `requestId`, but deliberately no status.
+Mock OA 独立于 Java 运行并使用 SQLite。提交通过 `expense:<expenseId>` 实现幂等，初始状态为 `PENDING`。批准/拒绝转换是终态且幂等；相反决定会产生冲突。webhook 包含 `eventId`、`eventType` 和 `requestId`，但有意不包含 status。
 
-For webhook exposure, Java permits only the exact `POST /api/webhooks/mock-oa/expense-approval` path without normal user authentication. Health/version and token-protected internal read routes have separate contracts. The webhook handler validates the raw-body HMAC-SHA256 signature and timestamp window (300 seconds), strictly parses the body, then calls Mock OA `GET /api/expense-approvals/{requestId}`. Only that authoritative status can update `ExpenseClaim`; `PENDING` never regresses a terminal local claim, and a terminal decision cannot be reversed.
+对于 webhook 暴露，Java 仅允许精确的 `POST /api/webhooks/mock-oa/expense-approval` path 不经过普通用户认证。健康检查/版本以及受 token 保护的内部读取路由各自拥有独立契约。webhook handler 校验原始 body 的 HMAC-SHA256 签名和时间窗口（300 秒），严格解析 body，然后调用 Mock OA `GET /api/expense-approvals/{requestId}`。只有这个权威 status 能更新 `ExpenseClaim`；`PENDING` 永远不会让本地终态回退，终态决定也不能反转。
 
 D2 管理员审批台使用独立的 `Browser → Java /api/admin/mock-oa/** → Mock OA` 链路。Java 的 `/api/admin/**` 继续由已验证 JWT 的 `role=ADMIN` 授权；前端不持有 Mock OA secret、`ADMIN_TOKEN` 或 `X-Admin-Token`。生产 Compose 中 Mock OA 只加入 `ai-copilot-net` 并使用 `expose: 8010`，没有宿主机 `ports` 映射，因此公网浏览器不能直接访问 Mock OA。
 
-Reconciliation and retry delivery are separate, low-frequency, bounded workers. They select only their durable candidate sets; the Mock OA provider remains fail-closed when `MOCK_OA_ENABLED=false`. Reconciliation uses a due `external_last_checked_at` compare-and-set before the out-of-transaction GET and shares the same status-sync path as webhook processing. A failed external resume never rolls back a committed Java terminal state.
+Reconciliation 和 retry delivery 是相互独立、低频且有界的 worker。它们只选择各自持久化的候选集合；`MOCK_OA_ENABLED=false` 时 Mock OA provider 继续 fail-closed。Reconciliation 在事务外 GET 之前，先对到期的 `external_last_checked_at` 执行 compare-and-set，并与 webhook 处理共用同一 status-sync 路径。external resume 失败永远不会回滚已提交的 Java 终态。
 
-## 9. Checkpoint and crash recovery
+## 9. Checkpoint 与崩溃恢复
 
 LangGraph runtime 固定使用 PostgreSQL：启动 `ConnectionPool + PostgresSaver + JsonPlusSerializer`，执行 `setup()` 并编译持久化图；DSN、连接、setup 或图编译失败会阻止启动，不自动降级。
 
@@ -196,26 +196,26 @@ POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapsho
 
 最终 response contract 和有界 `execution_history` 在 `finalize_node` 内写入最后一次 Checkpoint 前完成。`execution_history` 只保存成功的 travel/invoice 等白名单摘要，在 ACTIVE Memory + task type 匹配时 hydrate，且永远标记为 `CONTEXT_ONLY`。
 
-## Failure and recovery matrix
+## 故障与恢复矩阵
 
-| Failure | Durable authority/state | Recovery |
+| 故障 | 持久化权威/状态 | 恢复方式 |
 |---|---|---|
-| Python crashes mid non-interrupt graph | PostgreSQL latest Checkpoint snapshot | Exact safe `graph.invoke(None)` resume |
-| Browser closes at `WAITING_USER` | Checkpoint + Java PendingAction | Later Java confirm/cancel + HITL `Command(resume)` |
-| Java confirm response is lost after commit | Java BusinessAction is authoritative | Idempotent replay + HITL reconciliation |
-| Confirm-time OA is unavailable | PendingAction stays `PENDING_CONFIRMATION`; Memory stays `ACTIVE`; Graph stays `WAITING_USER` | Retry the confirmation path; no business mutation |
-| Confirm-time facts are stale | Java `FAILED` + Memory `ABANDONED`; no ExpenseClaim | Deterministic `REJECTED` HITL resume → Graph `END` |
-| Stale Java commit succeeds but first Python `REJECTED` resume fails | Java `FAILED` remains authoritative | Repeated Confirm does not revalidate OA or mutate Java; retry the same deterministic `REJECTED` payload |
-| Webhook is lost | ExpenseClaim remains `WAITING_APPROVAL` | Bounded reconciliation GET |
-| Duplicate or out-of-order webhook arrives | Java terminal transition rules | Idempotent handling; no regression |
-| OA is terminal but Python is unavailable（LEGACY_SINGLE） | Java ExpenseClaim terminal state is retained | Durable external-resume retry |
-| External resume response is lost（LEGACY_SINGLE） | Python may already be at Graph `END` | Replay the exact same payload; `EXTERNAL_COMPLETED` acknowledgement |
-| Python finalizer crashes after external result Checkpoint（LEGACY_SINGLE） | Checkpoint contains the external result | `EXTERNAL_CONTINUATION` → deterministic finalize |
-| TASK_RUNTIME external callback arrives while next Task is active | ExpenseClaim is the business authority; TaskExecution is correlation/lifecycle only | Update only ExpenseClaim + correlated TaskExecution; no Python external resume or Memory/checkpoint write |
-| Same runtime thread receives concurrent work | Process-local Java/Python guard | Busy/retry; no multi-instance ownership claim |
-| Expired `WAITING_USER` blocks a new Chat | Java `PendingAction` TTL + Memory terminal transition | Commit `EXPIRED`/`ABANDONED`, then replay the exact `EXPIRED` HITL resume before starting the new Chat |
+| Python 在非 interrupt 图执行中途崩溃 | PostgreSQL 最新 Checkpoint snapshot | 安全地精确执行 `graph.invoke(None)` resume |
+| 浏览器在 `WAITING_USER` 时关闭 | Checkpoint + Java PendingAction | 之后执行 Java confirm/cancel + HITL `Command(resume)` |
+| Java confirm 在提交后响应丢失 | Java BusinessAction 是权威来源 | 幂等重放 + HITL reconciliation |
+| 确认时 OA 不可用 | PendingAction 保持 `PENDING_CONFIRMATION`；Memory 保持 `ACTIVE`；Graph 保持 `WAITING_USER` | 重试确认路径；不改变业务状态 |
+| 确认时事实已过期 | Java `FAILED` + Memory `ABANDONED`；不创建 ExpenseClaim | 确定性的 `REJECTED` HITL resume → Graph `END` |
+| Java stale 提交成功但第一次 Python `REJECTED` resume 失败 | Java `FAILED` 仍是权威状态 | 重复 Confirm 不重新校验 OA 或改变 Java；重试同一个确定性的 `REJECTED` payload |
+| webhook 丢失 | ExpenseClaim 保持 `WAITING_APPROVAL` | 有界 reconciliation GET |
+| webhook 重复或乱序到达 | Java 终态转换规则 | 幂等处理；不发生回退 |
+| OA 已到终态但 Python 不可用（LEGACY_SINGLE） | 保留 Java ExpenseClaim 终态 | 持久化 external-resume retry |
+| external resume 响应丢失（LEGACY_SINGLE） | Python 可能已经到达 Graph `END` | 重放完全相同的 payload；返回 `EXTERNAL_COMPLETED` acknowledgement |
+| Python finalizer 在 external result Checkpoint 之后崩溃（LEGACY_SINGLE） | Checkpoint 包含 external result | `EXTERNAL_CONTINUATION` → 确定性 finalize |
+| 下一个 Task 活跃时收到 TASK_RUNTIME external callback | ExpenseClaim 是业务权威；TaskExecution 仅用于关联/生命周期 | 只更新 ExpenseClaim + 关联的 TaskExecution；不调用 Python external resume，也不写 Memory/checkpoint |
+| 同一 runtime thread 收到并发工作 | Java/Python 进程内 guard | busy/retry；不宣称多实例所有权 |
+| 过期的 `WAITING_USER` 阻断新 Chat | Java `PendingAction` TTL + Memory 终态转换 | 提交 `EXPIRED`/`ABANDONED`，然后重放精确的 `EXPIRED` HITL resume，再启动新 Chat |
 
-## 10. Memory and history boundaries
+## 10. Memory 与历史边界
 
 Memory 是 Conversation Scoped Task State Persistence，不是 Profile Memory、Preference Memory、Vector Memory 或业务真相。
 
@@ -240,13 +240,13 @@ Trigger 规则：`action_proposal` 或 Memory-eligible Tool 成功才触发；�
 | LangGraph Checkpoint | 执行现场与恢复材料 | 不能替代 Java DB 或身份来源 |
 | Java PostgreSQL | 业务状态和 Memory lifecycle authority | 不由 LLM/Python 直接写 |
 
-## 11. Concurrency and observability
+## 11. 并发与可观测性
 
 Java `AgentRuntimeThreadExecutionGuard` 在 Memory Read 前获取，覆盖 Java Agent 生命周期到响应结束；HITL/外部 resume 在 transaction commit 或 handoff 前后遵守 exact-one owner release。Python guard 覆盖 recovery inspection 到 final Checkpoint。两者都是单进程内存保护，不是多实例分布式锁；当前没有分布式 lease，也没有 event inbox/outbox 或 workflow engine。多实例首先需要 distributed execution ownership/lease；只有选择 durable event delivery 时才评估 Outbox/Inbox。
 
 Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返回。Phoenix/OpenTelemetry 默认关闭；启用时是旁路批量 trace，默认不采集 Prompt、用户输入、检索正文和模型输出，初始化或导出失败不阻断业务。
 
-## 12. Deployment and configuration
+## 12. 部署与配置
 
 关键默认值：
 
@@ -262,7 +262,7 @@ Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返�
 
 完整配置和启动步骤见 [deployment.md](deployment.md)；受控动作和外部审批的本地演示见 [demo-guide.md](demo-guide.md)。
 
-## 13. Accepted limitations
+## 13. 已接受的限制
 
 以下不是未记录的缺口，而是当前交付明确接受的边界：
 

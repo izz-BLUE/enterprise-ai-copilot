@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Single JSON codec shared by expense proposal persistence and confirmation. */
+/** 由报销 Proposal 持久化和确认共用的单一 JSON codec。 */
 @Component
 public class ExpenseActionPayloadCodec {
     private final ObjectMapper objectMapper;

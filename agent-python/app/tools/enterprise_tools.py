@@ -199,7 +199,7 @@ def leave_proposal_tool(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# P2-A Expense Workflow V1: travel_record_tool / invoice_verify_tool
+# P2-A Expense Workflow V1：travel_record_tool / invoice_verify_tool
 # （Phase 3；Phase 7 加 expense_proposal_tool；Phase 8 加 expense_status_tool）
 # ──────────────────────────────────────────────────────────────────────
 #
@@ -316,20 +316,20 @@ def invoice_verify_tool(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# P2-A Expense Workflow V1: expense_proposal_tool（Phase 7）
+# P2-A 报销工作流 V1：expense_proposal_tool（Phase 7）
 # ──────────────────────────────────────────────────────────────────────
 # 本 Tool 显式接收由 Tool Executor 注入的 ExpenseProposalContext（V2 §十三/
 # 追加约束 §1）：Executor 从当前请求已成功 tool_history 的 travel_record /
-# invoice_verify / rag observation 确定性构造 context，作为 program-level
-# runtime context 传入 —— 不允许把 raw tool_history 交给 LLM。
+# invoice_verify / rag observation 确定性构造 context，作为程序级 runtime
+# context 传入 —— 不允许把 raw tool_history 交给 LLM。
 #
 # Tool 内部**禁止**重新调用 MCP / Java / RAG（V2 §十三 强制修正）——
 # 只做：
 #   - 用户输入解析（ExpenseInputExtraction，规则版确定性）
 #   - 已有 Tool facts 聚合（context.travel_record / invoices / policy_context）
-#   - deterministic validation + calculation（费用求和 / hotel cap）
+#   - 确定性 validation + calculation（费用求和 / hotel cap）
 #   - cost center 内部 mock/lookup（COST-DEFAULT）
-#   - Proposal construction
+#   - Proposal 构造
 # 业务字段（cost_center / claimed_amount / reimbursable_amount / 验真状态 /
 # policy cap）由程序层计算后组装 Proposal，LLM 不得生成这些字段
 # （追加约束 §4）。
@@ -479,12 +479,12 @@ def expense_proposal_tool(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# P2-A Expense Workflow V1: expense_status_tool（Phase 8）
+# P2-A 报销工作流 V1：expense_status_tool（Phase 8）
 # ──────────────────────────────────────────────────────────────────────
 # 来源：Java /api/internal/expense/status（V2 §二十四），不是 MCP。
 # 身份由 Java 权威决定：employee_id 由 Executor 注入；LLM 可选提供 expense_id；
 # Java 侧做 ownership check（跨员工读取被拒绝）。
-# Planner / Memory 中即使存在不同状态，Java Expense Domain 仍是最终 Source of Truth。
+# Planner / Memory 中即使存在不同状态，Java Expense Domain 仍是最终事实来源。
 
 
 @tool

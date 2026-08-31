@@ -134,8 +134,8 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
 
     @Override
     public String revalidateBeforeExecute(PendingAction action) {
-        // External OA revalidation must stay outside BusinessActionService's
-        // transaction; the coordinator performs it before confirm().
+        // 外部 OA 重新校验必须留在 BusinessActionService 事务之外；coordinator
+        // 会在 confirm() 前执行。
         return null;
     }
 

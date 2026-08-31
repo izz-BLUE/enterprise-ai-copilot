@@ -128,7 +128,7 @@ public final class PendingAction {
                 createdAt, expiresAt, null, actionPayloadJson, null, null);
     }
 
-    /** P3-4 factory with immutable LangGraph wait correlation metadata. */
+    /** 带不可变 LangGraph wait 关联元数据的 P3-4 工厂方法。 */
     public static PendingAction pending(String actionId, BusinessActionType actionType,
                                         String originTraceId, String ownerUserId,
                                         String conversationId, String employeeId,

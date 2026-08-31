@@ -32,7 +32,7 @@ public record PythonAgentResponse(
         @JsonAlias("hitl_wait") HitlWaitMarker hitlWait,
         @JsonAlias("external_wait") ExternalWaitMarker externalWait) {
 
-    /** Compatibility constructor for pre-P3-4 test fixtures and legacy responses. */
+    /** 兼容 P3-4 之前的测试 fixture 和 legacy 响应的构造方法。 */
     public PythonAgentResponse(String answer, String route, Boolean safe, String category,
                                String reason, List<String> sources, Boolean success,
                                String traceId, BusinessActionProposal actionProposal,
@@ -41,7 +41,7 @@ public record PythonAgentResponse(
                 actionProposal, missingFields, memoryProposal, null, null);
     }
 
-    /** Compatibility constructor for P3-5A fixtures that already include hitl_wait. */
+    /** 兼容已包含 hitl_wait 的 P3-5A fixture 的构造方法。 */
     public PythonAgentResponse(String answer, String route, Boolean safe, String category,
                                String reason, List<String> sources, Boolean success,
                                String traceId, BusinessActionProposal actionProposal,

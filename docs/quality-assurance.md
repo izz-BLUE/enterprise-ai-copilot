@@ -1,49 +1,49 @@
-# Quality Assurance and Verification Baseline
+# 质量保证与验证基线
 
 本文记录项目最终文档收口采用的验证口径。测试结果是已接受的工程基线，不等价于生产 SLA、长期容量或真实 OA 集成承诺。
 
-## 1. Accepted baseline
+## 1. 已接受基线
 
 | 范围 | 结果 |
 |---|---:|
-| Java backend | 334 passed |
-| Python full suite | 1402 passed + 34 expected skips |
-| PostgreSQL checkpoint integration | 17 passed |
-| PostgreSQL crash recovery | 7 passed |
-| PostgreSQL HITL | 5 passed |
-| PostgreSQL external resume | 5 passed |
-| PostgreSQL persistent runtime total | 34 passed, 0 skipped |
-| Enterprise OA MCP | 24 passed |
-| Mock OA | 17 passed |
-| Frontend | 44 passed |
-| Lint/build | pass |
+| Java 后端 | 334 通过 |
+| Python 完整套件 | 1402 通过 + 34 个预期跳过 |
+| PostgreSQL checkpoint 集成 | 17 通过 |
+| PostgreSQL crash recovery | 7 通过 |
+| PostgreSQL HITL | 5 通过 |
+| PostgreSQL external resume | 5 通过 |
+| PostgreSQL 持久化 runtime 合计 | 34 通过，0 跳过 |
+| Enterprise OA MCP | 24 通过 |
+| Mock OA | 17 通过 |
+| 前端 | 44 通过 |
+| Lint/build | 通过 |
 
-## 2. Repository automation
+## 2. 仓库自动化
 
 ### CI (`.github/workflows/ci.yml`)
 
 - **Java Backend**：JDK 17，Maven compile 和 `./mvnw test`；
-- **Mock OA Webhook**：Mock OA pytest、Ruff、local Compose config validation；
-- **Python RAG Evaluation**：Python full suite、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成、baseline retrieval gate、rule rewrite retrieval evaluation；
-- **Frontend Build**：`npm ci`、production build、lint；
+- **Mock OA Webhook**：Mock OA pytest、Ruff、本地 Compose 配置校验；
+- **Python RAG Evaluation**：Python 完整套件、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成、基线检索门禁、规则重写检索评估；
+- **Frontend Build**：`npm ci`、生产构建、lint；
 - **Frontend Browser Tests**：Chromium 安装和 Playwright E2E；
 
-### Separate security workflows
+### 独立安全工作流
 
 - `.github/workflows/secret-scan.yml`：Gitleaks；
 - `.github/workflows/codeql.yml`：Analyze `java-kotlin`、`python`、`javascript-typescript`。
 
-### Dependency automation
+### 依赖自动化
 
 - `.github/dependabot.yml`：GitHub Actions、Maven、uv 和 npm 的月度依赖检查；这是依赖自动化，不是 CI job。
 
-## 3. RAG evaluation
+## 3. RAG 评估
 
 固定评估集包含 38 个 case，区分：
 
-- Retrieval：source hit、keyword hit、final case outcome，不调用 LLM；
-- Generation：expected answer keywords、no-answer refusal、flaky retry；
-- Regression：baseline/current report 对比，检测退化。
+- Retrieval（检索）：source hit、keyword hit、final case outcome，不调用 LLM；
+- Generation（生成）：expected answer keywords、no-answer refusal、flaky retry；
+- Regression（回归）：对比 baseline/current report，检测退化。
 
 命令：
 
@@ -55,19 +55,19 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 
 评估集规模有限；通过率不能外推到所有企业文档、所有模型版本或生产 QPS。
 
-## 4. Runtime and workflow verification
+## 4. Runtime 与工作流验证
 
 重点验证范围：
 
-- Java authority：PendingAction nonce、TTL、owner、幂等、锁、业务事务和 stale confirmation；
-- Python Agent：Planner schema、Tool visibility、Tool budget、success-signature dedupe、Safety Guard；
+- Java authority（Java 权威）：PendingAction nonce、TTL、owner、幂等、锁、业务事务和 stale confirmation；
+- Python Agent：Planner schema、Tool visibility（Tool 可见性）、Tool budget（Tool 预算）、success-signature dedupe、Safety Guard；
 - Checkpoint：PostgresSaver setup、同步 durability、latest snapshot recovery、`graph.invoke(None)`；
 - HITL：`WAITING_USER` marker/correlation、Java commit 后 `Command(resume)`；
 - External approval：Mock OA PENDING→terminal、HMAC webhook、authoritative GET、reconciliation 和 external resume；
-- Memory：ACTIVE read、trigger policy、`UPSERT + ACTIVE` proposal、Java terminal lifecycle；
+- Memory：ACTIVE 读取、trigger policy（触发策略）、`UPSERT + ACTIVE` proposal、Java 终态生命周期；
 - Frontend：聊天、Markdown、Safety、错误、确认卡和滚动回归。
 
-## 5. Operational safety
+## 5. 运维安全
 
 - Java/Python 都有有界并发和超时；busy/overload 以稳定 429 和 `Retry-After` 反馈；
 - Java 生成服务端 traceId，错误响应不暴露 exception message、secret、nonce digest 或 webhook raw body；
@@ -75,7 +75,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - `PHOENIX_TRACING` 默认关闭，启用时旁路导出失败不阻断业务；
 - `BUSINESS_ACTIONS_ENABLED`、Memory 写入和 Mock OA provider 默认关闭；reconciliation 与 external resume retry worker 始终低频调度并由 provider gateway fail-closed。
 
-## 6. Accepted limitations
+## 6. 已接受限制
 
 - 当前验证是小规格、单机、短时受控验证，没有生产 SLA；
 - Rule-based Safety Guard 不是完整的 prompt-injection/content-safety 方案；
@@ -85,7 +85,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - confirm-time revalidation 与本地 commit 之间存在小型 TOCTOU 窗口；
 - 浏览器、评估集、容量和集中式 metrics/alerting 覆盖有限。
 
-## 7. Reproducible commands
+## 7. 可复现命令
 
 ```bash
 cd backend-java

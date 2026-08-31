@@ -183,7 +183,7 @@ def _stringify_tool_history(history: list[dict[str, Any]]) -> str:
         return '[unserializable tool_history]'
 
 
-# ---------- Extractor ----------
+# ---------- Extractor（提取器） ----------
 
 class MemoryExtractor:
     """Memory Extractor 契约。

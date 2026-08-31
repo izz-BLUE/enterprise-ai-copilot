@@ -1,4 +1,4 @@
-"""Strict durable correlation for one external expense approval wait."""
+"""一个外部报销审批 wait 的严格持久化 correlation。"""
 
 from hashlib import sha256
 from typing import Literal
@@ -9,7 +9,7 @@ _EXTERNAL_WAIT_DOMAIN = b'enterprise-ai-copilot:external-wait:v1\0'
 
 
 class ExternalWaitMarker(BaseModel):
-    """Checkpoint-safe marker for the single P3-5 expense approval wait."""
+    """单个 P3-5 报销审批 wait 的 checkpoint-safe marker。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -43,7 +43,7 @@ class ExternalWaitMarker(BaseModel):
 
 
 class ExternalResumePayload(BaseModel):
-    """Java-authoritative terminal OA decision used to resume the graph."""
+    """用于恢复 graph 的 Java 权威 OA 终态决定。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 

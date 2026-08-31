@@ -3,12 +3,11 @@ package com.fantuan.copilot.auth;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 
 /**
- * Server-side policy for the intentionally public demo identity.
+ * 面向有意公开的 Demo 身份的服务端策略。
  *
- * The public demo remains an EMPLOYEE so it can use ordinary authenticated
- * Agent/RAG and read-only capabilities.  It is not granted controlled
- * business-action capability merely because the global action switch and
- * optional server-side hardening token are enabled.
+ * 公开 Demo 保持 EMPLOYEE 身份，因此可以使用普通认证后的 Agent/RAG 和只读
+ * capability。即使全局动作开关和可选的服务端 hardening token 已启用，也不会
+ * 仅因此获得受控业务动作 capability。
  */
 public final class DemoAuthPolicy {
     public static final String PUBLIC_DEMO_USER_ID = "U10000";

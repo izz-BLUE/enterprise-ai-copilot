@@ -1,4 +1,4 @@
-"""tool_stubs.py —— Real Eval Stub Tool
+"""tool_stubs.py —— Real Eval Stub Tool（桩工具）
 
 设计原则：
 - 不访问真实 RAG / Embedding / Eval 产物 / 网络

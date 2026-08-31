@@ -1,4 +1,4 @@
-# Performance
+# 性能
 
 ## 问题背景
 
@@ -32,7 +32,7 @@ Sentence Transformers 的 ONNX 后端仍然加载 Torch，再额外加载 ONNX R
 
 > 注意：这些是独立进程基准结果，不包含 FAISS、BM25 等其他组件。
 
-## 容器 Smoke Test
+## 容器 Smoke 测试
 
 完整服务容器测试（包含 FAISS、BM25、Chunks）：
 
@@ -109,7 +109,7 @@ Top-K 检索结果对比：
 | Top3 集合匹配 | 38/38 |
 | 变化 case | 0 |
 
-## Retrieval Evaluation
+## 检索评估
 
 ### none 模式（默认）
 

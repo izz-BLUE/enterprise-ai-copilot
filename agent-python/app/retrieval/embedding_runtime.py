@@ -68,7 +68,7 @@ def _validate_config() -> None:
 def load_model():
     """加载并缓存 Embedding 模型。
 
-    Returns:
+    返回：
         模型实例（SentenceTransformer 或 None）
     """
     global _model, _model_loaded
@@ -120,11 +120,11 @@ def load_model():
 def encode(texts: str | list[str], normalize: bool = True) -> np.ndarray:
     """编码文本为归一化向量。
 
-    Args:
+    参数：
         texts: 单条字符串或字符串列表
         normalize: 是否 L2 归一化（默认 True）
 
-    Returns:
+    返回：
         numpy.ndarray，单条时 shape=(dim,)，批量时 shape=(n, dim)
     """
     if EMBEDDING_BACKEND == 'onnx_direct':

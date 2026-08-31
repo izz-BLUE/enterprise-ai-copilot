@@ -24,7 +24,6 @@ elif [ "$event_name" = "push" ] \
   && git merge-base --is-ancestor "$before_sha" "$current_sha"; then
   echo "${before_sha}..${current_sha}"
 else
-  # New branches, non-fast-forward pushes, missing objects, and manual runs scan
-  # all history reachable from the checked-out commit.
+  # 新分支、非 fast-forward 推送、缺少对象以及手动运行时，扫描从当前检出提交可达的全部历史。
   echo "HEAD"
 fi

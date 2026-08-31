@@ -121,11 +121,11 @@ public class TraceIdFilter extends OncePerRequestFilter {
      * 规范化路径：把动态 action id 替换为占位符。
      * 不允许在日志中保留：
      *   - 原始 actionId（act_xxx）
-     *   - query string
+     *   - 查询字符串
      */
     static String normalizePath(String path) {
         if (path == null) return null;
-        // 去掉 query string（如果有）
+        // 去掉查询字符串（如果有）
         int q = path.indexOf('?');
         String core = q >= 0 ? path.substring(0, q) : path;
         // /api/agent/actions/{actionId}/{decision}

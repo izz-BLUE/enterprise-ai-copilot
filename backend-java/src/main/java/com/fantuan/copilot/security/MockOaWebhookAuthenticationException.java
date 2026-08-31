@@ -1,6 +1,6 @@
 package com.fantuan.copilot.security;
 
-/** Raised when a Mock OA webhook does not pass the HMAC freshness boundary. */
+/** Mock OA webhook 未通过 HMAC 新鲜度边界时抛出。 */
 public class MockOaWebhookAuthenticationException extends RuntimeException {
     public MockOaWebhookAuthenticationException(String message) {
         super(message);

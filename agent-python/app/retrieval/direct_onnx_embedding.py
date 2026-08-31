@@ -188,7 +188,7 @@ def _pool(last_hidden_state: np.ndarray, attention_mask: np.ndarray) -> np.ndarr
         sum_mask = np.clip(np.sum(mask_expanded, axis=1), 1e-9, None)
         return sum_embeddings / sum_mask
     elif mode == 'max':
-        # Max pooling
+        # Max pooling（最大池化）
         mask_expanded = np.expand_dims(attention_mask, axis=-1).astype(np.float32)
         masked = last_hidden_state * mask_expanded + (1 - mask_expanded) * (-1e9)
         return np.max(masked, axis=1)
@@ -206,11 +206,11 @@ def _normalize(embeddings: np.ndarray) -> np.ndarray:
 def encode(texts: str | list[str], normalize: bool = True) -> np.ndarray:
     """编码文本为向量。
 
-    Args:
+    参数：
         texts: 单条字符串或字符串列表
         normalize: 是否 L2 归一化（默认 True）
 
-    Returns:
+    返回：
         numpy.ndarray，单条时 shape=(dim,)，批量时 shape=(n, dim)
     """
     load_model()
@@ -219,21 +219,21 @@ def encode(texts: str | list[str], normalize: bool = True) -> np.ndarray:
     if single:
         texts = [texts]
 
-    # Tokenize
+    # Tokenize（分词）
     inputs = _tokenize(texts)
 
     # ONNX 推理
     outputs = _session.run(None, inputs)
     last_hidden_state = outputs[0].astype(np.float32)
 
-    # Pooling
+    # Pooling（池化）
     embeddings = _pool(last_hidden_state, inputs['attention_mask'])
 
     # 验证维度
     if embeddings.shape[1] != EXPECTED_DIM:
         raise RuntimeError(f'输出维度异常: 期望 {EXPECTED_DIM}, 实际 {embeddings.shape[1]}')
 
-    # Normalize
+    # Normalize（归一化）
     if normalize:
         embeddings = _normalize(embeddings)
 

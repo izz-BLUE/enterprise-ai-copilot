@@ -12,7 +12,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.Map;
 
-/** HTTP adapter for the independent Mock OA service. */
+/** 独立 Mock OA 服务的 HTTP adapter。 */
 @Component
 public class MockOaExpenseApprovalGateway implements ExpenseApprovalGateway {
     public static final String PROVIDER = "MOCK_OA";

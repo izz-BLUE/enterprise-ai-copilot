@@ -1,4 +1,4 @@
-"""Shared deterministic policy for a proposal that is ready for Java HITL."""
+"""供 Java HITL 使用的可确认 Proposal 共享确定性策略。"""
 
 from typing import Any
 
@@ -14,10 +14,10 @@ PROPOSAL_TOOL_NAMES = frozenset({
 
 
 def is_confirmable_action_proposal(state: dict[str, Any]) -> bool:
-    """Return whether the final state contains a genuinely confirmable proposal.
+    """返回最终状态是否包含真正可确认的 Proposal。
 
-    The predicate is shared by HITL routing and finalization.  Clarifications do
-    not qualify because they deliberately have no action proposal.
+    该判断由 HITL 路由和最终化共享。Clarification 不满足条件，因为它有意不包含
+    action proposal。
     """
     if state.get('stop_reason') != 'task_complete':
         return False

@@ -1,4 +1,4 @@
-"""memory_pipeline.py —— Memory Pipeline Orchestrator（Phase 3C / 3C-Fix）
+"""memory_pipeline.py —— Memory Pipeline 编排器（Phase 3C / 3C-Fix）
 
 职责：
   串联已有 Memory 组件（Trigger / Extractor / WritePolicy），产出统一的
@@ -93,7 +93,7 @@ class MemoryPipelineResult(BaseModel):
 
 
 class MemoryPipeline:
-    """Memory Pipeline Orchestrator。
+    """Memory Pipeline 编排器。
 
     用法：
       pipeline = MemoryPipeline()                    # 默认组件 + 无 llm_callable
@@ -181,7 +181,7 @@ class MemoryPipeline:
             ) from exc
 
     def _process_inner(self, agent_result: dict[str, Any]) -> MemoryPipelineResult:
-        # 1. Trigger Policy
+        # 1. 触发策略（Trigger Policy）
         trigger_decision = self._trigger.evaluate(agent_result)
         if not trigger_decision.should_extract:
             return MemoryPipelineResult(
@@ -212,7 +212,7 @@ class MemoryPipeline:
                 proposal=None,
             )
 
-        # 4. MemoryWritePolicy
+        # 4. MemoryWritePolicy（Memory 写入策略）
         #    Python 响应只允许 UPSERT + ACTIVE；所有终态由 Java 业务生命周期收口。
         #    拦截是程序层确定性行为（不依赖 LLM prompt），降级为"无命令"，
         #    与 NONE / 解析失败同语义（不抛错、不阻断主响应）。

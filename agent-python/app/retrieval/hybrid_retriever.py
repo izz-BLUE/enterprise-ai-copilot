@@ -149,7 +149,7 @@ def retrieve(query: str, top_k: int = 3, mode: str = 'hybrid') -> list[dict]:
         'hybrid'         — Faiss + BM25 + RRF 融合（默认）
         'hybrid_rerank'  — Hybrid 候选召回 + Cross Encoder 精排（实验）
 
-    Raises:
+    异常：
         ValueError: mode 不在合法值范围内
     """
     if mode not in _VALID_MODES:

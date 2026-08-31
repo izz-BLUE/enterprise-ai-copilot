@@ -96,7 +96,7 @@
 
 ## 验证结果
 
-### Retrieval Evaluation
+### 检索评估
 ```
 总用例数:              25
 answerable 用例数:     18
@@ -108,7 +108,7 @@ keyword_hit_rate:      100.0%
 final_pass_rate:       100.0%
 ```
 
-### Generation Evaluation
+### 生成评估
 ```
 总用例数:                25
 answerable 用例数:       18
@@ -124,8 +124,8 @@ LLM 调用失败:            0
 ```
 
 ### 回归检查
-- Retrieval: **NO REGRESSION** ✅
-- Generation: **NO REGRESSION** ✅
+- 检索：**NO REGRESSION** ✅
+- 生成：**NO REGRESSION** ✅
 
 ### 最终评估集构成
 
@@ -137,7 +137,7 @@ LLM 调用失败:            0
 | 无答案负样本 | 7 |
 | **总计** | **25** |
 
-## Baseline
+## 基线
 
 **本次不自动更新 baseline。** 可以考虑人工确认后手动更新：
 ```bash

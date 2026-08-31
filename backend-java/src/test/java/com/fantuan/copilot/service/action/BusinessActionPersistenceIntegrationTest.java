@@ -97,9 +97,9 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         Integer migrations = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM flyway_schema_history WHERE success", Integer.class);
         // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item；
-        // P3-4 V8: durable HITL wait correlation; P3-5B1 V9: OA correlation columns/indexes;
-        // P3-5B2b V10: last external approval check timestamp;
-        // P3-5B3 V11: external resume delivery markers; Phase 2 V12: Java Task Runtime.
+        // P3-4 V8：持久化 HITL wait correlation；P3-5B1 V9：OA 关联列/索引；
+        // P3-5B2b V10：外部审批最近检查时间戳；
+        // P3-5B3 V11：外部恢复投递标记；Phase 2 V12：Java Task Runtime。
         assertEquals(12, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,

@@ -38,10 +38,10 @@ public record InternalAgentChatRequest(
 
     /**
      * Memory 视图（内部接口用）。大小上限与 ai_task_memory 表 CHECK 约束对齐：
-     *  - taskType  ≤ 64
-     *  - status     ≤ 32
-     *  - taskStateJson ≤  16 KiB（octet_length）
-     *  - summary    ≤ 500
+     *  - taskType  上限 64
+     *  - status    上限 32
+     *  - taskStateJson 上限 16 KiB（octet_length）
+     *  - summary   上限 500
      * 这些上限由 Java 服务端赋值前在 AiTaskMemoryService 中保证；
      * 本 DTO 不再做额外校验（避免重复维护）。
      */

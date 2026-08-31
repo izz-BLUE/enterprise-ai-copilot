@@ -1,4 +1,4 @@
-"""memory_trigger_policy.py —— Memory Trigger Policy
+"""memory_trigger_policy.py —— Memory Trigger Policy（记忆触发策略）
 
 职责：
   确定一次 Agent 执行结束后，是否值得调用 Memory Extractor。

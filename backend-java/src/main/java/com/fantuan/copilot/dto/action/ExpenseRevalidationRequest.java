@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 
-/** Persisted Java facts used to query the authoritative Enterprise OA source. */
+/** 用于查询权威 Enterprise OA 来源的 Java 持久化事实。 */
 public record ExpenseRevalidationRequest(
         @JsonProperty("schema_version") int schemaVersion,
         @JsonProperty("employee_id") String employeeId,

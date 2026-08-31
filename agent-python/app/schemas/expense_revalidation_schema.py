@@ -1,4 +1,4 @@
-"""Strict internal contract for confirm-time Enterprise OA fact transport."""
+"""确认时 Enterprise OA 事实传输的严格内部契约。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ExpenseRevalidationRequest(BaseModel):
-    """Identifiers reconstructed by Java from its persisted PendingAction."""
+    """Java 根据持久化 PendingAction 重建的标识。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -38,7 +38,7 @@ class ExpenseRevalidationRequest(BaseModel):
 
 
 class ExpenseRevalidationTripFact(BaseModel):
-    """Raw current trip facts; Java validates status, owner and dates."""
+    """原始当前 trip 事实；Java 校验 status、owner 和日期。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -50,7 +50,7 @@ class ExpenseRevalidationTripFact(BaseModel):
 
 
 class ExpenseRevalidationInvoiceFact(BaseModel):
-    """One current invoice result, including source business errors."""
+    """一条当前 invoice 结果，包含来源业务错误。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 
@@ -64,7 +64,7 @@ class ExpenseRevalidationInvoiceFact(BaseModel):
 
 
 class ExpenseRevalidationResponse(BaseModel):
-    """Facts only; this adapter never returns a final business decision."""
+    """仅包含事实；此 adapter 永远不返回最终业务决定。"""
 
     model_config = ConfigDict(extra='forbid', strict=True)
 

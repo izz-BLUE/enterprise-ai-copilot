@@ -1,4 +1,4 @@
-"""enterprise_oa_client.py —— Enterprise OA MCP Client Adapter
+"""enterprise_oa_client.py —— Enterprise OA MCP 客户端适配器
 
 V2 §八 + V2 §五 + V2 §六约束：
 - Python Agent 工具只看到 success/data 或 success:false / error_code / message
@@ -163,7 +163,7 @@ class McpEnterpriseOaClient:
         initialize / list_tools 等握手；call_tool 直接 await。
         """
         try:
-            from mcp import Client  # SDK v2 high-level Client
+            from mcp import Client  # SDK v2 高层 Client
         except ImportError as exc:
             raise OaMcpClientError(
                 OA_MCP_UNREACHABLE,

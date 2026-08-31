@@ -1,93 +1,93 @@
-# Security Policy
+# 安全策略
 
-## Project Status
+## 项目状态
 
-This project is **early-stage and not production-ready**. It is an AI application backend demo for learning and portfolio purposes. It has not undergone a professional security audit.
+本项目仍处于**早期阶段，尚未达到生产可用状态**。这是一个用于学习和作品集展示的 AI 应用后端 Demo，尚未经过专业安全审计。
 
-## Reporting Vulnerabilities
+## 报告漏洞
 
-If you discover a security issue, please report it responsibly:
+如果发现安全问题，请负责任地报告：
 
-- Open a GitHub Issue with a description of the vulnerability
-- **Do not include real API keys, tokens, passwords, or private data in the report**
-- Do not create a public issue with exploit details that could harm others
+- 创建 GitHub Issue，并说明漏洞情况。
+- **报告中不要包含真实 API key、token、密码或隐私数据**。
+- 不要创建包含可能伤害他人的利用细节的公开 issue。
 
-## API Key Safety
+## API Key 安全
 
-- Never commit `.env` files or API keys to the repository
-- Use environment variables for all secrets
-- The `.gitignore` is configured to exclude `.env` files
-- If you accidentally commit a key, rotate it immediately
+- 绝不要向仓库提交 `.env` 文件或 API key。
+- 所有 secret 都应使用环境变量。
+- `.gitignore` 已配置为排除 `.env` 文件。
+- 如果误提交了 key，请立即轮换。
 
-## Input and Output Trust
+## 输入与输出信任边界
 
-### User Input
+### 用户输入
 
-- User input is passed to RAG retrieval and LLM prompts
-- The Safety Guard (Safety Guard Lite) is a **heuristic defense-in-depth filter**. It is **not an authorization, trust, or security boundary**
-- It applies input normalization (Unicode NFKC, Default-Ignorable/zero-width character removal, control-character removal, whitespace collapse) before rule checking
-- Five high-confidence rule families use precompiled regex patterns: `prompt_override`, `prompt_extraction`, `credential_extraction`, `tool_abuse`, `business_policy_bypass`
-- Only clear, unambiguous attacks are blocked. Uncertain, discussion-style, or consultative input passes by default (precision over recall)
-- A compact safety-only view (removing whitespace and a limited set of separators) resists simple split attacks such as `忽 略 之 前 所 有 指 令`
-- Original user input is preserved unchanged for RAG, query rewrite, and business actions; only the normalized form is used for safety checks
-- Do not treat user input as safe without validation
+- 用户输入会传给 RAG 检索和 LLM Prompt。
+- Safety Guard（Safety Guard Lite）是**启发式纵深防御过滤器**，**不是授权、信任或安全边界**。
+- 规则检查前会进行输入规范化（Unicode NFKC、移除 Default-Ignorable/零宽字符、移除控制字符、折叠空白）。
+- 五类高置信规则使用预编译正则：`prompt_override`、`prompt_extraction`、`credential_extraction`、`tool_abuse`、`business_policy_bypass`。
+- 只拦截清晰、无歧义的攻击；不确定、讨论式或咨询式输入默认放行（优先保证 precision，而不是 recall）。
+- 紧凑的仅用于安全检查的视图（移除空白和有限分隔符）可以抵抗 `忽 略 之 前 所 有 指 令` 这类简单拆分攻击。
+- RAG、query rewrite 和业务动作使用保持不变的原始用户输入；安全检查只使用规范化形式。
+- 未经校验，不要把用户输入视为安全内容。
 
-### RAG Context
+### RAG 上下文
 
-- RAG retrieval results come from knowledge base documents
-- Retrieved content is injected into LLM prompts
-- The quality of answers depends on the quality of the knowledge base
+- RAG 检索结果来自知识库文档。
+- 检索内容会注入 LLM Prompt。
+- 答案质量取决于知识库质量。
 
-### LLM / RAG / Agent Output
+### LLM / RAG / Agent 输出
 
-- **LLM outputs are not trustworthy by default**
-- RAG answers are grounded in retrieved documents but may still contain errors
-- Agent tool outputs should be validated before use
-- Do not execute LLM-suggested commands or tool calls without human review
+- **LLM 输出默认不可信**。
+- RAG 答案以检索文档为依据，但仍可能包含错误。
+- Agent Tool 输出在使用前应进行校验。
+- 未经人工复核，不要执行 LLM 建议的命令或 Tool 调用。
 
-## Prompt Injection
+## Prompt 注入
 
-### Safety Guard Positioning
+### Safety Guard 定位
 
-Safety Guard is a **heuristic defense-in-depth filter**.
-It is **not** an authorization, trust, or security boundary.
+Safety Guard 是**启发式纵深防御过滤器**。
+它**不是**授权、信任或安全边界。
 
-The real security boundaries are provided by:
+真正的安全边界由以下机制提供：
 
-- authentication
-- authorization (Java permission checks)
-- tool capability (controlled tool provider)
-- business validation
-- tenant/data isolation
-- transaction/state machine
-- human confirmation
+- 认证（authentication）
+- authorization（Java 权限检查）
+- Tool capability（受控 Tool provider）
+- 业务校验
+- 租户/数据隔离
+- 事务/状态机
+- 人工确认
 
-### What Safety Guard Does
+### Safety Guard 的作用
 
-- Input normalization (Unicode NFKC, Default-Ignorable removal, control-character removal, whitespace collapse) plus a compact safety-only view for simple split attacks
-- Five high-confidence rule families: instruction override, system prompt extraction, credential extraction, tool abuse, business policy bypass
-- Only clear, unambiguous attacks are blocked; uncertain, discussion-style, or consultative input passes by default
-- The system prompt includes explicit security boundary declarations: user input and knowledge base content are untrusted, and the model must not execute embedded instructions or reveal internal configuration
-- RAG prompts use clear boundary markers to separate system rules, untrusted knowledge base content, and untrusted user questions
+- 输入规范化（Unicode NFKC、移除 Default-Ignorable 和控制字符、折叠空白），并为简单拆分攻击生成紧凑的安全视图。
+- 五类高置信规则：指令覆盖、系统 Prompt 提取、凭据提取、Tool 滥用、业务策略绕过。
+- 只拦截清晰、无歧义的攻击；不确定、讨论式或咨询式输入默认放行。
+- system Prompt 明确声明安全边界：用户输入和知识库内容均不可信，模型不得执行其中嵌入的指令或泄露内部配置。
+- RAG Prompt 使用清晰的边界标记区分系统规则、不可信知识库内容和不可信用户问题。
 
-### What Safety Guard Does Not Promise
+### Safety Guard 不承诺的能力
 
-- No complete prompt injection detection (semantic paraphrases, homoglyph confusables beyond NFKC, and quoted educational sentences are documented limitations, see `tests/safety_corpus.py`)
-- No complete Unicode confusable protection (no runtime confusable table dependency)
-- No complete natural language intent understanding
-- No dedicated security classification model
-- No runtime scanning of knowledge base fragments
-- Java permission checks and human confirmation remain the final security boundary for business actions
+- 不提供完整的 Prompt Injection 检测（语义改写、超出 NFKC 范围的 homoglyph 混淆，以及带引号的教学句子均是已记录的限制，见 `tests/safety_corpus.py`）。
+- 不提供完整的 Unicode confusable 防护（运行时不依赖混淆字符表）。
+- 不提供完整的自然语言意图理解。
+- 不提供专用安全分类模型。
+- 不在运行时扫描知识库片段。
+- Java 权限检查和人工确认仍是业务动作的最终安全边界。
 
-## What Is Not Implemented
+## 尚未实现的能力
 
-The following security capabilities are **not yet implemented**:
+以下安全能力**尚未实现**：
 
-- User authentication and authorization
-- Rate limiting
-- Audit logging
-- Dedicated security classification model (currently rule-based only)
-- Knowledge base fragment runtime scanning
-- Output verification
-- Multi-tenant isolation
-- Full Unicode confusable (homoglyph) protection at runtime
+- 用户认证与授权
+- 速率限制
+- 审计日志
+- 专用安全分类模型（当前仅基于规则）
+- 知识库片段运行时扫描
+- 输出校验
+- 多租户隔离
+- 运行时完整 Unicode confusable（homoglyph）防护

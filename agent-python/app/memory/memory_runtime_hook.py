@@ -63,7 +63,7 @@ TERMINAL_COMMAND_BLOCKED = 'terminal_command_blocked'
 
 
 # ---------------------------------------------------------------------------
-# Result
+# 结果
 # ---------------------------------------------------------------------------
 
 
@@ -89,7 +89,7 @@ class MemoryRuntimeResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Hook
+# Hook（运行时钩子）
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +173,7 @@ class MemoryRuntimeHook:
                 f'得到 {type(agent_result).__name__}'
             )
 
-        # 1. Pipeline
+        # 1. Pipeline（流水线）
         try:
             pipeline_result = self._pipeline.process(agent_result)
         except MemoryPipelineError as exc:
@@ -326,7 +326,7 @@ class MemoryRuntimeHook:
                 error=None,
             )
 
-        # 5. Dispatcher
+        # 5. Dispatcher（分发器）
         logger.info(
             'MemoryRuntimeHook: Dispatching memory write (conversation_id=%s, action=%s, task_type=%s)',
             conversation_id, command.action, command.task_type,

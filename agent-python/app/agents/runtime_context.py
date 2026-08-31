@@ -1,8 +1,7 @@
-"""Trusted context for one LangGraph invocation.
+"""一次 LangGraph 调用的可信上下文。
 
-These values are supplied by the current Java -> Python request and are not
-part of :class:`AgentState`.  They must never be recovered from an execution
-snapshot as trusted input.
+这些值由当前 Java -> Python 请求提供，不属于 :class:`AgentState`。绝不能从执行
+snapshot 中恢复它们并将其作为可信输入。
 """
 
 from datetime import date
@@ -12,7 +11,7 @@ ExecutionMode = Literal['LEGACY_SINGLE', 'TASK_RUNTIME']
 
 
 class AgentRuntimeContext(TypedDict):
-    """Per-request trusted inputs used by Agent nodes and Tool Executor."""
+    """Agent 节点和 Tool Executor 使用的请求级可信输入。"""
 
     employee_id: str
     allow_eval: bool

@@ -29,9 +29,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Delivers a Java-authoritative terminal ExpenseClaim result to the original
- * Python execution.  Delivery markers are retry bookkeeping only; Java's
- * ExpenseClaim status remains the business authority.
+ * 将 Java 权威的 ExpenseClaim 终态结果投递给原始 Python execution。
+ * 投递 marker 仅用于重试记录；Java 的 ExpenseClaim status 仍是业务权威。
  */
 @Service
 public class ExpenseExternalResumeCoordinator {
@@ -74,7 +73,7 @@ public class ExpenseExternalResumeCoordinator {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** Compatibility constructor for focused unit tests. */
+    /** 兼容聚焦单元测试的构造方法。 */
     public ExpenseExternalResumeCoordinator(
             ExpenseClaimRepository claims,
             PendingActionRepository actions,
@@ -89,7 +88,7 @@ public class ExpenseExternalResumeCoordinator {
                 threadGuard, transactions, retryIntervalMillis, clock, null);
     }
 
-    /** Best-effort immediate or retry delivery for one local ExpenseClaim. */
+    /** 对一个本地 ExpenseClaim 立即投递或执行重试投递。 */
     public void tryResume(String expenseId) {
         if (expenseId == null || expenseId.isBlank()) {
             return;

@@ -142,7 +142,7 @@ public class LangGraphAgentController {
                 new AgentRuntimeThreadExecutionGuard(), null, null);
     }
 
-    /** Production-shaped constructor useful for tests that provide the guard but not HITL. */
+    /** 供只提供 guard、但不提供 HITL 的测试使用的生产形态构造方法。 */
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
                                     AdminAccessService adminAccessService,
                                     BusinessActionService businessActionService,
@@ -156,7 +156,7 @@ public class LangGraphAgentController {
                 runtimeThreadExecutionGuard, null, null);
     }
 
-    /** Compatibility constructor for tests that provide the existing HITL coordinator. */
+    /** 兼容提供现有 HITL coordinator 的测试的构造方法。 */
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
                                     AdminAccessService adminAccessService,
                                     BusinessActionService businessActionService,
@@ -219,10 +219,9 @@ public class LangGraphAgentController {
             String presentedToken, VerifiedIdentity identity, boolean allowEval,
             boolean allowBusinessActions, String conversationId, String runtimeThreadId) {
 
-        // Java owns PendingAction TTL.  Reconcile an expired approval while
-        // this request still holds the same runtime-thread guard that covers
-        // the following ordinary Chat call; the coordinator performs Python
-        // resume only after the Java transaction has committed.
+        // PendingAction TTL 由 Java 负责。在当前请求仍持有覆盖后续普通 Chat 调用的
+        // 同一 runtime-thread guard 时，收口已过期的审批；coordinator 仅在 Java
+        // 事务提交后执行 Python resume。
         if (hitlCoordinator != null) {
             try {
                 if (!hitlCoordinator.reconcileExpiredBeforeChat(
@@ -240,9 +239,9 @@ public class LangGraphAgentController {
             }
         }
 
-        // PendingAction is the authoritative WAITING_USER boundary for both
-        // legacy single actions and Task Runtime.  Check it after TTL
-        // reconciliation and before any task recovery or decomposition.
+        // PendingAction 是 legacy single action 和 Task Runtime 共用的
+        // WAITING_USER 权威边界。在 TTL reconciliation 之后、任何任务恢复或
+        // 分解之前检查它。
         if (businessActionService != null && businessActionService.hasBlockingAction(
                 identity.userId(), conversationId)) {
             eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
@@ -251,18 +250,16 @@ public class LangGraphAgentController {
                     "当前会话已有待确认的申请，请先确认或取消后再发起新申请。");
         }
 
-        // Task Runtime admission order is Java-owned: an active user wait or
-        // clarification is bound to its task before a new message can reach
-        // decomposition.  Legacy controllers constructed without the runtime
-        // service retain the existing single-task path.
+        // Task Runtime 的准入顺序由 Java 负责：活跃的用户等待或 clarification
+        // 必须先绑定到对应任务，新消息才能进入分解。未构造 runtime service 的
+        // legacy controller 保留原有单任务路径。
         TaskExecution taskExecution = null;
         if (taskRuntimeService != null) {
             try {
-                // This Java-owned reconciliation covers both a RUNNING task
-                // whose previous Python call was lost and a non-blocked
-                // PENDING successor.  It also preserves the admission order:
-                // WAITING_USER -> WAITING_CLARIFICATION -> RUNNING recovery
-                // -> deterministic next task -> new decomposition.
+                // 该 Java 负责的 reconciliation 同时覆盖：上一次 Python 调用丢失的
+                // RUNNING 任务，以及未阻断的 PENDING successor。它也保持准入顺序：
+                // WAITING_USER -> WAITING_CLARIFICATION -> RUNNING 恢复
+                // -> 确定性下一任务 -> 新的分解。
                 taskExecution = taskRuntimeService.reconcile(
                         identity.userId(), conversationId).orElse(null);
                 if (taskExecution != null
@@ -371,10 +368,9 @@ public class LangGraphAgentController {
                     "HITL wait 上下文无效。");
         }
         if (pythonResponse.actionProposal() != null) {
-            // A durable HITL wait may belong to an already-terminal Java
-            // action whose checkpoint still needs reconciliation.  Let the
-            // coordinator inspect that correlation even after capability
-            // revocation; non-HITL proposals retain the original gate.
+            // 持久化 HITL wait 可能属于已经终态化的 Java action，而其 checkpoint
+            // 仍需要 reconciliation。即使 capability 已撤销，也让 coordinator
+            // 检查该 correlation；非 HITL Proposal 继续使用原有 gate。
             if (!allowBusinessActions && pythonResponse.hitlWait() == null) {
                 eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
                         AdminLogEvent.LEVEL_WARN, started);

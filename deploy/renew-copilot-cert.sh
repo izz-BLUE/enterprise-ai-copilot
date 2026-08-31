@@ -1,9 +1,9 @@
 #!/bin/bash
-# Enterprise AI Copilot - Copilot Certificate Auto-Renewal
-# Usage: /opt/enterprise-ai-copilot/deploy/renew-copilot-cert.sh
+# Enterprise AI Copilot - Copilot 证书自动续期
+# 用法：/opt/enterprise-ai-copilot/deploy/renew-copilot-cert.sh
 #
-# This script is deployed to the server at the path above.
-# Cron: /etc/cron.d/eac-copilot-certbot (twice daily at 3:15 AM and 3:15 PM)
+# 此脚本部署在上方路径的服务器位置。
+# Cron：/etc/cron.d/eac-copilot-certbot（每天 3:15 和 15:15 各执行一次）
 
 set -euo pipefail
 
@@ -16,16 +16,16 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
 }
 
-# Check if certificate exists
+# 检查证书是否存在
 if [ ! -f "$CERT_PATH" ]; then
     log "ERROR: Certificate not found at $CERT_PATH"
     exit 1
 fi
 
-# Get current certificate mtime
+# 获取当前证书的修改时间
 CERT_MTIME_BEFORE=$(stat -c %Y "$CERT_PATH" 2>/dev/null || echo "0")
 
-# Run certbot renew with flock
+# 使用 flock 运行 certbot renew
 (
     flock -n 200 || { log "ERROR: Could not acquire lock"; exit 1; }
 
@@ -41,13 +41,13 @@ CERT_MTIME_BEFORE=$(stat -c %Y "$CERT_PATH" 2>/dev/null || echo "0")
 
     log "Certbot renew completed"
 
-    # Check if certificate was renewed
+    # 检查证书是否已续期
     CERT_MTIME_AFTER=$(stat -c %Y "$CERT_PATH" 2>/dev/null || echo "0")
 
     if [ "$CERT_MTIME_BEFORE" != "$CERT_MTIME_AFTER" ]; then
         log "Certificate renewed, testing nginx config"
 
-        # Test nginx config
+        # 测试 nginx 配置
         if docker exec eat-what-nginx-prod nginx -t >> "$LOG_FILE" 2>&1; then
             log "Nginx config test passed, reloading"
             docker exec eat-what-nginx-prod nginx -s reload >> "$LOG_FILE" 2>&1

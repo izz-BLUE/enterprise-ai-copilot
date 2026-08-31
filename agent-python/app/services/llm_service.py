@@ -96,7 +96,7 @@ def _get_client() -> OpenAI:
 def _get_controlled_tool_client() -> OpenAI:
     global _controlled_tool_client
     if _controlled_tool_client is None:
-        # Controlled business actions must make exactly one HTTP attempt.
+        # 受控业务动作必须只执行一次 HTTP 尝试。
         _controlled_tool_client = _build_client(max_retries=0)
     return _controlled_tool_client
 

@@ -2,7 +2,7 @@ package com.fantuan.copilot.dto.webhook;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-/** Strict notification envelope; it deliberately contains no approval status. */
+/** 严格的通知封装；其中有意不包含审批 status。 */
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record MockOaExpenseApprovalWebhook(
         String eventId,

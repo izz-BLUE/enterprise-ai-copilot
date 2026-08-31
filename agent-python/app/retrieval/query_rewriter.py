@@ -94,11 +94,11 @@ _add(
 def rewrite_query(query: str, mode: str = 'none') -> dict:
     """对 query 执行查询重写。
 
-    Args:
+    参数：
         query: 用户原始问题
         mode: 'none' 不重写, 'rule' 规则重写
 
-    Returns:
+    返回：
         {
             'original_query': str,
             'rewritten_query': str,

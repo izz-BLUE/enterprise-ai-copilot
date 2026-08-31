@@ -69,10 +69,10 @@ class NormalizedInput:
 def normalize_for_safety(text: str | None) -> NormalizedInput:
     """对用户输入进行安全检查专用规范化。
 
-    Args:
+    参数：
         text: 原始用户输入，可能为 None
 
-    Returns:
+    返回：
         NormalizedInput 包含规范化文本与状态标记
     """
     if text is None:

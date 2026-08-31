@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 
-/** Authenticated Mock OA notification endpoint; the notification body is never status authority. */
+/** 已认证的 Mock OA 通知端点；通知 body 永远不是 status 权威来源。 */
 @RestController
 public class MockOaWebhookController {
     public static final String PATH = "/api/webhooks/mock-oa/expense-approval";

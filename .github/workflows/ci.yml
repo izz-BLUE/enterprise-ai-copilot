@@ -1,4 +1,4 @@
-# Enterprise AI Copilot - CI Pipeline
+# Enterprise AI Copilot - CI 流水线
 name: CI
 
 on:

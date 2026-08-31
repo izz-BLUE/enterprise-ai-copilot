@@ -1,4 +1,4 @@
-# RAG Quality Engineering
+# RAG 质量工程
 
 ## 概述
 
@@ -8,7 +8,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 
 ## 质量优化链路
 
-### D36：BM25 + RRF Hybrid Retrieval
+### D36：BM25 + RRF 混合检索
 
 **问题：** 纯向量检索（Faiss）对关键词精确匹配不足。例如用户问"公司用什么 VPN"，向量检索可能返回 IT 相关内容但不一定命中 VPN 关键词。
 
@@ -24,7 +24,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 
 ---
 
-### D37：Cross Encoder Re-rank 实验模式
+### D37：Cross Encoder 重排序实验模式
 
 **问题：** RRF 融合后 TopK 内的排序质量仍有提升空间。某些 case 中，正确文档排在第 4-5 位，被 TopK=3 截断。
 
@@ -80,7 +80,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 
 ---
 
-### D40：Generation Evaluation 诊断优化
+### D40：生成评估诊断优化
 
 **问题：** D39 暴露 3 个 generation FAIL，但无法区分失败原因。
 
@@ -130,14 +130,14 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 
 ## 当前评估结果
 
-**Retrieval Evaluation**（不调用 LLM，零 token 消耗）：
+**检索评估**（不调用 LLM，零 token 消耗）：
 
 | 模式 | source_hit | keyword_hit | final_pass_rate |
 |------|-----------|-------------|-----------------|
 | none | 100% | 96.4% | 96.4% |
 | rule | 100% | 100% | 100% |
 
-**Generation Evaluation**（调用 LLM）：
+**生成评估**（调用 LLM）：
 
 | 模式 | answerable | no-answer | overall |
 |------|-----------|-----------|---------|

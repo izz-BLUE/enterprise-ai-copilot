@@ -1,4 +1,4 @@
-"""Real PostgreSQL acceptance for durable external expense approval resume."""
+"""持久化外部报销审批恢复的真实 PostgreSQL 验收。"""
 
 import hashlib
 import json

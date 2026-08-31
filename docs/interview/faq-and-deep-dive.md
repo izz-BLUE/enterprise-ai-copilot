@@ -1,4 +1,4 @@
-# Interview FAQ and Deep Dive
+# 面试 FAQ 与深度问答
 
 回答都以当前实现为边界，不把小规格 Demo、Mock OA 或 fixture-backed MCP 说成生产系统。
 

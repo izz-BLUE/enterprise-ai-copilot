@@ -16,7 +16,7 @@ public record ActionExecutionResponse(
         String originTraceId,
         String traceId,
         PendingActionView nextPendingAction) {
-    /** Compatibility constructor for the single-action response contract. */
+    /** 兼容单动作响应契约的构造方法。 */
     public ActionExecutionResponse(String actionId,
                                    BusinessActionType type,
                                    ActionStatus status,

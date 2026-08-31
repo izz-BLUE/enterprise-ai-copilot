@@ -6,7 +6,7 @@ import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
-/** Java to the narrow Python adapter; no planner or LangGraph is involved. */
+/** Java 到窄范围 Python adapter 的边界；不涉及 Planner 或 LangGraph。 */
 @Component
 public class PythonExpenseAuthoritativeRevalidationGateway
         implements ExpenseAuthoritativeRevalidationGateway {

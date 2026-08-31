@@ -3,7 +3,7 @@ package com.fantuan.copilot.service.action;
 import com.fantuan.copilot.model.action.ActionStatus;
 import org.springframework.http.HttpStatus;
 
-/** Infrastructure failure at confirm time; the pending action remains retryable. */
+/** 确认时的基础设施失败；pending action 仍可重试。 */
 final class ExpenseRevalidationUnavailableException extends ActionException {
     ExpenseRevalidationUnavailableException(String actionId, ActionStatus status,
                                              Throwable cause) {

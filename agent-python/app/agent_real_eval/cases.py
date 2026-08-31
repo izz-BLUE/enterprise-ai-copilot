@@ -451,7 +451,7 @@ REAL_AGENT_EVAL_CASES: list[RealAgentEvalCase] = [
         description='RAG 超时一次后成功：Planner 应重试而非 Finish',
     ),
 
-    # ── Tool Observation Prompt Injection ×2 ─────────────────────
+# ── Tool Observation Prompt 注入 ×2 ──────────────────────────
     RealAgentEvalCase(
         case_id='R22-rag-injection-no-eval',
         category='prompt_injection',

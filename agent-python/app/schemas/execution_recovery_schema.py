@@ -1,4 +1,4 @@
-"""Strict marker persisted with an unfinished Planner-first execution."""
+"""与未完成 Planner-first execution 一起持久化的严格 marker。"""
 
 from datetime import date
 from hashlib import sha256
@@ -13,11 +13,10 @@ _DATE_PATTERN = r'^\d{4}-\d{2}-\d{2}$'
 
 
 class ExecutionRecoveryMarker(BaseModel):
-    """Deterministic control metadata for one resumable graph execution.
+    """一个可恢复 graph execution 的确定性控制元数据。
 
-    This marker is not an identity, authorization, credential, nonce, or
-    business fact. Trusted request values remain in Runtime Context and are
-    deliberately absent from this schema.
+    该 marker 不是身份、授权、凭据、nonce 或业务事实。可信请求值保留在 Runtime
+    Context 中，并有意不出现在此 schema 中。
     """
 
     model_config = ConfigDict(extra='forbid', strict=True)
@@ -38,12 +37,12 @@ class ExecutionRecoveryMarker(BaseModel):
 
 
 def fingerprint_request(question: str) -> str:
-    """Hash the exact Python-received question without normalization."""
+    """对 Python 收到的原始问题进行哈希，不做规范化。"""
     return sha256(_FINGERPRINT_PREFIX + question.encode('utf-8')).hexdigest()
 
 
 def fingerprint_actor_scope(employee_id: str) -> str:
-    """Bind recovery to the current trusted employee scope without persisting it."""
+    """将恢复绑定到当前可信员工作用域，但不持久化该作用域。"""
     return sha256(
         _ACTOR_SCOPE_FINGERPRINT_PREFIX + employee_id.encode('utf-8')
     ).hexdigest()
@@ -54,7 +53,7 @@ def new_execution_recovery_marker(
     business_date: date | None,
     employee_id: str,
 ) -> dict:
-    """Create a fresh strict marker for a Planner-first execution."""
+    """为 Planner-first execution 创建新的严格 marker。"""
     marker = ExecutionRecoveryMarker(
         schema_version=1,
         execution_id=f'ex_{uuid4().hex}',

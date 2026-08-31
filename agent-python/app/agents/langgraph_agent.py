@@ -66,7 +66,7 @@ class AgentState(TypedDict):
     observation: str
     planner_decision: dict | None
     stop_reason: str
-    # Scoped Conversation Memory / Task Continuity P0 — Phase 2 (Read Path)。
+    # 作用域会话记忆 / 任务连续性 P0 —— Phase 2（读取路径）。
     # memory_context 由 Java 侧基于 (trusted user_id, conversation_id) 复合 key
     # 仅在 ACTIVE 时注入；它属于不可信历史上下文，不会改变 Capability Gate、
     # 当前可见 Tool 集合或任何 trusted 系统字段（employee_id / business_date /
@@ -75,10 +75,10 @@ class AgentState(TypedDict):
     # P3-3：当前未完成 Planner-first execution 的严格恢复控制标记；不承载
     # user/employee/permission/date/trace/deadline 等可信 Runtime Context。
     execution_recovery: dict | None
-    # P3-4: persisted correlation for the single user-confirmation wait.
+    # P3-4：单个用户确认等待的持久化关联信息。
     hitl_wait: dict | None
     hitl_result: dict | None
-    # P3-5A: one durable external expense approval wait and its terminal result.
+    # P3-5A：一个持久化的外部报销审批等待及其终态结果。
     external_wait: dict | None
     external_result: dict | None
 
@@ -297,7 +297,7 @@ def build_agent_graph():
 
 
 def prepare_hitl_node(state: AgentState) -> dict:
-    """Create the deterministic checkpoint marker immediately before approval."""
+    """在审批前立即创建确定性的 checkpoint marker。"""
     if not is_confirmable_action_proposal(state):
         raise RuntimeError('当前状态不是可确认的业务 Proposal，禁止进入 HITL')
 
@@ -321,15 +321,15 @@ def prepare_hitl_node(state: AgentState) -> dict:
 
 
 def approval_node(state: AgentState) -> dict:
-    """Pause for Java's authoritative decision and deterministically apply it."""
+    """暂停等待 Java 权威决定，并确定性地应用该决定。"""
     try:
         wait = HitlWaitMarker.model_validate(state.get('hitl_wait'))
     except Exception:
         logger.error('HITL approval marker 校验失败')
         raise RuntimeError('HITL wait marker 无效') from None
 
-    # This node must remain side-effect free before interrupt(): LangGraph 1.2.9
-    # re-executes the node from its beginning when Command(resume=...) arrives.
+    # interrupt() 之前本节点必须保持无副作用：LangGraph 1.2.9 收到
+    # Command(resume=...) 时会从节点开头重新执行。
     resumed = interrupt(wait.model_dump())
     try:
         payload = HitlResumePayload.model_validate(resumed)
@@ -364,7 +364,7 @@ def approval_node(state: AgentState) -> dict:
 
 
 def _should_wait_for_external_approval(state: AgentState) -> bool:
-    """Route only a confirmed expense with its Java ExpenseClaim id."""
+    """只为带有 Java ExpenseClaim ID 的已确认报销进行路由。"""
     try:
         result = HitlResumePayload.model_validate(state.get('hitl_result'))
     except Exception:
@@ -377,7 +377,7 @@ def _should_wait_for_external_approval(state: AgentState) -> bool:
 
 
 def _approval_route(state: AgentState, runtime: Runtime[AgentRuntimeContext]) -> str:
-    """Select external lifecycle from Java's trusted context only."""
+    """仅根据 Java 可信上下文选择 external 生命周期。"""
     if runtime.context.get('execution_mode', 'LEGACY_SINGLE') == 'TASK_RUNTIME':
         return 'finalize_node'
     return (
@@ -388,7 +388,7 @@ def _approval_route(state: AgentState, runtime: Runtime[AgentRuntimeContext]) ->
 
 
 def prepare_external_wait_node(state: AgentState) -> dict:
-    """Persist deterministic correlation without calling any external system."""
+    """不调用任何外部系统，仅持久化确定性的 correlation。"""
     if not _should_wait_for_external_approval(state):
         raise RuntimeError('当前状态不允许进入 external approval wait')
     try:
@@ -414,15 +414,15 @@ def prepare_external_wait_node(state: AgentState) -> dict:
 
 
 def external_wait_node(state: AgentState) -> dict:
-    """Consume exactly one correlated Java-authoritative OA terminal decision."""
+    """只消费一个具有关联关系的 Java 权威 OA 终态决定。"""
     try:
         wait = ExternalWaitMarker.model_validate(state.get('external_wait'))
     except Exception:
         logger.error('External approval marker 校验失败')
         raise RuntimeError('External wait marker 无效') from None
 
-    # LangGraph 1.2.9 re-enters this node from the beginning on resume.  Keep
-    # everything before interrupt() deterministic and side-effect free.
+    # LangGraph 1.2.9 在 resume 时会从开头重新进入本节点。
+    # interrupt() 之前的所有内容都必须保持确定性且无副作用。
     resumed = interrupt(wait.model_dump())
     try:
         payload = ExternalResumePayload.model_validate(resumed)
@@ -525,10 +525,9 @@ def compile_agent_loop_graph(
 @lru_cache(maxsize=1)
 def build_agent_loop_graph():
     """无 Checkpointer 的兼容 Planner-first Graph。"""
-    # Dynamic interrupt requires a checkpointer to be resumable.  The legacy
-    # no-checkpoint graph remains a deterministic compatibility graph used by
-    # unit tests and DISABLED mode; POSTGRES production compiles the HITL graph
-    # through CheckpointRuntime with the default enable_hitl=True.
+    # 动态 interrupt 需要 checkpointer 才能恢复。legacy 无 checkpoint 图仍是
+    # 单元测试和 DISABLED 模式使用的确定性兼容图；POSTGRES 生产模式通过
+    # CheckpointRuntime 编译 HITL 图，默认 enable_hitl=True。
     return compile_agent_loop_graph(enable_hitl=False)
 
 
@@ -552,9 +551,8 @@ def _finalize_action_proposal(state: dict) -> dict:
         state['action_proposal'] = None
         state['missing_fields'] = []
         return state
-    # Clarification keeps its missing_fields with action_proposal=None.  A
-    # materialized proposal must use the same shared readiness predicate as
-    # HITL routing, otherwise stale proposals could leak into the response.
+    # Clarification 保留 missing_fields，且 action_proposal=None。具体 Proposal
+    # 必须使用与 HITL 路由相同的共享就绪判断，否则 stale Proposal 可能泄漏到响应。
     if state.get('action_proposal') is not None and not is_confirmable_action_proposal(state):
         state['action_proposal'] = None
         state['missing_fields'] = []
@@ -602,8 +600,7 @@ def _finalize_response_contract(state: dict) -> dict:
         state['reason'] = state.get('reason', '')
         return state
 
-    # Java has already decided the business action.  The graph must not ask the
-    # LLM to reinterpret that result during finalization.
+    # Java 已经决定业务动作。图在最终化期间不得要求 LLM 重新解释该结果。
     if stop_reason in {
         'hitl_confirmed', 'hitl_cancelled', 'hitl_expired', 'hitl_rejected',
         'external_approved', 'external_rejected',
@@ -645,7 +642,7 @@ def _finalize_response_contract(state: dict) -> dict:
             state['reason'] = ''
         return state
 
-    # 3. refused：route=refuse, category=normal。
+    # 3. refused：route=refuse，category=normal。
     if stop_reason == 'refused':
         state['route'] = 'refuse'
         state['category'] = 'normal'
@@ -773,7 +770,7 @@ def _build_runtime_context(
     employee_id: str,
     execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> AgentRuntimeContext:
-    """Build trusted context from the current request only."""
+    """仅根据当前请求构建可信上下文。"""
     return {
         "employee_id": employee_id,
         "allow_eval": allow_eval,
@@ -786,7 +783,7 @@ def _build_runtime_context(
 
 
 def _build_graph_config(runtime_thread_id: str | None, trace_id: str) -> dict:
-    """Build config with only current-request observability and thread routing."""
+    """仅使用当前请求的可观测性和线程路由信息构建 config。"""
     config: dict = {}
     if trace_id:
         config['metadata'] = {'business_trace_id': trace_id}
@@ -806,7 +803,7 @@ def resume_langgraph_agent(
     employee_id: str = '',
     execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
-    """Resume the latest pending Planner-first checkpoint with fresh trusted context."""
+    """使用新的可信上下文恢复最新的待处理 Planner-first checkpoint。"""
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
         allow_business_actions=allow_business_actions,
@@ -835,7 +832,7 @@ def resume_hitl_langgraph_agent(
     employee_id: str = '',
     execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
-    """Resume the active approval interrupt with Java's validated result."""
+    """使用 Java 校验后的结果恢复活跃的审批 interrupt。"""
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
         allow_business_actions=allow_business_actions,
@@ -864,7 +861,7 @@ def resume_external_langgraph_agent(
     employee_id: str = '',
     execution_mode: ExecutionMode = 'LEGACY_SINGLE',
 ) -> dict:
-    """Resume the active external interrupt with fresh trusted Runtime Context."""
+    """使用新的可信 Runtime Context 恢复活跃的外部 interrupt。"""
     runtime_context = _build_runtime_context(
         allow_eval=allow_eval,
         allow_business_actions=allow_business_actions,

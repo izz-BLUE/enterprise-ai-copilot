@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 
-/** Java-authoritative result sent to Python's internal HITL resume endpoint. */
+/** 发送给 Python 内部 HITL resume 端点的 Java 权威结果。 */
 public record HitlResumePayload(
         @JsonProperty("schema_version") int schemaVersion,
         @JsonProperty("wait_id") String waitId,

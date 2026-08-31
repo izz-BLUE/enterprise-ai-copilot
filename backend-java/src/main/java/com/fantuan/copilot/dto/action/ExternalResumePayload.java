@@ -5,7 +5,7 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 
 import java.util.Objects;
 
-/** Java-authoritative terminal ExpenseClaim result sent to Python external resume. */
+/** 发送给 Python external resume 的 Java 权威 ExpenseClaim 终态结果。 */
 public record ExternalResumePayload(
         @JsonProperty("schema_version") int schemaVersion,
         @JsonProperty("wait_id") String waitId,

@@ -15,7 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
-/** Shared Mock OA authority refresh used by webhook delivery and reconciliation. */
+/** webhook 投递和 reconciliation 共用的 Mock OA 权威刷新。 */
 @Service
 public class ExpenseExternalApprovalStatusSyncService {
     private static final Logger log = LoggerFactory.getLogger(ExpenseExternalApprovalStatusSyncService.class);
@@ -39,14 +39,14 @@ public class ExpenseExternalApprovalStatusSyncService {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** Compatibility constructor for focused status-sync unit tests without B3 wiring. */
+    /** 兼容不包含 B3 wiring 的聚焦 status-sync 单元测试的构造方法。 */
     public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
                                                     ExpenseApprovalGateway approvalGateway,
                                                     TransactionOperations transactions) {
         this(claims, approvalGateway, transactions, null, null);
     }
 
-    /** Compatibility constructor for focused tests that provide B3 wiring. */
+    /** 兼容提供 B3 wiring 的聚焦测试的构造方法。 */
     public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
                                                     ExpenseApprovalGateway approvalGateway,
                                                     TransactionOperations transactions,
@@ -95,8 +95,8 @@ public class ExpenseExternalApprovalStatusSyncService {
             }
         });
         if (!taskRuntimeClaim) {
-            // The terminal ExpenseClaim and TaskExecution update above are
-            // complete before legacy Python continuation starts.
+            // 上方的 ExpenseClaim 和 TaskExecution 终态更新完成后，才启动 legacy
+            // Python continuation（继续执行）。
             if (resumeCoordinator != null) {
                 resumeCoordinator.tryResume(claim.expenseId());
             }

@@ -195,7 +195,7 @@ public class AiTaskMemoryService {
     }
 
     // -----------------------------------------------------------------------
-    // Validation helpers
+// 校验辅助方法
     // -----------------------------------------------------------------------
 
     private static void requireOwner(String field, String value) {

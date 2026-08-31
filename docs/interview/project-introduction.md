@@ -1,18 +1,18 @@
-# Project Introduction for Interviews
+# 面试项目介绍
 
 以下口径以当前仓库实现和最终验证基线为准。描述项目时强调边界：这是可演示、可恢复、可验证的小规格系统，不把它包装成生产级平台。
 
-## 30 seconds
+## 30 秒
 
 > 我做了一个企业 AI Copilot，解决企业制度问答和受控业务流程辅助问题。Java Spring Boot 负责认证、权限和业务状态，Python FastAPI 负责 RAG、LLM 和 LangGraph Agent，前端用 React。RAG 用 FAISS + 字符级 BM25 + RRF，并返回来源；Agent 可以读取差旅和发票事实生成报销 Proposal，但不直接写库，必须经过 Java PendingAction、用户确认、confirm-time revalidation 和外部审批。项目还验证了 PostgreSQL Checkpoint、HITL、外部 resume 以及 Memory 与业务事实的边界。
 
-## 1 minute
+## 1 分钟
 
 > 这个项目不是简单的“问答 API”。稳定链路是 Java → Python → hybrid retrieval → DeepSeek；Agent 链路默认使用 Planner-first LangGraph，Planner 只负责有限规划，Tool Executor 负责 capability、身份、预算和去重，Java 是最终业务 authority。
 >
 > 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。项目有 1402 个 Python 通过、34 个预期 skip，PostgreSQL durable flows 34/0，Java 334、MCP 24、Mock OA 17、前端 44 的接受基线。
 
-## 3 minutes
+## 3 分钟
 
 ### 背景
 
@@ -43,7 +43,7 @@ MCP facts → deterministic Proposal → WAITING_USER
 
 Memory key 是 `(user_id, conversation_id)`，只读 ACTIVE。当前 ACTIVE Memory 不会单独触发 Extractor，只有 action proposal 或白名单 Tool 成功才触发 Python trigger→extractor→`UPSERT + ACTIVE` proposal，Java 才落库。`tool_history` 是当前 execution，`execution_history` 是有界 `CONTEXT_ONLY`，Checkpoint 是执行现场，Java DB 是业务事实。POSTGRES 模式用 `PostgresSaver`；精确匹配的 crash recovery 用 `graph.invoke(None)`，两个 wait 各自用 `Command(resume)`。
 
-## Resume bullets
+## 简历要点
 
 - 设计 Java Spring Boot + Python FastAPI 双服务 AI 平台，将 Java 认证/权限/业务事务与 Python RAG/LLM/LangGraph 编排解耦，并通过 trusted runtime context 防止 LLM 伪造身份和能力。
 - 构建 FAISS + 字符级 BM25 + RRF hybrid retrieval 与 38-case 回归评估，覆盖 source hit、keyword hit、生成关键词、no-answer refusal 和 baseline regression。

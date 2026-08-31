@@ -12,7 +12,7 @@ FAISS 和 BM25 都是 TopK 排序检索器，而不是答案充分性分类器�
 
 本实验没有改变这一公开行为。Shadow block 仍继续原生成链路，当前没有减少实际 LLM 调用。
 
-## 3. Scored Retrieval 设计
+## 3. 带分数检索设计
 
 FAISS 使用归一化向量上的 `IndexFlatIP`，原始分数等价于 cosine similarity，越大越相似。实现新增内部 scored API，同时保留原 `retrieve()` 返回 chunk 列表的兼容行为。
 

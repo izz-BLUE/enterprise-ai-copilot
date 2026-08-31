@@ -60,7 +60,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * 输入路径映射（每条断言都有真实输入）：
  *   - SENSITIVE_USER_QUESTION_123      → ChatRequest.message → LangGraphAgentController.langgraphChat（真实方法）
  *   - SENSITIVE_AGENT_ANSWER_456       → PythonAgentResponse.answer（同上，mock Python 响应）
- *   - SENSITIVE_LEAVE_REASON_GHI       → AnnualLeaveActionProposal.reason → PendingAction.reason → BusinessActionService.audit
+ *   - SENSITIVE_LEAVE_REASON_GHI       → AnnualLeaveActionProposal.reason → PendingAction.reason → BusinessActionService.audit（审计）
  *   - SENSITIVE_CONFIRMATION_NONCE_789 → PendingAction.actionId（业务动作引用字段，经 auditRef 哈希）
  *   - SENSITIVE_TASK_STATE_DEF         → PythonAgentResponse.memoryProposal → Java 持久化旁路
  *

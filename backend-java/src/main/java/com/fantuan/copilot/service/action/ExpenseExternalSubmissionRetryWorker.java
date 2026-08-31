@@ -4,7 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** Retries only durable Mock OA submission; it never polls approval status. */
+/** 仅重试持久化的 Mock OA 提交；永远不轮询审批 status。 */
 @Component
 public class ExpenseExternalSubmissionRetryWorker {
     private final ExpenseExternalApprovalCoordinator coordinator;

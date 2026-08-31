@@ -240,7 +240,7 @@ class LangGraphAgentMemoryReadBodyTest {
         org.mockito.Mockito.verify(memoryService, org.mockito.Mockito.never()).find(USER_B, CLIENT_CONV);
     }
 
-    // ---------- 5. Prompt Boundary ----------
+    // ---------- 5. Prompt 边界 ----------
 
     @Test
     void maliciousMemoryStringStaysAsDataField() throws Exception {
@@ -351,7 +351,7 @@ class LangGraphAgentMemoryReadBodyTest {
         assertFalse("rt_fake".equals(actual));
     }
 
-    // ---------- helpers ----------
+    // ---------- 辅助方法 ----------
 
     private void installJwt(String userId) {
         AuthenticatedUser user = new AuthenticatedUser(

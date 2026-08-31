@@ -1,4 +1,4 @@
-"""Real PostgreSQL crash-resume acceptance for P3-3."""
+"""P3-3 真实 PostgreSQL 崩溃恢复验收。"""
 
 import hashlib
 import json
@@ -111,7 +111,7 @@ def _leave_proposal_result():
 
 
 def _crashable_planner_graph(runtime: CheckpointRuntime, calls: dict):
-    """Use a test-only wrapper to model a process-level unhandled graph failure."""
+    """使用仅供测试的包装器模拟进程级未处理图失败。"""
     graph = StateGraph(AgentState, context_schema=AgentRuntimeContext)
 
     def planner_with_fault(
@@ -259,8 +259,8 @@ def test_r1_to_r16_real_postgres_crash_restart_resume_and_fail_closed():
         assert 'eval_report_tool' not in planner_prompt
         assert 'leave_proposal_tool' not in planner_prompt
 
-        # Same unfinished checkpoint is still protected against date/question drift.
-        # The completed state above is intentionally not reused for these checks.
+# 同一个未完成 Checkpoint 仍受到日期/问题漂移保护。
+# 上方的已完成状态不会被这些检查有意复用。
     finally:
         runtime_b.shutdown()
 

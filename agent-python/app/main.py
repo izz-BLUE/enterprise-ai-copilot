@@ -105,7 +105,7 @@ _OA_REVALIDATION_BUSINESS_CODES = {
 
 
 class _ResponseMemoryWriter:
-    """收集 policy-approved command，随 Agent 响应返回给 Java。
+    """收集通过 policy 的 command，随 Agent 响应返回给 Java。
 
     该 writer 不接触 HTTP、身份或数据库。Java 收到提案后使用当前请求的
     VerifiedIdentity 与 conversationId 决定真实持久化作用域。
@@ -200,7 +200,7 @@ def _task_input_message(request: ChatRequest, execution_mode: ExecutionMode) -> 
 
 @app.middleware('http')
 async def trace_id_middleware(request: Request, call_next):
-    """Attach traceId and bound admission to expensive AI request paths."""
+    """为昂贵的 AI 请求路径附加 traceId 并执行有界准入。"""
     trace_id = request.headers.get('x-trace-id')
     if not trace_id:
         trace_id = str(uuid.uuid4())
@@ -313,7 +313,7 @@ def _memory_context_to_dict(memory_context) -> dict | None:
 
 
 def _revalidation_unavailable(trace_id: str) -> JSONResponse:
-    """Keep transport failure retryable and hide MCP details from Java callers."""
+    """保持传输失败可重试，并向 Java 调用方隐藏 MCP 细节。"""
     return JSONResponse(
         status_code=503,
         content=ExpenseRevalidationResponse(
@@ -362,7 +362,7 @@ def expense_revalidate(
     request: ExpenseRevalidationRequest,
     req: Request,
 ) -> ExpenseRevalidationResponse | JSONResponse:
-    """Transport current OA facts for Java's confirm-time decision only.
+    """仅为 Java 的确认时决策传输当前 OA 事实。
 
     This endpoint deliberately bypasses Planner, LLM, LangGraph, Memory and
     Checkpoint.  Expected invoice business errors remain facts for Java to
@@ -434,7 +434,7 @@ def chat(request: ChatRequest, req: Request) -> ChatResponse | JSONResponse:
 
 @app.post('/agent/tasks/decompose', response_model=TaskDecompositionResult)
 def decompose_tasks(request: TaskDecompositionRequest, req: Request) -> TaskDecompositionResult:
-    """Stateless, deterministic decomposition; no checkpoint or lifecycle state."""
+    """无状态、确定性的分解；不包含 checkpoint 或生命周期状态。"""
     trace_id = req.state.trace_id
     logger.info('[%s] 收到 Task decomposition 请求 (len=%d)', trace_id, len(request.message))
     return decompose_write_tasks(request.message)
@@ -482,7 +482,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     # Python 不接受任何来自请求体 / LLM arguments 的 employeeId。
     employee_id = (req.headers.get('x-employee-id') or '').strip()
 
-    # Scoped Conversation Memory / Task Continuity P0 — Phase 2 (Read Path)。
+        # Scoped Conversation Memory / Task Continuity P0——Phase 2（读取路径）。
     # Java 侧 LangGraphAgentController 已基于 (trusted user_id, conversation_id)
     # 复合 key 只在 status=ACTIVE 时填充 body.memoryContext 字段；本端点直接读取。
     # 不进入 Safety Guard 二次扫描，不修改任何 trusted 系统字段。
@@ -496,7 +496,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
     execution_history: list[dict] = []
     skip_memory_pipeline = False
     try:
-        # X-Agent-Thread-Id 只由 Java 根据可信 identity + resolved conversationId
+        # X-Agent-Thread-Id 只由 Java 根据可信 identity + 已解析的 conversationId
         # 注入；缺失或格式不合法时 fail-closed，绝不自行生成或回退无快照模式。
         runtime_thread_id = checkpoint_runtime.build_thread_id(
             (req.headers.get('x-agent-thread-id') or '').strip(),
@@ -558,9 +558,9 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                     employee_id=employee_id,
                 )
             elif recovery.mode is RecoveryMode.WAITING_USER:
-                # A normal chat must never cross an active approval interrupt.
-                # Return the persisted proposal/wait marker so Java can perform
-                # idempotent PendingAction registration.
+                # 普通 chat 永远不能跨过活跃的 approval interrupt。
+                # 返回持久化的 proposal/wait marker，以便 Java 执行幂等的
+                # PendingAction 注册。
                 snapshot = graph.get_state(
                     {'configurable': {'thread_id': runtime_thread_id}},
                 )
@@ -576,8 +576,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                     'hitl_wait': recovery.hitl_wait,
                 })
             elif recovery.mode is RecoveryMode.WAITING_EXTERNAL:
-                # An external OA wait outranks a new user question and is
-                # never crossed by ordinary crash recovery.
+                # 外部 OA wait 优先于新的用户问题，普通崩溃恢复永远不能跨过它。
                 snapshot = graph.get_state(
                     {'configurable': {'thread_id': runtime_thread_id}},
                 )
@@ -675,7 +674,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
 
 @app.post('/agent/langgraph/hitl/resume', response_model=AgentResponse)
 def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResponse | JSONResponse:
-    """Resume one persisted business-action interrupt with Java authority.
+    """使用 Java 权威恢复一个持久化的业务动作 interrupt。
 
     This endpoint has no browser contract.  The thread id and capability
     headers are accepted only from Java's internal gateway; the payload itself
@@ -739,8 +738,7 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
                 execution_mode=execution_mode,
             )
         elif decision.mode is RecoveryMode.HITL_CONTINUATION:
-            # Approval has already been checkpointed; only deterministic
-            # finalization is pending after a Python crash.
+            # Approval 已经写入 checkpoint；Python 崩溃后只剩确定性的最终化待完成。
             result = resume_langgraph_agent(
                 graph=graph,
                 runtime_thread_id=runtime_thread_id,
@@ -757,9 +755,8 @@ def langgraph_hitl_resume(payload: HitlResumePayload, req: Request) -> AgentResp
             )
             result = dict(snapshot.values)
         elif decision.mode is RecoveryMode.WAITING_EXTERNAL:
-            # P3-4 response-loss recovery: the CONFIRMED decision was already
-            # consumed and the second interrupt is durable.  Return it without
-            # re-running approval, Planner, Tool, or any resume command.
+            # P3-4 响应丢失恢复：CONFIRMED decision 已经消费，第二个 interrupt
+            # 已持久化。直接返回它，不重新运行 approval、Planner、Tool 或任何 resume command。
             snapshot = graph.get_state(
                 {'configurable': {'thread_id': runtime_thread_id}},
             )
@@ -801,7 +798,7 @@ def langgraph_external_resume(
     payload: ExternalResumePayload,
     req: Request,
 ) -> AgentResponse | JSONResponse:
-    """Resume one durable external expense approval with Java authority."""
+    """使用 Java 权威恢复一个持久化的外部报销审批。"""
     trace_id = req.state.trace_id
     execution_mode, mode_error = _trusted_execution_mode(
         req, trace_id, req.headers.get('x-agent-task-id'))
@@ -923,7 +920,7 @@ def _checkpoint_failure_response(trace_id: str, status_code: int) -> JSONRespons
 
 
 def _recovery_conflict_response(trace_id: str) -> JSONResponse:
-    """Hide internal recovery reasons while exposing the stable 409 contract."""
+    """隐藏内部恢复原因，同时暴露稳定的 409 契约。"""
     response = AgentResponse(
         answer='当前会话存在未完成的 Agent 执行，请重试原请求或重新开始会话。',
         route='error',

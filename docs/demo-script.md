@@ -1,4 +1,4 @@
-# Demo Script
+# Demo 脚本
 
 这是面向快速展示的短脚本；完整的本地启动、外部审批和故障排查见 [demo-guide.md](demo-guide.md)，面试口径见 [interview/demo-script.md](interview/demo-script.md)。
 

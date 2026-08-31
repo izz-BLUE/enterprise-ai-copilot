@@ -42,12 +42,12 @@ def _get_model():
 def rerank(query: str, candidates: list[dict], top_k: int = 3) -> list[dict]:
     """对候选 chunk 进行 Cross Encoder 精排。
 
-    Args:
+    参数：
         query: 用户问题
         candidates: Hybrid Retrieval 返回的候选 chunk 列表
         top_k: 最终返回数量
 
-    Returns:
+    返回：
         按 rerank_score 降序排列的 top_k 个 chunk 副本
     """
     model = _get_model()

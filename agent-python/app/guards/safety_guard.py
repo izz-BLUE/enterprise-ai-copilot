@@ -154,10 +154,10 @@ def _check_rule(rule, scan_text: str, compact_text: str):
 def check_user_query_safety(query: str | None) -> dict:
     """检查用户问题是否安全。
 
-    Args:
+    参数：
         query: 用户输入的问题文本，可能为 None
 
-    Returns:
+    返回：
         dict:
             safe     — True 表示安全，可以继续处理
             category — 风险类别，safe 时为 "normal"

@@ -1,4 +1,4 @@
-# Deployment
+# 部署
 
 ## 验证环境
 
@@ -139,7 +139,7 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 **HTTPS (443)：**
 - 独立证书路径
 - 静态文件：`/usr/share/nginx/html/copilot/current`
-- SPA fallback：`try_files $uri $uri/ /index.html`
+- SPA 回退：`try_files $uri $uri/ /index.html`
 - `/assets/` 缓存 7 天
 - `/api/` 反向代理到 `http://ai-copilot-java:8080`
 - 安全响应头（nosniff, DENY, strict-origin, permissions-policy）
@@ -237,7 +237,7 @@ graph LR
 | 服务 | 端口 | 绑定 |
 |------|------|------|
 | Python | 8000 | 仅 Docker 内网（expose） |
-| Java | 8080 | 127.0.0.1（localhost only） |
+| Java | 8080 | 127.0.0.1（仅 localhost） |
 | PostgreSQL | 5432 | 仅 Docker 内网（expose，不映射宿主机） |
 | Phoenix UI / OTLP HTTP | 6006 | 仅 `127.0.0.1`，不得直接暴露公网 |
 | Phoenix OTLP gRPC | 4317 | 仅 Docker 内网（expose） |

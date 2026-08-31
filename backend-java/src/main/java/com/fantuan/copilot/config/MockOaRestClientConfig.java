@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
-/** Isolated timeout policy for the external Mock OA boundary. */
+/** 外部 Mock OA 边界的隔离超时策略。 */
 @Configuration
 public class MockOaRestClientConfig {
     @Bean("mockOaRestTemplate")

@@ -1,4 +1,4 @@
-"""Real Eval Runner
+"""Real Eval 运行器
 
 执行流程：
   run_real_eval(cases, runs_per_case)
@@ -465,7 +465,7 @@ def _evaluate_run(
             )
             failure_categories.append(_FAIL_REASON_BUCKET["forbidden_tool_executed"])
 
-        # 4. accepted_tool_sequences
+        # 4. accepted_tool_sequences（允许的 Tool 序列）
         if case.accepted_tool_sequences:
             if not _matched_sequence(executed, case.accepted_tool_sequences):
                 failure_reasons.append(
@@ -485,7 +485,7 @@ def _evaluate_run(
             )
             failure_categories.append(_FAIL_REASON_BUCKET["budget_violation"])
 
-        # 6. invalid_decision
+        # 6. invalid_decision（无效决策）
         if stop_reason == "invalid_decision":
             failure_reasons.append("invalid_decision: planner 输出不可解析")
             failure_categories.append(_FAIL_REASON_BUCKET["invalid_decision"])
@@ -651,7 +651,7 @@ def run_case_repeatedly(
     report.pass_count = sum(1 for r in report.runs if r.passed)
     report.passed = bool(report.runs) and report.pass_count == len(report.runs)
     report.stable = report.passed  # 同义：一个 Case 所有 Run 都通过才算 stable
-    # required_tools satisfied / sequence matched：按"任一 Run 通过"判定，
+    # required_tools 已满足 / sequence matched：按“任一 Run 通过”判定，
     # 反映"Case 本身是否曾经被正确解决过"
     report.required_tools_satisfied = any(
         _completed_required_tools(
@@ -867,7 +867,7 @@ def run_real_eval(
 
 
 def report_to_jsonable(report: RealEvalSuiteReport) -> dict:
-    """RealEvalSuiteReport → JSON-serializable dict。"""
+    """将 RealEvalSuiteReport 转为 JSON 可序列化字典。"""
     out = asdict(report)
     return out
 
