@@ -127,10 +127,11 @@ class AdminLogSentinelLeakTest {
                         user, null, List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))));
 
         AdminAccessService adminAccessService = mock(AdminAccessService.class);
-        when(adminAccessService.isAdmin(any())).thenReturn(false);
+        when(adminAccessService.isAdminIdentity(any())).thenReturn(false);
 
         BusinessActionService businessActionService = mock(BusinessActionService.class);
-        when(businessActionService.isAllowed(any())).thenReturn(false);
+        when(businessActionService.isAllowed(any(), any(com.fantuan.copilot.identity.VerifiedIdentity.class)))
+                .thenReturn(false);
         when(businessActionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 23));
 
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);

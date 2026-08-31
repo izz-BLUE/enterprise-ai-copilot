@@ -14,14 +14,10 @@ export class BusinessActionApiError extends Error {
 async function postDecision({
   path,
   confirmationNonce,
-  adminToken,
   idempotencyKey,
   accessToken,
 }) {
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json' }
-  if (adminToken?.trim()) {
-    headers['X-Admin-Token'] = adminToken.trim()
-  }
   if (idempotencyKey) {
     headers['Idempotency-Key'] = idempotencyKey
   }
@@ -72,14 +68,12 @@ export function confirmBusinessAction({
   actionId,
   confirmationNonce,
   idempotencyKey,
-  adminToken,
   accessToken,
 }) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/confirm`,
     confirmationNonce,
     idempotencyKey,
-    adminToken,
     accessToken,
   })
 }
@@ -87,13 +81,11 @@ export function confirmBusinessAction({
 export function cancelBusinessAction({
   actionId,
   confirmationNonce,
-  adminToken,
   accessToken,
 }) {
   return postDecision({
     path: `/api/agent/actions/${encodeURIComponent(actionId)}/cancel`,
     confirmationNonce,
-    adminToken,
     accessToken,
   })
 }

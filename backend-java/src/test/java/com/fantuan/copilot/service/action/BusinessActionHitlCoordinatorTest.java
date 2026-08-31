@@ -89,8 +89,8 @@ class BusinessActionHitlCoordinatorTest {
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
         when(threadGuard.tryAcquire(RUNTIME_THREAD_ID)).thenReturn(true);
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
-        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(allowBusinessActions);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(allowBusinessActions);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
     }
 
@@ -112,8 +112,8 @@ class BusinessActionHitlCoordinatorTest {
     void expiredChatActionUsesExistingExpiredResumeWithoutTakingGuardAgain() {
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
-        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(false);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(false);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
         PendingAction expired = terminalAction(ActionStatus.EXPIRED);
         when(actionService.reconcileExpiredForChat(
@@ -164,7 +164,7 @@ class BusinessActionHitlCoordinatorTest {
         order.verify(actionService).authorizeForAction(eq(ADMIN_TOKEN), any());
         order.verify(actionService).confirm(eq(ACTION_ID), eq("nonce"), eq("idem"),
                 eq(ADMIN_TOKEN), eq("confirm-trace"), any());
-        order.verify(actionService).isAllowed(ADMIN_TOKEN);
+        order.verify(actionService).isAllowed(ADMIN_TOKEN, IDENTITY);
         order.verify(actionService).businessDate();
         order.verify(pythonAgentGateway).post(
                 eq("/agent/langgraph/hitl/resume"), any(), any(HttpHeaders.class),
@@ -233,8 +233,8 @@ class BusinessActionHitlCoordinatorTest {
                 realGuard, adminAccessService, externalApprovalCoordinator);
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
-        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
         PendingAction expense = org.mockito.Mockito.mock(PendingAction.class);
         when(expense.actionId()).thenReturn(ACTION_ID);
@@ -334,8 +334,8 @@ class BusinessActionHitlCoordinatorTest {
             String errorCode) {
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(true);
-        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(true);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();
@@ -420,8 +420,8 @@ class BusinessActionHitlCoordinatorTest {
     void expiredTerminalViewAndPayloadUseCanonicalTerminalSemantics() {
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
-        when(adminAccessService.isAdmin(ADMIN_TOKEN)).thenReturn(false);
-        when(actionService.isAllowed(ADMIN_TOKEN)).thenReturn(false);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(false);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(false);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
         BusinessActionProposal proposal = registrationProposal();
         HitlWaitMarker wait = registrationWait();

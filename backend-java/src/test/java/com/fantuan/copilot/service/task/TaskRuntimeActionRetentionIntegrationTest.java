@@ -36,6 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(properties = {
         "demo.auth.enabled=true",
         "demo.auth.default-password=test-password",
+        "demo.auth.public-password=public-test-password",
+        "demo.auth.interview-password=interview-test-password",
+        "demo.auth.admin-password=admin-test-password",
         "business.actions.enabled=true",
         "business.actions.require-admin=false",
         "business.actions.max-pending=1",

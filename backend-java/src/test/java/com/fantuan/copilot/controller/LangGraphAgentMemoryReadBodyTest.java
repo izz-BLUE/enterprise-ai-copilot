@@ -17,6 +17,7 @@ import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.identity.IdentityContext;
+import com.fantuan.copilot.identity.VerifiedIdentity;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,8 +84,8 @@ class LangGraphAgentMemoryReadBodyTest {
                 new IdentityContext(), memoryService,
                 new AdminLogBuffer());
 
-        when(admin.isAdmin(any())).thenReturn(false);
-        when(actionService.isAllowed(any())).thenReturn(false);
+        when(admin.isAdminIdentity(any())).thenReturn(false);
+        when(actionService.isAllowed(any(), any(VerifiedIdentity.class))).thenReturn(false);
         when(actionService.businessDate()).thenReturn(java.time.LocalDate.of(2026, 8, 20));
 
         PythonAgentResponse python = new PythonAgentResponse(

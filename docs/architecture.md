@@ -40,7 +40,7 @@ flowchart TB
 - `X-Agent-Thread-Id`：Java 根据可信 user/conversation 生成 `rt_<sha256>`，Python 再区分 graph variant；
 - `X-Agent-Execution-Mode`：仅由 Java 注入的 `LEGACY_SINGLE` 或 `TASK_RUNTIME`；Python 放入 Runtime Context，LLM 与 AgentState 不得选择；
 - `X-Agent-Task-Id`：TASK_RUNTIME 下由 Java 生成并绑定当前 TaskExecution，用于定位 task checkpoint；
-- `allow_eval` / `allow_business_actions`：Java capability gate 结果，Python 只消费，不接受模型扩大。
+- `allow_eval` / `allow_business_actions`：Java capability gate 结果，Python 只消费，不接受模型扩大；公开 `demo` 身份即使全局业务动作开关开启也固定为 `allow_business_actions=false`。
 
 这些字段不进入保存的 AgentState，也不进入 LLM 的 `arguments`。PlannerDecision 使用严格 Pydantic schema；Tool Executor 在实际执行前再次校验结构、员工身份、能力、Tool 预算、成功签名和 retry policy。
 
@@ -56,7 +56,7 @@ START → safety → planner ⇄ tool_executor → finalize → END
 
 Safety Guard Lite 是深度防御过滤器，不是 authorization 或业务 validation。安全拒答不进入 Planner。Planner 每次输出一个严格 decision，当前最多 6 次 decision；Tool Executor 当前最多真正执行 5 次 Tool，成功、失败和超时均消耗执行预算。
 
-可见 Tool 由 Runtime Context 和服务配置动态生成：`rag_answer_tool` 始终可见；Java read 配置可用时加入 leave/expense status；Enterprise OA MCP 可用时加入 travel/invoice；`allow_eval` 加入 eval；`allow_business_actions` 且有 employee 时加入 leave/expense proposal。注册表和执行器仍是最后防线。
+可见 Tool 由 Runtime Context 和服务配置动态生成：`rag_answer_tool` 始终可见；Java read 配置可用时加入 leave/expense status；Enterprise OA MCP 可用时加入 travel/invoice；`allow_eval` 加入 eval；`allow_business_actions` 且有 employee 时加入 leave/expense proposal，公开 `demo` 身份不满足该 capability。注册表和执行器仍是最后防线。
 
 `leave_proposal_tool` 和 `expense_proposal_tool` 只生成 Proposal 或 Clarification。它们不调用业务写 API、不生成 nonce、不改变 Java 状态。报销金额、住宿上限和 Proposal facts 由程序确定性计算，LLM 不能计算或伪造。
 
@@ -256,7 +256,7 @@ Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返�
 | `MEMORY_WRITE_MODE` | Python 默认 `DISABLED` |
 | `MOCK_OA_ENABLED` | Java 默认 `false` |
 | reconciliation/resume retry | 始终低频调度；由 `MOCK_OA_ENABLED` 控制 provider 可用性，间隔/批量参数限流 |
-| `ADMIN_TOKEN` | 空值为本地 Demo eval 口径；生产 Compose 强制提供 |
+| `ADMIN_TOKEN` | server-only 业务动作 hardening Token；浏览器不接触，生产 Compose 强制提供 |
 
 完整配置和启动步骤见 [deployment.md](deployment.md)；受控动作和外部审批的本地演示见 [demo-guide.md](demo-guide.md)。
 

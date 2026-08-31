@@ -27,6 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(properties = {
         "demo.auth.enabled=true",
         "demo.auth.default-password=test-password",
+        "demo.auth.public-password=public-test-password",
+        "demo.auth.interview-password=interview-test-password",
+        "demo.auth.admin-password=admin-test-password",
         "business.actions.enabled=true",
         "business.actions.require-admin=false"
 })
@@ -53,6 +56,24 @@ class IdentityIsolationIntegrationTest extends PostgresIntegrationTestBase {
         assertOwner(create(user("E10001"), nextWeekday(2)), "E10001", "张三");
         assertOwner(create(user("E10002"), nextWeekday(3)), "E10002", "李四");
         assertOwner(create(user("E10003"), nextWeekday(4)), "E10003", "王五");
+    }
+
+    @Test
+    void publicDemoIsReadOnlyEvenWhenBusinessActionsAreEnabled() {
+        VerifiedIdentity publicDemo = new VerifiedIdentity(
+                "U10000", "demo", "E10000", "公开演示账号",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+
+        assertFalse(service.isAllowed(null, publicDemo));
+        assertTrue(service.isAllowed(null, user("E10001")));
+
+        ActionException denied = assertThrows(ActionException.class,
+                () -> create(publicDemo, nextWeekday(2)));
+        assertEquals("BUSINESS_ACTIONS_NOT_ALLOWED", denied.errorCode());
+        assertEquals(0, actions.size());
+        assertEquals(0, requests.size());
+        assertEquals(new BigDecimal("5.0"),
+                accounts.findBalance(publicDemo.employeeId()).orElseThrow());
     }
 
     @Test

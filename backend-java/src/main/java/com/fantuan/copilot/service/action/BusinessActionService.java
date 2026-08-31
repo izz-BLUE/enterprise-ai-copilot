@@ -10,6 +10,7 @@ import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
+import com.fantuan.copilot.auth.DemoAuthPolicy;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.model.task.TaskExecutionStatus;
@@ -100,6 +101,15 @@ public class BusinessActionService {
     }
 
     /**
+     * Trusted capability boundary for an authenticated Agent request.
+     * The public demo is intentionally read-only even when the global action
+     * switch and Admin Token gate are both enabled.
+     */
+    public boolean isAllowed(String presentedToken, VerifiedIdentity identity) {
+        return isAllowed(presentedToken) && DemoAuthPolicy.mayUseBusinessActions(identity);
+    }
+
+    /**
      * Admission guard shared by legacy single actions and Task Runtime.
      * The caller supplies only the trusted Java owner and resolved conversation.
      */
@@ -150,7 +160,7 @@ public class BusinessActionService {
 
     /** Preserve the service's authorization ordering before coordinator routing. */
     void authorizeForAction(String presentedToken, VerifiedIdentity identity) {
-        requireEnabledAndAdmin(presentedToken);
+        requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
     }
 
@@ -233,7 +243,7 @@ public class BusinessActionService {
         // 未知非空类型属于协议层错误（INVALID_REQUEST）。
         BusinessActionType actionType = proposal.actionType();
         if (actionType == null) {
-            requireEnabledAndAdmin(presentedToken);
+            requireEnabledAndAdmin(presentedToken, identity);
             requireIdentity(identity);
             throw new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "BUSINESS_RULE_VIOLATION", "action_type 缺失，请检查申请参数。", null, null);
@@ -258,7 +268,7 @@ public class BusinessActionService {
                     // approval checkpoint after capability revocation.
                     return handler.buildSummary(existing, null);
                 }
-                requireEnabledAndAdmin(presentedToken);
+                requireEnabledAndAdmin(presentedToken, identity);
                 if (existing.status() == ActionStatus.PENDING_CONFIRMATION) {
                     ActionNonceService.Nonce nonce = nonceService.create();
                     actions.updateConfirmationNonceDigest(
@@ -271,7 +281,7 @@ public class BusinessActionService {
                 }
             }
         }
-        requireEnabledAndAdmin(presentedToken);
+        requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
         if (hitlWaitId == null) {
             actions.lockControl();
@@ -330,7 +340,7 @@ public class BusinessActionService {
     public ActionExecutionResponse confirm(String actionId, String confirmationNonce,
                                            String idempotencyKey, String presentedToken,
                                            String traceId, VerifiedIdentity identity) {
-        requireEnabledAndAdmin(presentedToken);
+        requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
         verifyOwner(action, identity);
@@ -402,7 +412,7 @@ public class BusinessActionService {
     public void failStaleConfirmation(String actionId, String confirmationNonce,
                                       String presentedToken, String traceId,
                                       VerifiedIdentity identity, String failureCode) {
-        requireEnabledAndAdmin(presentedToken);
+        requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
         if (!isStaleFailureCode(failureCode)) {
             throw new IllegalArgumentException("Unsupported stale failure code");
@@ -428,7 +438,7 @@ public class BusinessActionService {
     public ActionExecutionResponse cancel(String actionId, String confirmationNonce,
                                           String presentedToken, String traceId,
                                           VerifiedIdentity identity) {
-        requireEnabledAndAdmin(presentedToken);
+        requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
         PendingAction action = findForUpdate(actionId);
         verifyOwner(action, identity);
@@ -517,7 +527,7 @@ public class BusinessActionService {
                 && taskRuntimeService.findByActionId(action.actionId()).isPresent();
     }
 
-    private void requireEnabledAndAdmin(String presentedToken) {
+    private void requireEnabledAndAdmin(String presentedToken, VerifiedIdentity identity) {
         if (!properties.isEnabled()) {
             throw new ActionException(HttpStatus.SERVICE_UNAVAILABLE,
                     "BUSINESS_ACTIONS_DISABLED", "业务动作功能当前未启用。", null, null);
@@ -525,6 +535,10 @@ public class BusinessActionService {
         if (properties.isRequireAdmin() && !adminAccessService.isAdmin(presentedToken)) {
             throw new ActionException(HttpStatus.FORBIDDEN,
                     "ADMIN_REQUIRED", "需要管理员权限。", null, null);
+        }
+        if (DemoAuthPolicy.isPublicDemo(identity)) {
+            throw new ActionException(HttpStatus.FORBIDDEN,
+                    "BUSINESS_ACTIONS_NOT_ALLOWED", "当前 Demo 账号仅支持只读能力。", null, null);
         }
     }
 

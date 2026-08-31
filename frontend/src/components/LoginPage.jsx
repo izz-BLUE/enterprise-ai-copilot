@@ -4,8 +4,10 @@ import './LoginPage.css'
 
 export default function LoginPage({ onLogin }) {
   const demoAuthEnabled = import.meta.env.DEV || import.meta.env.VITE_DEMO_AUTH_ENABLED === 'true'
-  const [username, setUsername] = useState(demoAuthEnabled ? 'zhangsan' : '')
-  const [password, setPassword] = useState('')
+  const publicDemoUsername = import.meta.env.VITE_PUBLIC_DEMO_USERNAME || 'demo'
+  const publicDemoPassword = import.meta.env.VITE_PUBLIC_DEMO_PASSWORD || 'demo-public-2026'
+  const [username, setUsername] = useState(demoAuthEnabled ? publicDemoUsername : '')
+  const [password, setPassword] = useState(demoAuthEnabled ? publicDemoPassword : '')
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
 
@@ -54,7 +56,7 @@ export default function LoginPage({ onLogin }) {
           />
 
           {demoAuthEnabled && (
-            <p className="login-demo-hint">演示账号：张三（普通员工）</p>
+            <p className="login-demo-hint">公开演示账号：demo（仅支持只读能力）</p>
           )}
           {error && <p className="login-error" role="alert">{error}</p>}
 

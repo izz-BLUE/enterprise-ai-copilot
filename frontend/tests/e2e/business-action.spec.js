@@ -131,11 +131,6 @@ const nextExpensePendingAction = (overrides = {}) => ({
   ...overrides,
 })
 
-async function fillAdminToken(page, token = 'test-only') {
-  await page.getByRole('button', { name: /管理员演示设置/ }).click()
-  await page.getByPlaceholder('输入 Admin Token...').fill(token)
-}
-
 test('展示完整年假草稿且敏感确认数据不进入 DOM', async ({ page }) => {
   await openDraft(page)
 
@@ -151,6 +146,8 @@ test('展示完整年假草稿且敏感确认数据不进入 DOM', async ({ page
   await expect(card).toContainText('2 天')
   await expect(card.getByRole('button', { name: '确认提交' })).toBeVisible()
   await expect(card.getByRole('button', { name: '取消草稿' })).toBeVisible()
+  await expect(page.getByPlaceholder('输入 Admin Token...')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText('管理员演示设置')
   await expect(page.locator('body')).not.toContainText(TEST_NONCE)
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
@@ -175,7 +172,7 @@ test('EXPENSE_CLAIM PendingAction 显示报销摘要和确认操作，不渲染�
   await expect(page.locator('body')).not.toContainText(TEST_ACTION_ID)
 })
 
-test('Agent请求使用HttpOnly Cookie会话且不发送Demo身份Header', async ({ page }) => {
+test('浏览器不提供 Admin Token 且 Agent 请求不发送该 Header', async ({ page }) => {
   let captured
   await page.route('**/api/agent/langgraph/chat', async route => {
     captured = {
@@ -193,12 +190,13 @@ test('Agent请求使用HttpOnly Cookie会话且不发送Demo身份Header', async
 
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
+  expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.body).toEqual({ message: '请帮我申请年假' })
   expect(captured.body.userId).toBeUndefined()
   expect(captured.body.employeeId).toBeUndefined()
 })
 
-test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page }) => {
+test('Confirm 只发送 nonce 和 UUID 幂等 Key', async ({ page }) => {
   let captured
   await page.route('**/api/agent/actions/**/confirm', async route => {
     captured = {
@@ -214,13 +212,12 @@ test('Confirm 只发送 nonce、Admin Token 和 UUID 幂等 Key', async ({ page 
   })
 
   await openDraft(page)
-  await fillAdminToken(page)
   await page.getByRole('button', { name: '确认提交' }).click()
 
   await expect(page.getByText('模拟申请已提交')).toBeVisible()
   await expect(page.getByText('申请编号：LR-202607-0001')).toBeVisible()
   expect(new URL(captured.url).pathname).toBe(`/api/agent/actions/${TEST_ACTION_ID}/confirm`)
-  expect(captured.headers['x-admin-token']).toBe('test-only')
+  expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['idempotency-key']).toMatch(
@@ -250,7 +247,6 @@ test('Confirm continuation 自动追加 Expense 确认卡并保留下一步 nonc
   })
 
   await openDraft(page)
-  await fillAdminToken(page)
   await page.getByRole('region', { name: '年假申请确认卡' })
     .getByRole('button', { name: '确认提交' }).click()
 
@@ -475,12 +471,11 @@ test('Cancel 不发送 Idempotency-Key 且成功后隐藏操作按钮', async ({
   })
 
   await openDraft(page)
-  await fillAdminToken(page)
   await page.getByRole('button', { name: '取消草稿' }).click()
 
   await expect(page.getByText('申请草稿已取消')).toBeVisible()
   await expect(page.getByRole('button', { name: '确认提交' })).toHaveCount(0)
-  expect(captured.headers['x-admin-token']).toBe('test-only')
+  expect(captured.headers['x-admin-token']).toBeUndefined()
   expect(captured.headers.authorization).toBeUndefined()
   expect(captured.headers['x-requested-with']).toBe('XMLHttpRequest')
   expect(captured.headers['idempotency-key']).toBeUndefined()
@@ -589,7 +584,7 @@ test('本地已过期草稿不能发送 Confirm 或 Cancel', async ({ page }) =>
   expect(decisionRequests).toBe(0)
 })
 
-test('ADMIN_REQUIRED 显示安全错误并允许补 Token 后重试', async ({ page }) => {
+test('ADMIN_REQUIRED 显示安全错误且重试仍不发送 Admin Token', async ({ page }) => {
   let requestCount = 0
   await page.route('**/api/agent/actions/**/confirm', async route => {
     requestCount += 1
@@ -606,7 +601,7 @@ test('ADMIN_REQUIRED 显示安全错误并允许补 Token 后重试', async ({ p
       })
       return
     }
-    expect(route.request().headers()['x-admin-token']).toBe('test-only')
+    expect(route.request().headers()['x-admin-token']).toBeUndefined()
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -620,7 +615,6 @@ test('ADMIN_REQUIRED 显示安全错误并允许补 Token 后重试', async ({ p
   await expect(page.locator('body')).not.toContainText(TEST_NONCE)
   await expect(page.locator('body')).not.toContainText(/Exception|stack trace/i)
 
-  await fillAdminToken(page)
   await page.getByRole('button', { name: '重试确认' }).click()
   await expect(page.getByText('模拟申请已提交')).toBeVisible()
 })

@@ -149,7 +149,7 @@ if ($result.Success) {
         if ($json.route -eq "eval") {
             Write-Pass "Eval Query returned route=eval"
         } elseif ($json.route -eq "refuse" -and $json.category -eq "access_control") {
-            Write-Pass "Eval Query returned route=refuse (Admin Token mode)"
+            Write-Pass "Eval Query returned route=refuse (non-ADMIN identity)"
         } else {
             Write-Fail "Eval Query returned unexpected: route=$($json.route)"
         }

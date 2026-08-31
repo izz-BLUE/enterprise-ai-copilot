@@ -14,7 +14,7 @@ import java.time.ZoneId;
 @ConfigurationProperties(prefix = "business.actions")
 public class BusinessActionProperties {
     private boolean enabled = false;
-    private boolean requireAdmin = true;
+    private boolean requireAdmin = false;
     @Min(1)
     private long ttlSeconds = 600;
     @Min(1)

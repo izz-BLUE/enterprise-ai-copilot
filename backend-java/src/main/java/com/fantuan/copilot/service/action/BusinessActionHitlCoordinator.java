@@ -576,7 +576,7 @@ public class BusinessActionHitlCoordinator {
                                                     String traceId) {
         String runtimeThreadId = threadIdService.generate(identity.userId(),
                 task.conversationId(), task.taskId());
-        HttpHeaders headers = taskRuntimeHeaders(identity.employeeId(), task.conversationId(),
+        HttpHeaders headers = taskRuntimeHeaders(identity, task.conversationId(),
                 runtimeThreadId, task.taskId(), presentedToken);
         return pythonAgentGateway.post("/agent/langgraph/chat",
                 new InternalAgentChatRequest(task.taskText(), null, task.taskId(),
@@ -594,7 +594,7 @@ public class BusinessActionHitlCoordinator {
                 taskRuntimeService.findByActionId(action.actionId())
                         .map(TaskExecution::taskId).orElseThrow(
                                 () -> new TaskRuntimeException("Task Runtime 关联任务不存在。")));
-        HttpHeaders headers = taskRuntimeHeaders(identity.employeeId(), action.conversationId(),
+        HttpHeaders headers = taskRuntimeHeaders(identity, action.conversationId(),
                 runtimeThreadId,
                 taskRuntimeService.findByActionId(action.actionId())
                         .map(TaskExecution::taskId).orElseThrow(), presentedToken);
@@ -602,7 +602,7 @@ public class BusinessActionHitlCoordinator {
                 PythonAgentResponse.class, traceId);
     }
 
-    private HttpHeaders taskRuntimeHeaders(String employeeId,
+    private HttpHeaders taskRuntimeHeaders(VerifiedIdentity identity,
                                            String conversationId,
                                            String runtimeThreadId,
                                            String taskId,
@@ -611,11 +611,11 @@ public class BusinessActionHitlCoordinator {
         headers.set("X-Agent-Thread-Id", runtimeThreadId);
         headers.set("X-Agent-Execution-Mode", "TASK_RUNTIME");
         headers.set("X-Agent-Task-Id", taskId);
-        headers.set("X-Employee-Id", employeeId);
+        headers.set("X-Employee-Id", identity.employeeId());
         headers.set("X-Conversation-Id", conversationId);
-        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdmin(presentedToken)));
+        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdminIdentity(identity)));
         headers.set("X-Allow-Business-Actions",
-                Boolean.toString(actionService.isAllowed(presentedToken)));
+                Boolean.toString(actionService.isAllowed(presentedToken, identity)));
         headers.set("X-Business-Date", actionService.businessDate().toString());
         return headers;
     }
@@ -648,7 +648,7 @@ public class BusinessActionHitlCoordinator {
                 response.requestId(), canonicalMessage(action, ActionStatus.SUCCEEDED, response.message()));
         boolean guardReleased = false;
         try {
-            PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity.employeeId(),
+            PythonAgentResponse pythonResponse = postResume(action.ownerUserId(), identity,
                     action.conversationId(), presentedToken, traceId, payload);
             // The HITL resume has returned and the graph is now durably waiting
             // for OA.  Hand the same runtime thread boundary to the external
@@ -717,10 +717,10 @@ public class BusinessActionHitlCoordinator {
                 null, wait.actionType(), ActionStatus.FAILED, null, REJECTED_MESSAGE);
         try {
             if (taskId == null) {
-                postResume(identity.userId(), identity.employeeId(), conversationId,
+                postResume(identity.userId(), identity, conversationId,
                         presentedToken, traceId, payload);
             } else {
-                postTaskRuntimeWaitResume(identity.userId(), identity.employeeId(), conversationId,
+                postTaskRuntimeWaitResume(identity.userId(), identity, conversationId,
                         taskId, presentedToken, traceId, payload);
             }
         } catch (RuntimeException exception) {
@@ -731,14 +731,14 @@ public class BusinessActionHitlCoordinator {
     }
 
     private PythonAgentResponse postTaskRuntimeWaitResume(String ownerUserId,
-                                                          String employeeId,
+                                                          VerifiedIdentity identity,
                                                           String conversationId,
                                                           String taskId,
                                                           String presentedToken,
                                                           String traceId,
                                                           HitlResumePayload payload) {
         String runtimeThreadId = threadIdService.generate(ownerUserId, conversationId, taskId);
-        HttpHeaders headers = taskRuntimeHeaders(employeeId, conversationId,
+        HttpHeaders headers = taskRuntimeHeaders(identity, conversationId,
                 runtimeThreadId, taskId, presentedToken);
         return pythonAgentGateway.post("/agent/langgraph/hitl/resume", payload, headers,
                 PythonAgentResponse.class, traceId);
@@ -767,7 +767,7 @@ public class BusinessActionHitlCoordinator {
                                String presentedToken, String traceId,
                                HitlResumePayload payload) {
         try {
-            PythonAgentResponse response = postResume(action.ownerUserId(), identity.employeeId(),
+            PythonAgentResponse response = postResume(action.ownerUserId(), identity,
                     action.conversationId(), presentedToken, traceId, payload);
             return isSuccessful(response) && response.externalWait() == null;
         } catch (RuntimeException exception) {
@@ -778,7 +778,8 @@ public class BusinessActionHitlCoordinator {
         }
     }
 
-    private PythonAgentResponse postResume(String ownerUserId, String employeeId, String conversationId,
+    private PythonAgentResponse postResume(String ownerUserId, VerifiedIdentity identity,
+                                           String conversationId,
                                            String presentedToken, String traceId,
                                            HitlResumePayload payload) {
         TaskExecution task = taskRuntimeService == null || payload.actionId() == null ? null
@@ -788,10 +789,10 @@ public class BusinessActionHitlCoordinator {
                 : threadIdService.generate(ownerUserId, conversationId, task.taskId());
         HttpHeaders headers = new HttpHeaders();
         headers.set("X-Agent-Thread-Id", runtimeThreadId);
-        headers.set("X-Employee-Id", employeeId);
-        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdmin(presentedToken)));
+        headers.set("X-Employee-Id", identity.employeeId());
+        headers.set("X-Allow-Eval", Boolean.toString(adminAccessService.isAdminIdentity(identity)));
         headers.set("X-Allow-Business-Actions",
-                Boolean.toString(actionService.isAllowed(presentedToken)));
+                Boolean.toString(actionService.isAllowed(presentedToken, identity)));
         LocalDate businessDate = actionService.businessDate();
         headers.set("X-Business-Date", businessDate.toString());
         if (task != null) {

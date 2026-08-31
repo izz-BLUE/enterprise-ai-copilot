@@ -45,7 +45,16 @@ ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 MEMORY_WRITE_MODE=DISABLED
 ```
 
-Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`。外部审批 retry/reconciliation worker 会按间隔和批量参数低频运行，provider 关闭时 gateway fail-closed。
+Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true` 和 `BUSINESS_ACTIONS_ENABLED=true`。固定账号的密码边界如下：
+
+```text
+DEMO_PUBLIC_PASSWORD=demo-public-2026       # 刻意公开；与前端 VITE_PUBLIC_DEMO_PASSWORD 一致
+DEMO_INTERVIEW_PASSWORD=<server-side-only>  # zhangsan；不要写入前端或公开文档
+DEMO_ADMIN_PASSWORD=<server-side-only>      # admin；不要写入前端或公开文档
+DEMO_AUTH_DEFAULT_PASSWORD=<server-side-only> # 仅 lisi/wangwu legacy seed
+```
+
+前端可复制 `frontend/.env.example`；其中 `VITE_PUBLIC_DEMO_USERNAME` / `VITE_PUBLIC_DEMO_PASSWORD` 会进入浏览器构建产物，只能填写公开 demo 凭据。`demo`（U10000/E10000）保留普通 Agent/RAG 与安全只读能力，即使 `BUSINESS_ACTIONS_ENABLED=true` 也不会获得业务写能力；`zhangsan`（U10001/E10001）继续按 Java trusted identity policy 演示 Leave/Expense，浏览器不需要 Admin Token。若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`。外部审批 retry/reconciliation worker 会按间隔和批量参数低频运行，provider 关闭时 gateway fail-closed。
 
 ## 3. Start services
 
@@ -190,7 +199,7 @@ curl -X POST http://localhost:8080/api/chat `
 
 ### Eval gate
 
-Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只消费 Java 的 `allow_eval` 结果。空 Admin Token 仅代表本地 Demo eval 口径，不等于真实管理员认证。
+评估与管理员日志能力由 Java 已验证 JWT 的 `role=ADMIN` 授权；EMPLOYEE 不能访问。浏览器不提供或发送 Admin Token。`ADMIN_TOKEN` 如配置，仅作为 `BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 时内部业务动作的 server-side hardening，Python 只消费 Java 的 `allow_eval` 结果。
 
 ## 7. Troubleshooting
 

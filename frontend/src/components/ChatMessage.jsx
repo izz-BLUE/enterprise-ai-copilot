@@ -117,7 +117,7 @@ export default function ChatMessage({
 
         {status.type === 'access_denied' && (
           <div className="access-denied-banner">
-            Evaluation 仅管理员可访问。请在左侧「管理员演示设置」中填入正确的 Admin Token。
+            Evaluation 仅管理员可访问，请使用 ADMIN 身份登录。
           </div>
         )}
 

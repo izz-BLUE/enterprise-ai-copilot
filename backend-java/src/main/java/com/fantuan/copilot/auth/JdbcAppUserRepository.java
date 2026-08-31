@@ -48,6 +48,18 @@ public class JdbcAppUserRepository implements AppUserRepository {
                 """, parameters);
     }
 
+    @Override
+    public void updatePasswordHash(String userId, String passwordHash) {
+        int updated = jdbc.update(
+                "UPDATE app_user SET password_hash = :passwordHash WHERE user_id = :userId",
+                new MapSqlParameterSource()
+                        .addValue("userId", userId)
+                        .addValue("passwordHash", passwordHash));
+        if (updated != 1) {
+            throw new IllegalStateException("Demo auth password migration did not update one user");
+        }
+    }
+
     private Optional<AppUser> find(String sql, String value) {
         try {
             return Optional.ofNullable(jdbc.queryForObject(sql, Map.of("value", value),

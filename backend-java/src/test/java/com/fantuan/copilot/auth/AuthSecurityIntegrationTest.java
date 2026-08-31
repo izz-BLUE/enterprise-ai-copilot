@@ -40,7 +40,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
 
-    private static final String TEST_PASSWORD = "test-" + UUID.randomUUID();
+    private static final String PUBLIC_DEMO_PASSWORD = "public-test-" + UUID.randomUUID();
+    private static final String INTERVIEW_PASSWORD = "interview-test-" + UUID.randomUUID();
+    private static final String ADMIN_PASSWORD = "admin-test-" + UUID.randomUUID();
+    private static final String LEGACY_PASSWORD = "legacy-test-" + UUID.randomUUID();
 
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;
@@ -50,15 +53,24 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
 
     @DynamicPropertySource
     static void authTestProperties(DynamicPropertyRegistry registry) {
-        registry.add("demo.auth.default-password", () -> TEST_PASSWORD);
+        registry.add("demo.auth.default-password", () -> LEGACY_PASSWORD);
+        registry.add("demo.auth.public-password", () -> PUBLIC_DEMO_PASSWORD);
+        registry.add("demo.auth.interview-password", () -> INTERVIEW_PASSWORD);
+        registry.add("demo.auth.admin-password", () -> ADMIN_PASSWORD);
     }
 
     @BeforeEach
     void resetSeededAccounts() {
-        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE "
-                        + "WHERE username IN (?, ?, ?, ?)",
-                passwordEncoder.encode(TEST_PASSWORD),
-                "zhangsan", "lisi", "wangwu", "admin");
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE WHERE username = ?",
+                passwordEncoder.encode(PUBLIC_DEMO_PASSWORD), "demo");
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE WHERE username = ?",
+                passwordEncoder.encode(INTERVIEW_PASSWORD), "zhangsan");
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE WHERE username = ?",
+                passwordEncoder.encode(LEGACY_PASSWORD), "lisi");
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE WHERE username = ?",
+                passwordEncoder.encode(LEGACY_PASSWORD), "wangwu");
+        jdbc.update("UPDATE app_user SET password_hash = ?, enabled = TRUE WHERE username = ?",
+                passwordEncoder.encode(ADMIN_PASSWORD), "admin");
         jdbc.update("""
                 UPDATE leave_account
                 SET annual_balance = CASE employee_id
@@ -72,8 +84,8 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     @Test
-    void loginIssuesJwtWithoutEnabledClaimAndInitializerSeedsFourAccounts() throws Exception {
-        JsonNode body = login("zhangsan", TEST_PASSWORD);
+    void loginIssuesJwtWithoutEnabledClaimAndInitializerSeedsFiveAccounts() throws Exception {
+        JsonNode body = login("zhangsan", INTERVIEW_PASSWORD);
         assertEquals("U10001", body.get("user").get("userId").asText());
         assertEquals("E10001", body.get("user").get("employeeId").asText());
         assertEquals("EMPLOYEE", body.get("user").get("role").asText());
@@ -84,7 +96,7 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
         assertEquals("EMPLOYEE", jwt.getClaimAsString("role"));
         assertNull(jwt.getClaims().get("enabled"));
 
-        assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM app_user", Integer.class));
+        assertEquals(5, jdbc.queryForObject("SELECT COUNT(*) FROM app_user", Integer.class));
         assertEquals(10.0, jdbc.queryForObject(
                 "SELECT annual_balance FROM leave_account WHERE employee_id = 'E10001'",
                 Double.class));
@@ -100,19 +112,45 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
     }
 
     @Test
+    void publicDemoLoginUsesIndependentReadOnlyIdentityCredential() throws Exception {
+        JsonNode body = login("demo", PUBLIC_DEMO_PASSWORD);
+        assertEquals("U10000", body.get("user").get("userId").asText());
+        assertEquals("E10000", body.get("user").get("employeeId").asText());
+        assertEquals("公开演示账号", body.get("user").get("displayName").asText());
+        assertEquals("EMPLOYEE", body.get("user").get("role").asText());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", "demo")
+                                .put("password", INTERVIEW_PASSWORD)
+                                .toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.createObjectNode()
+                                .put("username", "zhangsan")
+                                .put("password", PUBLIC_DEMO_PASSWORD)
+                                .toString()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
+    }
+
+    @Test
     void disabledAccountCannotLogin() throws Exception {
         jdbc.update("UPDATE app_user SET enabled = FALSE WHERE username = 'lisi'");
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(APPLICATION_JSON)
-                        .content("{\"username\":\"lisi\",\"password\":\"" + TEST_PASSWORD + "\"}"))
+                        .content("{\"username\":\"lisi\",\"password\":\"" + LEGACY_PASSWORD + "\"}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.errorCode").value("AUTHENTICATION_FAILED"));
     }
 
     @Test
     void validJwtCanReadCurrentUser() throws Exception {
-        String token = login("zhangsan", TEST_PASSWORD).get("accessToken").asText();
+        String token = login("zhangsan", INTERVIEW_PASSWORD).get("accessToken").asText();
 
         mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -127,7 +165,7 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.createObjectNode()
                                 .put("username", "zhangsan")
-                                .put("password", TEST_PASSWORD)
+                                .put("password", INTERVIEW_PASSWORD)
                                 .toString()))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -184,7 +222,7 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
 
     @Test
     void validJwtCanReachBusinessActionAndAdminCannotActAsEmployee() throws Exception {
-        String employeeToken = login("zhangsan", TEST_PASSWORD).get("accessToken").asText();
+        String employeeToken = login("zhangsan", INTERVIEW_PASSWORD).get("accessToken").asText();
         mockMvc.perform(post("/api/agent/actions/missing-action/cancel")
                         .header("Authorization", "Bearer " + employeeToken)
                         .header("X-Admin-Token", "required-admin-token")
@@ -193,7 +231,7 @@ class AuthSecurityIntegrationTest extends PostgresIntegrationTestBase {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("ACTION_NOT_FOUND"));
 
-        String adminToken = login("admin", TEST_PASSWORD).get("accessToken").asText();
+        String adminToken = login("admin", ADMIN_PASSWORD).get("accessToken").asText();
         Jwt adminJwt = jwtDecoder.decode(adminToken);
         assertEquals("ADMIN", adminJwt.getClaimAsString("role"));
         assertNull(adminJwt.getClaims().get("employee_id"));

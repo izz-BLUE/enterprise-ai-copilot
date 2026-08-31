@@ -87,7 +87,7 @@ Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限�
 - 始终可见：`rag_answer_tool`
 - 受信任 `employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加：`leave_balance_tool` / `leave_request_tool`
 - `allow_eval=true` 时追加：`eval_report_tool`
-- `allow_business_actions=true` 且受信任 `employee_id` 非空时追加：`leave_proposal_tool`
+- `allow_business_actions=true` 且受信任 `employee_id` 非空时追加：`leave_proposal_tool`；公开 `demo` 身份由 Java 固定为 `allow_business_actions=false`
 
 Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终授权边界；Executor、Tool 与 Java 仍保留各自的身份、权限、参数、预算和业务授权校验。`business_date` 不属于 Capability Gate。Planner 拥有规划权但没有最终业务执行授权；可信系统字段（`employee_id` / `business_date` / `trace_id`）由程序层注入，不进入 LLM `arguments`。`leave_proposal_tool` 只生成 Proposal / Clarification，不执行写操作。
 
@@ -166,8 +166,9 @@ Java 和 Python 都有并发限制：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `ADMIN_TOKEN` | 管理员 Token | 空 = Demo 模式 |
+| `ADMIN_TOKEN` | server-only 业务动作 hardening Token；浏览器不接触 | 空 = 不启用额外 hardening |
 | `BUSINESS_ACTIONS_ENABLED` | 启用业务动作 | false |
+| `BUSINESS_ACTIONS_REQUIRE_ADMIN` | 额外要求内部请求提供 `ADMIN_TOKEN` | false |
 | `SPRING_DATASOURCE_URL` | PostgreSQL URL | jdbc:postgresql://localhost:5432/enterprise_ai_copilot |
 
 ## 数据目录
@@ -188,5 +189,5 @@ Java 和 Python 都有并发限制：
 - Python 端 `DEEPSEEK_API_KEY` 未配置时，LLM 调用不可用，但检索评估仍可运行
 - Faiss 索引和 metadata 在模块加载时初始化，文件不存在时仅警告不阻塞
 - Embedding 模型首次 encode 时延迟加载
-- Java 端 `admin.token` 为空时为 Demo 模式，所有用户可访问 eval 路由
+- 浏览器 eval/管理能力由 Java 从已验证 JWT 的 `role=ADMIN` 授权；`ADMIN_TOKEN` 不进入前端。`BUSINESS_ACTIONS_REQUIRE_ADMIN=true` 时仅对业务动作增加 server-side token hardening。
 - Business Action 默认关闭，需设置 `BUSINESS_ACTIONS_ENABLED=true` 启用

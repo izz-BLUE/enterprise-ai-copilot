@@ -16,7 +16,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
                 .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "OPTIONS")
-                .allowedHeaders("Authorization", "X-Admin-Token",
+                .allowedHeaders("Authorization",
                         "Idempotency-Key", "X-Requested-With", "Content-Type", "Accept")
                 .exposedHeaders("X-Trace-Id", "X-Conversation-Id", "Retry-After")
                 .allowCredentials(true);

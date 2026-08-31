@@ -52,6 +52,50 @@ import static org.mockito.Mockito.*;
 
 class LangGraphAgentActionMappingTest {
     @Test
+    void publicDemoBusinessProposalIsRejectedBeforePendingActionPersistence() {
+        RestTemplate restTemplate = mock(RestTemplate.class);
+        PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        AdminAccessService admin = mock(AdminAccessService.class);
+        VerifiedIdentity publicDemo = new VerifiedIdentity(
+                "U10000", "demo", "E10000", "公开演示账号",
+                AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        when(identityContext.require(any())).thenReturn(publicDemo);
+        when(actionService.isAllowed(any(), eq(publicDemo))).thenReturn(false);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
+        AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
+                LocalDate.of(2026, 7, 20), "公开 demo 不应写入", HalfDay.NONE);
+        PythonAgentResponse python = new PythonAgentResponse("业务动作", "action", true,
+                "business_action", "", List.of(), true, "python-trace", proposal,
+                List.of(), null);
+        when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
+                .thenReturn(ResponseEntity.ok(python));
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
+                admin, actionService, identityContext, mock(AiTaskMemoryService.class),
+                new AdminLogBuffer());
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("public-demo-trace");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("帮我请一天年假", "public-demo-conversation"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals("business_action", response.getBody().category());
+        verify(actionService, never()).createPending(
+                any(), anyString(), anyString(), any(), anyString());
+        ArgumentCaptor<HttpEntity> requestEntity = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).postForEntity(anyString(), requestEntity.capture(),
+                eq(PythonAgentResponse.class));
+        assertEquals("false", requestEntity.getValue().getHeaders()
+                .getFirst("X-Allow-Business-Actions"));
+    }
+
+    @Test
     void memoryPersistenceFailureDoesNotFailAgentResponse() {
         PythonAgentGateway gateway = mock(PythonAgentGateway.class);
         BusinessActionService actionService = mock(BusinessActionService.class);
@@ -130,8 +174,8 @@ class LangGraphAgentActionMappingTest {
                 AuthRole.EMPLOYEE, true, VerifiedIdentity.Source.JWT);
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenReturn(identity);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
         AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
@@ -168,6 +212,7 @@ class LangGraphAgentActionMappingTest {
         ArgumentCaptor<HttpEntity> entity = ArgumentCaptor.forClass(HttpEntity.class);
         verify(restTemplate).postForEntity(anyString(), entity.capture(), eq(PythonAgentResponse.class));
         assertEquals("true", entity.getValue().getHeaders().getFirst("X-Allow-Business-Actions"));
+        assertEquals("true", entity.getValue().getHeaders().getFirst("X-Allow-Eval"));
         assertEquals("2026-07-16", entity.getValue().getHeaders().getFirst("X-Business-Date"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Admin-Token"));
         assertFalse(entity.getValue().getHeaders().containsKey("X-Memory-Write-Scope"));
@@ -178,6 +223,7 @@ class LangGraphAgentActionMappingTest {
                 eq("LEAVE_REQUEST"), eq(Map.of("phase", "pending_confirmation")), eq("等待确认"));
         verify(actionService, never()).createPending(eq(proposal), eq("python-trace-999"),
                 eq("admin"), eq(identity), anyString());
+        verify(admin, never()).isAdmin("admin");
     }
 
     @Test
@@ -192,8 +238,8 @@ class LangGraphAgentActionMappingTest {
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenReturn(identity);
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
         AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
@@ -240,8 +286,8 @@ class LangGraphAgentActionMappingTest {
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenReturn(identity);
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 7, 16));
         AnnualLeaveActionProposal proposal = new AnnualLeaveActionProposal(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, LocalDate.of(2026, 7, 20),
@@ -343,8 +389,8 @@ class LangGraphAgentActionMappingTest {
                 "LEAVE_REQUEST", Map.of("waiting_for", "confirmation"), "等待确认");
 
         when(identityContext.require(any())).thenReturn(identity);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
         when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
@@ -411,8 +457,8 @@ class LangGraphAgentActionMappingTest {
                 "日期范围与已提交的模拟申请冲突。", null, null);
 
         when(identityContext.require(any())).thenReturn(identity);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.hasBlockingAction(identity.userId(), "conv-1"))
                 .thenReturn(false, true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
@@ -488,8 +534,8 @@ class LangGraphAgentActionMappingTest {
                 "EXPENSE_CLAIM", Map.of("waiting_for", "invoice"), "等待补充发票");
 
         when(identityContext.require(any())).thenReturn(identity);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
         when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
@@ -540,8 +586,8 @@ class LangGraphAgentActionMappingTest {
                 "LEAVE_REQUEST", Map.of("step", "failed"), "旧任务结果");
 
         when(identityContext.require(any())).thenReturn(identity);
-        when(admin.isAdmin("admin")).thenReturn(true);
-        when(actionService.isAllowed("admin")).thenReturn(true);
+        when(admin.isAdminIdentity(identity)).thenReturn(true);
+        when(actionService.isAllowed(eq("admin"), any(VerifiedIdentity.class))).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 29));
         when(threadIds.generate(identity.userId(), "conv-1")).thenReturn("conversation-thread");
         when(threadIds.generate(identity.userId(), "conv-1", "task-1"))
