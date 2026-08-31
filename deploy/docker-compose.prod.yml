@@ -44,7 +44,7 @@ services:
       - ai-copilot-net
 
   python-agent:
-    image: "${PYTHON_IMAGE:-enterprise-ai-copilot-python:6e24f52}"
+    image: "${PYTHON_IMAGE:?PYTHON_IMAGE is required in production}"
     container_name: ai-copilot-python
     restart: unless-stopped
     environment:
@@ -91,7 +91,7 @@ services:
       - ai-copilot-net
 
   mock-oa:
-    image: "${MOCK_OA_IMAGE:-enterprise-ai-copilot-mock-oa:6e24f52}"
+    image: "${MOCK_OA_IMAGE:?MOCK_OA_IMAGE is required in production}"
     container_name: ai-copilot-mock-oa
     restart: unless-stopped
     environment:
@@ -117,7 +117,7 @@ services:
       - ai-copilot-net
 
   java-backend:
-    image: "${JAVA_IMAGE:-enterprise-ai-copilot-java:6e24f52}"
+    image: "${JAVA_IMAGE:?JAVA_IMAGE is required in production}"
     container_name: ai-copilot-java
     restart: unless-stopped
     depends_on:
@@ -136,6 +136,7 @@ services:
       PYTHON_AGENT_ACQUIRE_TIMEOUT_MS: ${PYTHON_AGENT_ACQUIRE_TIMEOUT_MS:-500}
       JAVA_TOOL_OPTIONS: "-Xms64m -Xmx256m"
       CORS_ALLOWED_ORIGINS: http://localhost:5173,https://copilot.jintianchi.cn
+      AUTH_JWT_SECRET: "${AUTH_JWT_SECRET:?AUTH_JWT_SECRET is required in production}"
       ADMIN_TOKEN: "${ADMIN_TOKEN:?ADMIN_TOKEN is required in production}"
       BUSINESS_ACTIONS_ENABLED: ${BUSINESS_ACTIONS_ENABLED:-false}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}

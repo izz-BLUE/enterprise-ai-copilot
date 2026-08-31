@@ -40,15 +40,16 @@
 
 生产发布应传入正式版本号、完整 Commit SHA 和 UTC 构建时间。Java 可通过
 `/api/version` 查询，Python 内部可通过 `/agent/version` 查询；两个接口均不返回 Secret。
-生产 `.env` 应设置 `JAVA_IMAGE` 和 `PYTHON_IMAGE`，值使用版本号与 Git 短 SHA
+生产 `.env` 应设置 `JAVA_IMAGE`、`PYTHON_IMAGE` 和 `MOCK_OA_IMAGE`，值使用版本号与 Git 短 SHA
 组成的不可变标签。
 
 ### 镜像
 
 | 镜像 | 说明 |
 |------|------|
-| enterprise-ai-copilot-python:6e24f52 | Python Direct ONNX 生产镜像 |
-| enterprise-ai-copilot-java:6e24f52 | Java Backend 生产镜像 |
+| `JAVA_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
+| `PYTHON_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
+| `MOCK_OA_IMAGE` | 必填；推荐 `registry/repository:<git-sha>` |
 
 ## 目录结构
 
@@ -290,7 +291,7 @@ graph LR
 | PHOENIX_CAPTURE_CONTENT | `${PHOENIX_CAPTURE_CONTENT:-false}`；默认隐藏 Prompt、输入和输出正文 |
 | PHOENIX_DEFAULT_RETENTION_POLICY_DAYS | `${PHOENIX_DEFAULT_RETENTION_POLICY_DAYS:-7}` |
 | MOCK_OA_ENABLED | Java 是否启用 Mock OA 提交与状态查询，默认 false |
-| MOCK_OA_IMAGE | 生产 Compose 使用的 Mock OA 镜像；默认 `enterprise-ai-copilot-mock-oa:6e24f52` |
+| MOCK_OA_IMAGE | 生产 Compose 使用的 Mock OA 镜像；必填，推荐 `registry/repository:<git-sha>` |
 | MOCK_OA_BASE_URL | Java 访问 Mock OA 的基础地址；本地通常为 `http://localhost:8010` |
 | MOCK_OA_WEBHOOK_SECRET | Java 与 Mock OA 共享的 HMAC-SHA256 密钥；生产必须通过 Secret 注入 |
 | MOCK_OA_WEBHOOK_REPLAY_WINDOW_SECONDS | Java webhook 时间戳窗口，最大 300 秒，默认 300 |
