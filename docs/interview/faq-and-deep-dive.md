@@ -28,7 +28,7 @@ Prompt 要求基于检索证据回答，无证据时明确拒答；返回 source
 
 ## Q7：Planner-first 与 Router-first 的关系？
 
-默认 `AGENT_LOOP_ENABLED=true` 是 `safety → planner ⇄ tool_executor → finalize`；`false` 才走 `safety → router → rag|eval|action|refuse`。两套图互斥但共享 Java authority；Router-first 是兼容回退，不是 primary。
+生产入口固定是 `safety → planner ⇄ tool_executor → finalize`；`safety → router → rag|eval|action|refuse` 仅作为测试/离线兼容图。两套图共享 Java authority；Router-first 不是生产 primary。
 
 ## Q8：Planner 会不会直接执行报销？
 

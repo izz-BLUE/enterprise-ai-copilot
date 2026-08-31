@@ -9,22 +9,21 @@ from app.runtime.execution_recovery import RecoveryMode
 from app.schemas.execution_recovery_schema import new_execution_recovery_marker
 
 
-def _runtime(mode='POSTGRES', dsn='postgresql://runtime-test'):
+def _runtime(dsn='postgresql://runtime-test'):
     return CheckpointRuntime(
-        mode=mode,
         dsn=dsn,
         connect_timeout_seconds=3,
         max_connections=3,
     )
 
 
-def test_disabled_runtime_does_not_create_connection_pool():
-    runtime = _runtime(mode='DISABLED', dsn='')
+def test_runtime_requires_dsn_before_creating_connection_pool():
+    runtime = _runtime(dsn='')
     with patch('app.runtime.checkpoint_runtime.ConnectionPool') as pool_type:
-        runtime.start()
+        with pytest.raises(RuntimeError, match='LANGGRAPH_CHECKPOINT_DSN 未配置'):
+            runtime.start()
     pool_type.assert_not_called()
-    assert runtime.get_graph(use_planner=True) is None
-    assert runtime.readiness() == {'enabled': False, 'ready': True}
+    assert runtime.readiness() == {'enabled': True, 'ready': False}
 
 
 def test_postgres_runtime_uses_pool_strict_serializer_and_startup_compiled_graphs():
@@ -75,7 +74,6 @@ def test_postgres_startup_failure_closes_pool_and_never_falls_back_to_disabled()
             runtime.start()
 
     pool.close.assert_called_once_with()
-    assert runtime.enabled is True
     assert runtime.readiness() == {'enabled': True, 'ready': False}
 
 

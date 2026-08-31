@@ -25,7 +25,7 @@ def _request(thread_id: str) -> Request:
 
 def _runtime() -> CheckpointRuntime:
     runtime = CheckpointRuntime(
-        mode='POSTGRES', dsn='postgresql://unused',
+        dsn='postgresql://unused',
         connect_timeout_seconds=1, max_connections=1,
     )
     runtime._planner_graph = Mock()
@@ -37,7 +37,6 @@ def test_endpoint_same_thread_busy_returns_429_and_does_not_run_agent(monkeypatc
     final_thread_id = base_thread_id + ':planner-v1'
     runtime = _runtime()
     assert runtime.try_acquire_thread(final_thread_id) is True
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     try:
@@ -57,7 +56,6 @@ def test_endpoint_graph_failure_releases_same_thread_guard(monkeypatch):
     runtime = _runtime()
     runtime.inspect_recovery = Mock(return_value=RecoveryDecision(RecoveryMode.NEW_EXECUTION))
     runtime.load_execution_history = Mock(return_value=[])
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.run_langgraph_agent', side_effect=RuntimeError('graph failed')) as run:
@@ -75,7 +73,6 @@ def test_endpoint_checkpoint_history_read_failure_returns_503_and_releases_guard
     runtime = _runtime()
     runtime.inspect_recovery = Mock(return_value=RecoveryDecision(RecoveryMode.NEW_EXECUTION))
     runtime.load_execution_history = Mock(side_effect=OSError('database unavailable'))
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.run_langgraph_agent') as run:

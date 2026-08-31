@@ -21,7 +21,6 @@ from app.core.config import (
     AI_MAX_CONCURRENT_REQUESTS,
     LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS,
     LANGGRAPH_CHECKPOINT_DSN,
-    LANGGRAPH_CHECKPOINT_MODE,
     logger,
 )
 from app.runtime.execution_recovery import RecoveryDecision
@@ -38,12 +37,10 @@ class CheckpointRuntime:
     def __init__(
         self,
         *,
-        mode: str,
         dsn: str,
         connect_timeout_seconds: int,
         max_connections: int,
     ) -> None:
-        self._mode = mode
         self._dsn = dsn
         self._connect_timeout_seconds = connect_timeout_seconds
         self._max_connections = max_connections
@@ -58,25 +55,13 @@ class CheckpointRuntime:
     @classmethod
     def from_config(cls) -> 'CheckpointRuntime':
         return cls(
-            mode=LANGGRAPH_CHECKPOINT_MODE,
             dsn=LANGGRAPH_CHECKPOINT_DSN,
             connect_timeout_seconds=LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS,
             max_connections=AI_MAX_CONCURRENT_REQUESTS,
         )
 
-    @property
-    def mode(self) -> str:
-        return self._mode
-
-    @property
-    def enabled(self) -> bool:
-        return self._mode == 'POSTGRES'
-
     def start(self) -> None:
-        """初始化 POSTGRES Runtime；失败时关闭已打开资源并向上抛出安全错误。"""
-        if not self.enabled:
-            logger.info('LangGraph checkpoint initialized mode=DISABLED')
-            return
+        """初始化 PostgreSQL Runtime；失败时关闭已打开资源并向上抛出安全错误。"""
         if not self._dsn:
             raise RuntimeError('LANGGRAPH_CHECKPOINT_DSN 未配置')
 
@@ -110,9 +95,11 @@ class CheckpointRuntime:
         logger.info('LangGraph checkpoint initialized mode=POSTGRES database=postgresql')
 
     def get_graph(self, use_planner: bool) -> Any | None:
-        """返回启动时编译的持久化 Graph；DISABLED 模式无需持久化 Graph。"""
-        if not self.enabled:
-            return None
+        """返回启动时编译的持久化 Graph。
+
+        use_planner=False 仅供现有测试和离线兼容场景使用；服务端生产入口固定
+        选择 Planner-first Graph。
+        """
         graph = self._planner_graph if use_planner else self._deterministic_graph
         if graph is None:
             raise RuntimeError('LangGraph checkpoint graph 尚未初始化')
@@ -143,8 +130,6 @@ class CheckpointRuntime:
         只有 Java 提供的 ACTIVE Memory 才能打开任务连续性闸门；数据库读取异常
         原样抛出，由 endpoint 返回 POSTGRES checkpoint failure（503），不静默降级。
         """
-        if not self.enabled:
-            return []
         if not isinstance(memory_context, dict) or memory_context.get('status') != 'ACTIVE':
             return []
         task_type = memory_context.get('taskType') or memory_context.get('task_type')
@@ -194,8 +179,6 @@ class CheckpointRuntime:
 
     def readiness(self) -> dict[str, bool]:
         """Readiness 才探测 PostgreSQL；liveness 不受临时数据库抖动影响。"""
-        if not self.enabled:
-            return {'enabled': False, 'ready': True}
         if self._pool is None:
             return {'enabled': True, 'ready': False}
         try:
@@ -222,7 +205,6 @@ class CheckpointRuntime:
                 pool.close()
             except Exception as exc:
                 logger.warning(
-                    'LangGraph checkpoint shutdown failed mode=%s error_type=%s',
-                    self._mode,
+                    'LangGraph checkpoint shutdown failed mode=POSTGRES error_type=%s',
                     type(exc).__name__,
                 )

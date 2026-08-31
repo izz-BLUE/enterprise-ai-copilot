@@ -46,9 +46,9 @@ flowchart TB
 
 ## 3. Agent graph
 
-### Planner-first（仓库部署默认）
+### Planner-first（生产唯一入口）
 
-`AGENT_LOOP_ENABLED=true` 时，主入口是：
+主入口固定是：
 
 ```text
 START → safety → planner ⇄ tool_executor → finalize → END
@@ -62,15 +62,15 @@ Safety Guard Lite 是深度防御过滤器，不是 authorization 或业务 vali
 
 这两个 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只用于 Python → Java 的只读业务 Tool 链路。
 
-### Legacy Router-first（显式回退）
+### Legacy Router-first（测试/离线兼容）
 
-`AGENT_LOOP_ENABLED=false` 时使用已实现的确定性图：
+直接测试或离线对照可使用已实现的确定性图：
 
 ```text
 START → safety → router → rag | eval | action | refuse → END
 ```
 
-它用于兼容性回退和对照验证，不是仓库部署的 primary path；两套图都必须汇入同一个 Java authority boundary。
+它不属于生产运行时选择；两套图都必须汇入同一个 Java authority boundary。
 
 ## 4. RAG data path
 
@@ -178,14 +178,11 @@ Mock OA is independent from Java and uses SQLite. Submission is idempotent by `e
 
 For webhook exposure, Java permits only the exact `POST /api/webhooks/mock-oa/expense-approval` path without normal user authentication. Health/version and token-protected internal read routes have separate contracts. The webhook handler validates the raw-body HMAC-SHA256 signature and timestamp window (300 seconds), strictly parses the body, then calls Mock OA `GET /api/expense-approvals/{requestId}`. Only that authoritative status can update `ExpenseClaim`; `PENDING` never regresses a terminal local claim, and a terminal decision cannot be reversed.
 
-Reconciliation is default-off and bounded. It selects only `WAITING_APPROVAL + MOCK_OA + external_request_id`, uses a due `external_last_checked_at` compare-and-set before the out-of-transaction GET, and shares the same status-sync path as webhook processing. Submission retry and external-resume retry are separate, low-frequency, bounded workers. A failed external resume never rolls back a committed Java terminal state.
+Reconciliation and retry delivery are separate, low-frequency, bounded workers. They select only their durable candidate sets; the Mock OA provider remains fail-closed when `MOCK_OA_ENABLED=false`. Reconciliation uses a due `external_last_checked_at` compare-and-set before the out-of-transaction GET and shares the same status-sync path as webhook processing. A failed external resume never rolls back a committed Java terminal state.
 
 ## 9. Checkpoint and crash recovery
 
-`LANGGRAPH_CHECKPOINT_MODE` has two modes:
-
-- `DISABLED`：不创建持久化 LangGraph runtime；适合普通本地 RAG/Agent 测试；
-- `POSTGRES`：启动 `ConnectionPool + PostgresSaver + JsonPlusSerializer`，执行 `setup()` 并编译两套图；DSN、连接、setup 或图编译失败会阻止启动，不自动降级。
+LangGraph runtime 固定使用 PostgreSQL：启动 `ConnectionPool + PostgresSaver + JsonPlusSerializer`，执行 `setup()` 并编译持久化图；DSN、连接、setup 或图编译失败会阻止启动，不自动降级。
 
 POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapshot：
 
@@ -253,12 +250,12 @@ Java 生成的 trace ID 通过 `X-Trace-Id` 透传并在响应头/响应体返�
 
 | 配置 | 默认/部署口径 |
 |---|---|
-| `AGENT_LOOP_ENABLED` | `true`；`false` 才回退 Router-first |
-| `LANGGRAPH_CHECKPOINT_MODE` | Python 本地默认 `DISABLED`；生产 Compose 默认 `POSTGRES` |
+| Planner-first Agent graph | 生产入口固定使用；legacy 图仅测试/离线兼容 |
+| `LANGGRAPH_CHECKPOINT_DSN` | 必填；连接失败即不就绪 |
 | `business.actions.enabled` | Java 默认 `false` |
 | `MEMORY_WRITE_MODE` | Python 默认 `DISABLED` |
 | `MOCK_OA_ENABLED` | Java 默认 `false` |
-| reconciliation/resume retry | 默认 `false` |
+| reconciliation/resume retry | 始终低频调度；由 `MOCK_OA_ENABLED` 控制 provider 可用性，间隔/批量参数限流 |
 | `ADMIN_TOKEN` | 空值为本地 Demo eval 口径；生产 Compose 强制提供 |
 
 完整配置和启动步骤见 [deployment.md](deployment.md)；受控动作和外部审批的本地演示见 [demo-guide.md](demo-guide.md)。

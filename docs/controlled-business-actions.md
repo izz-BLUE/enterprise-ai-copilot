@@ -32,14 +32,14 @@ Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创
 ## 2. Planner and Router paths
 
 ```text
-AGENT_LOOP_ENABLED=true
+生产入口固定 Planner-first
   safety → planner ⇄ tool_executor → proposal → Java PendingAction
 
-AGENT_LOOP_ENABLED=false
+测试/离线兼容图
   safety → router → action → proposal → Java PendingAction
 ```
 
-Planner-first 是仓库部署默认；Router-first 是显式兼容回退。两者最终都调用同一 Java control plane。
+Planner-first 是生产唯一入口；Router-first 仅供直接测试/离线对照。两者最终都调用同一 Java control plane。
 
 Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。
 
@@ -167,11 +167,11 @@ Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只�
 | `business.actions.enabled` | `false` |
 | `business.actions.require-admin` | `true` |
 | `business.actions.ttl-seconds` | `600` |
-| `AGENT_LOOP_ENABLED` | `true`，`false` 显式回退 Router-first |
-| `LANGGRAPH_CHECKPOINT_MODE` | Python 本地 `DISABLED`，生产 Compose `POSTGRES` |
+| Planner-first Agent graph | 生产固定；Router-first 仅测试/离线兼容 |
+| `LANGGRAPH_CHECKPOINT_DSN` | 必填；PostgreSQL 初始化失败即 fail-closed |
 | `MEMORY_WRITE_MODE` | `DISABLED` |
 | `MOCK_OA_ENABLED` | `false` |
-| reconciliation / external resume retry | `false` |
+| reconciliation / external resume retry | 始终低频调度；provider 由 `MOCK_OA_ENABLED` 控制 |
 
 ## 10. Accepted boundaries
 

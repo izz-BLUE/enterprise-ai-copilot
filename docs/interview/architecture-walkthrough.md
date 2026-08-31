@@ -32,7 +32,7 @@ FAISS 负责语义召回，BM25 负责中文关键字精确匹配；分数尺度
 safety → planner ⇄ tool_executor → finalize
 ```
 
-Planner 输出严格的 Pydantic decision，但只拥有规划权；Tool Executor 根据可信 employee/capability、动态可见集合、预算和成功签名做第二次校验。最多 6 次 Planner decision、5 次 Tool execution。`AGENT_LOOP_ENABLED=false` 时才使用 legacy Router-first 兼容图。
+Planner 输出严格的 Pydantic decision，但只拥有规划权；Tool Executor 根据可信 employee/capability、动态可见集合、预算和成功签名做第二次校验。最多 6 次 Planner decision、5 次 Tool execution。生产入口固定 Planner-first，legacy Router-first 仅作为测试/离线兼容图保留。
 
 ## 4. Java authority（约 45 秒）
 

@@ -24,7 +24,7 @@ Java 是 gateway 和 control plane：解析 JWT/受控身份、生成 traceId、
 
 ### Agent 与 RAG
 
-仓库部署默认 `AGENT_LOOP_ENABLED=true`，使用 `safety → planner ⇄ tool_executor → finalize`；显式设为 false 才走 legacy Router-first。Planner 最多 6 次 decision，Tool 最多 5 次执行，Tool 可见性由 Java trusted context 和服务配置动态收缩。RAG 先用 BGE embedding、FAISS 和字符 BM25 召回，再用 RRF 融合，规则 Rewrite 只改检索 query，原问题仍进入 Prompt；38 个 case 评估 source/keyword hit、生成关键词和 no-answer refusal。
+生产入口固定使用 `safety → planner ⇄ tool_executor → finalize`；legacy Router-first 仅作为测试/离线兼容图保留。Planner 最多 6 次 decision，Tool 最多 5 次执行，Tool 可见性由 Java trusted context 和服务配置动态收缩。RAG 先用 BGE embedding、FAISS 和字符 BM25 召回，再用 RRF 融合，生产固定不做 Rewrite，`rule` 仅用于离线对照；38 个 case 评估 source/keyword hit、生成关键词和 no-answer refusal。
 
 ### 报销业务闭环
 

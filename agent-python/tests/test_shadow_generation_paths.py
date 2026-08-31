@@ -22,58 +22,54 @@ def _common_patches():
     )
 
 
-def test_shadow_block_still_calls_llm():
+def test_fixed_off_gate_still_calls_llm():
     retrieve, prompt, log_event = _common_patches()
     with retrieve, prompt, log_event as logged, \
-            patch('app.services.rag_answer_service.call_llm', return_value='answer') as llm, \
-            patch('app.retrieval.retrieval_gate.RAG_GATE_MODE', 'shadow'):
-        result = answer_rag('question', trace_id='trace-shadow', retrieval_query='query')
+            patch('app.services.rag_answer_service.call_llm', return_value='answer') as llm:
+        result = answer_rag('question', trace_id='trace-off', retrieval_query='query')
 
     assert result.success is True
     llm.assert_called_once()
     assert logged.call_args.kwargs['llm_called'] is True
-    assert logged.call_args.kwargs['decision'].answerable is False
+    assert logged.call_args.kwargs['decision'].answerable is True
 
 
-def test_enforce_block_skips_llm():
+def test_fixed_off_gate_does_not_block_llm():
     retrieve, prompt, log_event = _common_patches()
     with retrieve, prompt, log_event as logged, \
-            patch('app.services.rag_answer_service.call_llm') as llm, \
-            patch('app.retrieval.retrieval_gate.RAG_GATE_MODE', 'enforce'):
-        result = answer_rag('question', trace_id='trace-enforce', retrieval_query='query')
+            patch('app.services.rag_answer_service.call_llm', return_value='answer') as llm:
+        result = answer_rag('question', trace_id='trace-off', retrieval_query='query')
 
     assert result.success is True
-    assert result.answer == '当前知识库暂无相关信息'
-    llm.assert_not_called()
-    assert logged.call_args.kwargs['llm_called'] is False
+    assert result.answer == 'answer'
+    llm.assert_called_once()
+    assert logged.call_args.kwargs['llm_called'] is True
 
 
-def test_shadow_gate_error_fails_open_and_calls_llm():
+def test_gate_error_remains_fail_open_and_calls_llm():
     retrieve, prompt, log_event = _common_patches()
     reset_gate_metrics()
     with retrieve, prompt, log_event as logged, \
             patch('app.services.rag_answer_service.call_llm', return_value='answer') as llm, \
-            patch('app.retrieval.retrieval_gate.evaluate_gate', side_effect=RuntimeError('gate failed')), \
-            patch('app.retrieval.retrieval_gate.RAG_GATE_MODE', 'shadow'):
+            patch('app.retrieval.retrieval_gate.evaluate_gate', side_effect=RuntimeError('gate failed')):
         result = answer_rag('question', trace_id='trace-error', retrieval_query='query')
 
     assert result.success is True
     llm.assert_called_once()
     assert get_gate_metrics()['gate_evaluation_error'] == 1
-    assert logged.call_args.kwargs['decision'].mode_reason_code == 'shadow_fail_open'
+    assert logged.call_args.kwargs['decision'].mode_reason_code == 'gate_disabled'
 
 
-def test_enforce_gate_error_fails_closed():
+def test_gate_error_never_blocks_generation():
     retrieve, prompt, log_event = _common_patches()
     with retrieve, prompt, log_event as logged, \
-            patch('app.services.rag_answer_service.call_llm') as llm, \
-            patch('app.retrieval.retrieval_gate.evaluate_gate', side_effect=RuntimeError('gate failed')), \
-            patch('app.retrieval.retrieval_gate.RAG_GATE_MODE', 'enforce'):
+            patch('app.services.rag_answer_service.call_llm', return_value='answer') as llm, \
+            patch('app.retrieval.retrieval_gate.evaluate_gate', side_effect=RuntimeError('gate failed')):
         result = answer_rag('question', trace_id='trace-error', retrieval_query='query')
 
-    assert result.answer == '当前知识库暂无相关信息'
-    llm.assert_not_called()
-    assert logged.call_args.kwargs['decision'].mode_reason_code == 'enforce_error_block'
+    assert result.answer == 'answer'
+    llm.assert_called_once()
+    assert logged.call_args.kwargs['decision'].mode_reason_code == 'gate_disabled'
 
 
 def test_retrieval_error_does_not_call_llm():

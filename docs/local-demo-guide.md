@@ -50,16 +50,14 @@ curl -X POST http://localhost:8080/api/chat \
 
 ## Durable workflow prerequisites
 
-Python 本地默认 `LANGGRAPH_CHECKPOINT_MODE=DISABLED`。若演示可恢复用户确认和外部审批，需要显式设置：
+Python 本地启动即要求 PostgreSQL 执行快照 DSN；演示可恢复用户确认和外部审批时设置：
 
 ```text
-AGENT_LOOP_ENABLED=true
-LANGGRAPH_CHECKPOINT_MODE=POSTGRES
 LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
 ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 ```
 
-Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINESS_ACTIONS_ENABLED`、`MOCK_OA_ENABLED` 和所需的 external retry/reconciliation。所有功能默认关闭是安全基线。
+Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINESS_ACTIONS_ENABLED` 和 `MOCK_OA_ENABLED`。外部 retry/reconciliation worker 始终低频调度，provider 关闭时 gateway fail-closed；所有功能默认关闭是安全基线。
 
 ## Troubleshooting
 

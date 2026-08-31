@@ -7,32 +7,6 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
-def _load_rag_gate_settings(environ: Mapping[str, str]) -> tuple[str, float, float, float]:
-    """加载并校验实验性检索 Gate 配置；仅允许 off / shadow。"""
-    mode = environ.get('RAG_GATE_MODE', 'off').strip().lower()
-    if mode not in {'off', 'shadow', 'enforce'}:
-        raise ValueError(
-            f'RAG_GATE_MODE={mode!r} 非法，允许值为 off|shadow|enforce'
-        )
-    try:
-        vector_strong = float(environ.get('RAG_VECTOR_STRONG_THRESHOLD', '0.65'))
-        vector_weak = float(environ.get('RAG_VECTOR_WEAK_THRESHOLD', '0.61'))
-        bm25_weak = float(environ.get('RAG_BM25_WEAK_THRESHOLD', '2.10'))
-    except ValueError as exc:
-        raise ValueError(f'RAG 门控阈值必须是数字: {exc}') from exc
-
-    if not 0.0 <= vector_weak <= 1.0:
-        raise ValueError('RAG_VECTOR_WEAK_THRESHOLD 必须处于 [0, 1]')
-    if not 0.0 <= vector_strong <= 1.0:
-        raise ValueError('RAG_VECTOR_STRONG_THRESHOLD 必须处于 [0, 1]')
-    if vector_strong < vector_weak:
-        raise ValueError('RAG_VECTOR_STRONG_THRESHOLD 必须大于或等于 RAG_VECTOR_WEAK_THRESHOLD')
-    if not 0.0 <= bm25_weak <= 1000.0:
-        raise ValueError('RAG_BM25_WEAK_THRESHOLD 必须处于 [0, 1000]')
-
-    return mode, vector_strong, vector_weak, bm25_weak
-
-
 def _load_phoenix_settings(
     environ: Mapping[str, str],
 ) -> tuple[bool, str, str, float, bool]:
@@ -83,9 +57,6 @@ FAISS_META_FILE = os.path.join(PROJECT_ROOT, 'data', 'processed', 'faiss_metadat
 RERANK_MODEL = os.getenv('RERANK_MODEL', 'BAAI/bge-reranker-base')
 RERANK_CANDIDATE_K = int(os.getenv('RERANK_CANDIDATE_K', '10'))
 
-# Query Rewrite
-REWRITE_MODE = os.getenv('REWRITE_MODE', 'none')  # none / rule
-
 # LLM Timeout (seconds)
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '30'))
 LLM_MAX_RETRIES = int(os.getenv('LLM_MAX_RETRIES', '0'))
@@ -117,14 +88,10 @@ if AI_MAX_CONCURRENT_REQUESTS < 1:
 if AI_QUEUE_TIMEOUT_MS < 1:
     raise ValueError('AI_QUEUE_TIMEOUT_MS 必须大于等于 1')
 
-# LangGraph 执行快照：默认关闭，避免本地开发与常规单元测试依赖 PostgreSQL。
-# POSTGRES 模式在服务启动阶段创建连接池、执行官方 setup() 并编译持久化 Graph；
-# 任何配置或连接失败均 fail-closed，绝不回退到无 Checkpoint 模式。
-LANGGRAPH_CHECKPOINT_MODE = os.getenv('LANGGRAPH_CHECKPOINT_MODE', 'DISABLED').strip().upper()
-if LANGGRAPH_CHECKPOINT_MODE not in {'DISABLED', 'POSTGRES'}:
-    raise ValueError('LANGGRAPH_CHECKPOINT_MODE 只允许 DISABLED 或 POSTGRES')
-
+# LangGraph 执行快照：生产运行固定使用 PostgreSQL，DSN 缺失即拒绝启动。
 LANGGRAPH_CHECKPOINT_DSN = os.getenv('LANGGRAPH_CHECKPOINT_DSN', '').strip()
+if not LANGGRAPH_CHECKPOINT_DSN:
+    raise ValueError('LANGGRAPH_CHECKPOINT_DSN 不能为空')
 try:
     LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS = int(
         os.getenv('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS', '3')
@@ -133,12 +100,8 @@ except ValueError as exc:
     raise ValueError('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS 必须是整数') from exc
 if not 1 <= LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS <= 60:
     raise ValueError('LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS 必须处于 [1, 60]')
-if LANGGRAPH_CHECKPOINT_MODE == 'POSTGRES' and not LANGGRAPH_CHECKPOINT_DSN:
-    raise ValueError('LANGGRAPH_CHECKPOINT_MODE=POSTGRES 时 LANGGRAPH_CHECKPOINT_DSN 不能为空')
 
-# Agent Loop 开关（默认开启）：/agent/langgraph/chat 使用 Planner ⇄ Tool Executor
-# Loop；关闭时回退旧确定性 Graph（safety → router → rag|eval|action|refuse）。
-AGENT_LOOP_ENABLED = os.getenv('AGENT_LOOP_ENABLED', 'true').strip().lower() == 'true'
+# /agent/langgraph/chat 固定使用 Planner-first Graph（safety → planner ⇄ tool_executor → finalize）。
 AGENT_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AGENT_REQUEST_TIMEOUT_SECONDS', '40'))
 if AGENT_REQUEST_TIMEOUT_SECONDS < 5:
     raise ValueError('AGENT_REQUEST_TIMEOUT_SECONDS 必须大于等于 5')
@@ -162,16 +125,6 @@ if JAVA_TIMEOUT_SECONDS < 1:
 # Scoped Conversation Memory P0：写入模式默认关闭，避免未显式配置时产生额外
 # Extractor LLM 成本或 Memory 提案。模式合法性在 Runtime Hook 构造时再次校验。
 MEMORY_WRITE_MODE = os.getenv('MEMORY_WRITE_MODE', 'DISABLED').strip()
-
-# Experimental retrieval relevance gate (off by default; enforce is prohibited).
-# These thresholds only reproduce the first Shadow experiment and are not
-# validated deployment parameters. See docs/rag-retrieval-gate-experiment.md.
-(
-    RAG_GATE_MODE,
-    RAG_VECTOR_STRONG_THRESHOLD,
-    RAG_VECTOR_WEAK_THRESHOLD,
-    RAG_BM25_WEAK_THRESHOLD,
-) = _load_rag_gate_settings(os.environ)
 
 # Constants
 TOP_K = 3

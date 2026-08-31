@@ -27,8 +27,8 @@ from app.schemas.execution_recovery_schema import ExecutionRecoveryMarker
 
 _DSN = os.getenv('LANGGRAPH_CHECKPOINT_DSN', '')
 pytestmark = pytest.mark.skipif(
-    os.getenv('LANGGRAPH_CHECKPOINT_MODE') != 'POSTGRES' or not _DSN,
-    reason='PostgreSQL crash-resume integration requires explicit POSTGRES mode and DSN',
+    os.getenv('RUN_POSTGRES_CHECKPOINT_INTEGRATION') != 'true' or not _DSN,
+    reason='PostgreSQL crash-resume integration requires LANGGRAPH_CHECKPOINT_DSN',
 )
 
 
@@ -148,7 +148,7 @@ def _crashable_planner_graph(runtime: CheckpointRuntime, calls: dict):
 
 def _runtime():
     runtime = CheckpointRuntime(
-        mode='POSTGRES', dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
+        dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
     )
     runtime.start()
     return runtime

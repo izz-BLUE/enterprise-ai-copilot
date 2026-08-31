@@ -52,7 +52,6 @@ def test_postgres_endpoint_uses_startup_graph_and_java_thread_id(monkeypatch):
     runtime.build_thread_id.return_value = 'rt_' + ('a' * 64) + ':planner-v1'
     runtime.get_graph.return_value = graph
     runtime.inspect_recovery.return_value = RecoveryDecision(RecoveryMode.NEW_EXECUTION)
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.run_langgraph_agent', return_value=_RESULT) as run:
@@ -71,7 +70,6 @@ def test_postgres_endpoint_uses_startup_graph_and_java_thread_id(monkeypatch):
 def test_postgres_endpoint_rejects_missing_thread_id_without_agent_fallback(monkeypatch):
     runtime = Mock()
     runtime.build_thread_id.side_effect = ValueError('格式无效')
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.run_langgraph_agent') as run:
@@ -149,7 +147,6 @@ def test_postgres_endpoint_resumes_without_history_hydration(monkeypatch):
     runtime.inspect_recovery.return_value = RecoveryDecision(
         RecoveryMode.RESUME, pending_node='planner_node', execution_id='ex_' + ('a' * 32),
     )
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.resume_langgraph_agent', return_value=_RESULT) as resume, \
@@ -194,7 +191,6 @@ def test_postgres_endpoint_recovery_conflict_returns_409_without_side_effects(mo
         reason='request_mismatch',
         execution_id='ex_' + ('b' * 32),
     )
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.resume_langgraph_agent') as resume, \
@@ -226,7 +222,6 @@ def test_postgres_endpoint_capability_conflict_hides_persisted_proposal(monkeypa
         reason='business_capability_revoked',
         execution_id='ex_' + ('d' * 32),
     )
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.resume_langgraph_agent') as resume, \
@@ -257,7 +252,6 @@ def test_postgres_endpoint_resume_failure_returns_502_and_releases_guard(monkeyp
     runtime.inspect_recovery.return_value = RecoveryDecision(
         RecoveryMode.RESUME, pending_node='planner_node', execution_id='ex_' + ('c' * 32),
     )
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.resume_langgraph_agent', side_effect=RuntimeError('resume failed')) as resume:
@@ -309,7 +303,6 @@ def test_hitl_resume_endpoint_uses_authoritative_command_and_skips_memory(monkey
         'sources': [],
         'hitl_wait': decision.hitl_wait,
     }
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.inspect_hitl_resume', return_value=decision), \
@@ -379,7 +372,6 @@ def test_normal_chat_returns_waiting_external_without_fresh_or_resume(monkeypatc
         'answer': 'old answer',
         'external_wait': _external_wait_dict(),
     })
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.resume_langgraph_agent') as resume, \
@@ -439,7 +431,6 @@ def test_hitl_response_loss_returns_persisted_external_wait_without_command(monk
         request_id='EXP-20260827-0001',
         message='Java authoritative result',
     )
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.inspect_hitl_resume', return_value=decision), \
@@ -479,7 +470,6 @@ def test_external_resume_endpoint_uses_command_and_fresh_runtime(monkeypatch):
         'category': 'business_action',
         'external_wait': _external_wait_dict(),
     }
-    monkeypatch.setattr('app.main.LANGGRAPH_CHECKPOINT_MODE', 'POSTGRES')
     monkeypatch.setattr(app.state, 'checkpoint_runtime', runtime, raising=False)
 
     with patch('app.main.inspect_external_resume', return_value=decision), \

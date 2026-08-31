@@ -7,7 +7,7 @@
 - Java Spring Boot + Python FastAPI + React 三端链路；
 - Java authority boundary：JWT DemoAuth、Admin gate、trace、超时、有界并发和稳定错误响应；
 - RAG：chunking、BGE embedding、FAISS、字符 BM25、RRF、sources 和 38-case evaluation；
-- Planner-first LangGraph，以及 `AGENT_LOOP_ENABLED=false` 的 Router-first 兼容回退；
+- Planner-first LangGraph；Router-first 仅作为测试/离线兼容实现；
 - strict PlannerDecision、动态 Tool capability gate、Tool budget 和成功签名去重；
 - `ANNUAL_LEAVE_REQUEST` 与 `EXPENSE_CLAIM` Proposal；
 - Java PendingAction：nonce digest、owner、TTL、幂等、事务、状态机和 Memory terminal lifecycle；

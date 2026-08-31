@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from time import perf_counter
 
-from app.core.config import DEEPSEEK_MODEL, REWRITE_MODE, logger
+from app.core.config import DEEPSEEK_MODEL, logger
 from app.prompts.system_prompt import SYSTEM_PROMPT, build_rag_prompt
 from app.retrieval.hybrid_retriever import retrieve_with_signals
 from app.retrieval.query_rewriter import rewrite_query
@@ -44,12 +44,15 @@ def answer_rag(
     rewrite_mode: str | None = None,
     retrieval_query: str | None = None,
 ) -> RagAnswerResult:
-    """统一的生产 RAG 生成入口，供普通问答和 Agent Tool 共同复用。"""
+    """统一的生产 RAG 生成入口，供普通问答和 Agent Tool 共同复用。
+
+    生产路径固定不重写 query；rewrite_mode 仅保留给离线测试/评估调用方。
+    """
     effective_retrieval_query = retrieval_query
     if effective_retrieval_query is None:
         rewrite_result = rewrite_query(
             question,
-            mode=REWRITE_MODE if rewrite_mode is None else rewrite_mode,
+            mode='none' if rewrite_mode is None else rewrite_mode,
         )
         effective_retrieval_query = rewrite_result['rewritten_query']
         if rewrite_result['rewrite_applied']:
@@ -86,11 +89,7 @@ def answer_rag(
             len(chunks),
         )
 
-        enforce_blocked = (
-            gate_decision.mode_reason_code.startswith('enforce_')
-            and not gate_decision.answerable
-        )
-        if not chunks or enforce_blocked:
+        if not chunks:
             return RagAnswerResult(
                 answer=NO_KNOWLEDGE_ANSWER,
                 model=DEEPSEEK_MODEL,

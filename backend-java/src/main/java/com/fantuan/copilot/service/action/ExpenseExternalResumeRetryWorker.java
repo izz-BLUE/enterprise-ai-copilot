@@ -19,7 +19,6 @@ public class ExpenseExternalResumeRetryWorker {
 
     private final ExpenseClaimRepository claims;
     private final ExpenseExternalResumeCoordinator coordinator;
-    private final boolean enabled;
     private final long intervalMillis;
     private final int batchSize;
     private final Clock clock;
@@ -27,13 +26,11 @@ public class ExpenseExternalResumeRetryWorker {
     public ExpenseExternalResumeRetryWorker(
             ExpenseClaimRepository claims,
             ExpenseExternalResumeCoordinator coordinator,
-            @Value("${external.approval.resume.enabled:false}") boolean enabled,
             @Value("${external.approval.resume.retry-interval-ms:60000}") long intervalMillis,
             @Value("${external.approval.resume.batch-size:20}") int batchSize,
             Clock clock) {
         this.claims = claims;
         this.coordinator = coordinator;
-        this.enabled = enabled;
         this.intervalMillis = Math.max(1L, intervalMillis);
         this.batchSize = Math.max(1, Math.min(batchSize, 100));
         this.clock = clock;
@@ -41,9 +38,6 @@ public class ExpenseExternalResumeRetryWorker {
 
     @Scheduled(fixedDelayString = "${external.approval.resume.retry-interval-ms:60000}")
     public void runOnce() {
-        if (!enabled) {
-            return;
-        }
         Instant now = clock.instant();
         List<ExpenseClaim> candidates = claims.findExternalResumeCandidates(
                 now.minusMillis(intervalMillis), batchSize);

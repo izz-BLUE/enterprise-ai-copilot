@@ -74,7 +74,7 @@ Multi Task Runtime 的 task1 terminal 后，Java 先按既有 terminal authority
 
 Checkpoint 记录 Agent execution state，包括 `tool_history`、bounded `execution_history`、planner counters、execution marker 和 interrupt marker。它支持 crash recovery/HITL/external approval，但不拥有业务授权。
 
-`LANGGRAPH_CHECKPOINT_MODE=DISABLED` 时没有持久化 execution snapshot；`POSTGRES` 时使用 `ConnectionPool + PostgresSaver`，节点以同步 durability 落盘。普通新请求只在 Memory/task gate 通过后 hydrate history；同一次 Resume 保留原 execution state，不重新 hydrate history、不重跑 Planner。
+LangGraph 固定使用 `ConnectionPool + PostgresSaver` 持久化 execution snapshot，节点以同步 durability 落盘；`LANGGRAPH_CHECKPOINT_DSN` 缺失或初始化失败即 fail-closed。普通新请求只在 Memory/task gate 通过后 hydrate history；同一次 Resume 保留原 execution state，不重新 hydrate history、不重跑 Planner。
 
 Memory proposal pipeline 不在 HITL resume、external resume 或普通 `WAITING_EXTERNAL` response 中运行。这样避免外部 webhook、resume replay 或单纯业务查询产生意外 Memory trigger。
 

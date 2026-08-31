@@ -1,6 +1,6 @@
 """真实 PostgreSQL 的 LangGraph PostgresSaver 集成验收。
 
-该模块只在显式 POSTGRES 模式运行；默认 Python 全量测试保持不依赖数据库。
+该模块只在显式提供 DSN 时运行；默认 Python 全量测试保持不依赖数据库。
 """
 
 import hashlib
@@ -21,8 +21,8 @@ from app.services.llm_service import LLMProviderError
 
 _DSN = os.getenv('LANGGRAPH_CHECKPOINT_DSN', '')
 pytestmark = pytest.mark.skipif(
-    os.getenv('LANGGRAPH_CHECKPOINT_MODE') != 'POSTGRES' or not _DSN,
-    reason='PostgreSQL checkpoint integration requires explicit POSTGRES mode and DSN',
+    os.getenv('RUN_POSTGRES_CHECKPOINT_INTEGRATION') != 'true' or not _DSN,
+    reason='PostgreSQL checkpoint integration requires LANGGRAPH_CHECKPOINT_DSN',
 )
 
 
@@ -57,7 +57,6 @@ def _snapshot_graph(runtime: CheckpointRuntime):
 @pytest.fixture
 def checkpoint_runtime():
     runtime = CheckpointRuntime(
-        mode='POSTGRES',
         dsn=_DSN,
         connect_timeout_seconds=3,
         max_connections=3,
@@ -208,7 +207,7 @@ def test_p1_p3_p9_real_write_strict_serializer_and_trusted_state_boundary(checkp
 def test_p2_p11_p12_checkpoint_survives_runtime_restart_and_setup_is_idempotent():
     thread_id = _thread_id('p2-restart')
     runtime_a = CheckpointRuntime(
-        mode='POSTGRES', dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
+        dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
     )
     runtime_a.start()
     try:
@@ -228,7 +227,7 @@ def test_p2_p11_p12_checkpoint_survives_runtime_restart_and_setup_is_idempotent(
         runtime_a.shutdown()
 
     runtime_b = CheckpointRuntime(
-        mode='POSTGRES', dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
+        dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
     )
     runtime_b.start()
     try:
@@ -429,14 +428,12 @@ def test_f3_successful_proposal_remains_in_final_checkpoint(checkpoint_runtime):
 
 def test_p10_postgres_unavailable_fails_closed_without_disabled_fallback():
     runtime = CheckpointRuntime(
-        mode='POSTGRES',
         dsn='postgresql://127.0.0.1:1/checkpoint_unavailable',
         connect_timeout_seconds=1,
         max_connections=1,
     )
     with pytest.raises(RuntimeError, match='PostgreSQL checkpoint 初始化失败'):
         runtime.start()
-    assert runtime.enabled is True
 
 
 def test_h1_first_round_writes_normalized_execution_history(checkpoint_runtime):
@@ -461,7 +458,7 @@ def test_h1_first_round_writes_normalized_execution_history(checkpoint_runtime):
 def test_h2_execution_history_survives_runtime_restart():
     thread_id = _thread_id('p3-2-h2') + ':planner-v1'
     runtime_a = CheckpointRuntime(
-        mode='POSTGRES', dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
+        dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
     )
     runtime_a.start()
     try:
@@ -473,7 +470,7 @@ def test_h2_execution_history_survives_runtime_restart():
         runtime_a.shutdown()
 
     runtime_b = CheckpointRuntime(
-        mode='POSTGRES', dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
+        dsn=_DSN, connect_timeout_seconds=3, max_connections=3,
     )
     runtime_b.start()
     try:

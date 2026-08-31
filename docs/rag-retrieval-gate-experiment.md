@@ -150,7 +150,7 @@ Calibration 的相对最优 `0.58` 在一次性 Holdout 上只拦截 `1/8` no-an
 
 Enforcement 会让 Gate block 真正阻断生成。当前 Holdout 已证明该决策不可靠，启用后会同时造成正常问题误拒和无答案问题漏放。
 
-后续实现保留了显式 `RAG_GATE_MODE=enforce` 供目标数据集验收：block 会真正阻断生成，evaluator 异常时 fail-closed。该模式仍不是仓库部署默认值，未完成目标数据集阈值验收不得启用。
+后续实现曾保留可配置的 enforce 分支供目标数据集验收；该实验已停止，生产代码固定关闭 Gate，相关性信号只用于观测，不阻断生成。`rule` 查询重写同样只保留在离线评估脚本中。
 
 ## 15. 当前最终状态
 

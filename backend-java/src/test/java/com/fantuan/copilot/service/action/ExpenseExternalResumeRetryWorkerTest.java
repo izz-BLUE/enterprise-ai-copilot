@@ -15,10 +15,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,16 +29,7 @@ class ExpenseExternalResumeRetryWorkerTest {
 
     @BeforeEach
     void setUp() {
-        worker = worker(true, 60000, 20);
-    }
-
-    @Test
-    void disabledWorkerDoesNotReadCandidates() {
-        worker = worker(false, 60000, 20);
-
-        worker.runOnce();
-
-        verify(claims, never()).findExternalResumeCandidates(any(), anyInt());
+        worker = worker(60000, 20);
     }
 
     @Test
@@ -74,17 +62,17 @@ class ExpenseExternalResumeRetryWorkerTest {
 
     @Test
     void batchSizeIsClampedToOneHundred() {
-        worker = worker(true, 60000, 1000);
+        worker = worker(60000, 1000);
 
         worker.runOnce();
 
         verify(claims).findExternalResumeCandidates(NOW.minusSeconds(60), 100);
     }
 
-    private ExpenseExternalResumeRetryWorker worker(boolean enabled, long intervalMillis,
+    private ExpenseExternalResumeRetryWorker worker(long intervalMillis,
                                                      int batchSize) {
         return new ExpenseExternalResumeRetryWorker(
-                claims, coordinator, enabled, intervalMillis, batchSize,
+                claims, coordinator, intervalMillis, batchSize,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

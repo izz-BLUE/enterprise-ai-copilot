@@ -40,14 +40,12 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 复制 `agent-python/.env.example` 为 `.env`，并按演示目的配置：
 
 ```text
-AGENT_LOOP_ENABLED=true
-LANGGRAPH_CHECKPOINT_MODE=POSTGRES
 LANGGRAPH_CHECKPOINT_DSN=postgresql://<user>:<password>@localhost:5432/<db>
 ENTERPRISE_OA_MCP_URL=http://127.0.0.1:8100/mcp
 MEMORY_WRITE_MODE=DISABLED
 ```
 
-Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`，以及按需开启 `EXTERNAL_APPROVAL_RECONCILIATION_ENABLED` / `EXTERNAL_APPROVAL_RESUME_ENABLED`。功能默认关闭是安全基线，不是演示失败。
+Java Demo 环境还需要有效的 `AUTH_JWT_SECRET`、数据库配置、`DEMO_AUTH_ENABLED=true`、`DEMO_AUTH_DEFAULT_PASSWORD` 和 `BUSINESS_ACTIONS_ENABLED=true`；若启用外部审批，再配置 `MOCK_OA_ENABLED=true`、`MOCK_OA_BASE_URL=http://localhost:8010`、`MOCK_OA_WEBHOOK_SECRET`。外部审批 retry/reconciliation worker 会按间隔和批量参数低频运行，provider 关闭时 gateway fail-closed。
 
 ## 3. Start services
 
@@ -198,7 +196,7 @@ Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只
 
 | 现象 | 检查 |
 |---|---|
-| Agent 返回 checkpoint unavailable | `LANGGRAPH_CHECKPOINT_MODE`、DSN、PostgreSQL health、`PostgresSaver.setup()` |
+| Agent 返回 checkpoint unavailable | DSN、PostgreSQL health、`PostgresSaver.setup()` |
 | Proposal 缺少事实 | `ENTERPRISE_OA_MCP_URL`、fixture employee ownership、trip/invoice 状态 |
 | Confirm 返回 503 | Python revalidation adapter 或 OA MCP 不可用；PendingAction 应保持可重试 |
 | Confirm 被拒绝为 stale | trip/invoice 在 Proposal 后发生变化；重新读取当前事实再建 Proposal |
@@ -209,4 +207,4 @@ Admin Token 非空时，评估问题需要 Java 侧 `X-Admin-Token`；Python 只
 
 ## 8. Demo boundary
 
-演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、Mock OA、reconciliation、external resume retry 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。
+演示结束后可关闭 `BUSINESS_ACTIONS_ENABLED`、`MOCK_OA_ENABLED` 和 Memory write。不要把真实 token、nonce、cookie、raw webhook 或用户数据写入截图和日志。

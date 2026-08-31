@@ -104,13 +104,12 @@ jobs:
           DEEPSEEK_API_KEY: ""
           DEEPSEEK_BASE_URL: ""
           DEEPSEEK_MODEL: ""
-          LANGGRAPH_CHECKPOINT_MODE: DISABLED
         run: uv run python -m pytest -q
 
       - name: Run PostgreSQL checkpoint integration tests
         working-directory: agent-python
         env:
-          LANGGRAPH_CHECKPOINT_MODE: POSTGRES
+          RUN_POSTGRES_CHECKPOINT_INTEGRATION: "true"
           LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_ci:checkpoint_ci_password@localhost:5432/enterprise_ai_checkpoint_ci
           LANGGRAPH_CHECKPOINT_CONNECT_TIMEOUT_SECONDS: "3"
         run: >
@@ -122,6 +121,8 @@ jobs:
 
       - name: Run baseline retrieval quality gate
         working-directory: agent-python
+        env:
+          LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_eval:checkpoint_eval@localhost:5432/enterprise_ai_checkpoint_ci
         run: >
           uv run python scripts/eval/eval_retrieval.py
           --rewrite-mode none
@@ -131,6 +132,8 @@ jobs:
 
       - name: Run rule rewrite retrieval evaluation
         working-directory: agent-python
+        env:
+          LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_eval:checkpoint_eval@localhost:5432/enterprise_ai_checkpoint_ci
         run: uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule
 
   frontend-check:

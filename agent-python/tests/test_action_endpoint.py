@@ -1,14 +1,28 @@
 import json
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import Request
+import pytest
 
-from app.main import langgraph_chat
+from app.main import app, langgraph_chat
 from app.memory.memory_write_mode import make_execution_policy
 from app.memory.memory_write_policy import MemoryWriteCommand
+from app.runtime.execution_recovery import RecoveryDecision, RecoveryMode
 from app.schemas.chat_schema import ChatRequest
+
+
+@pytest.fixture(autouse=True)
+def checkpoint_runtime(monkeypatch):
+    runtime = Mock()
+    runtime.build_thread_id.return_value = "rt_" + ("a" * 64) + ":planner-v1"
+    runtime.get_graph.return_value = Mock()
+    runtime.try_acquire_thread.return_value = True
+    runtime.inspect_recovery.return_value = RecoveryDecision(RecoveryMode.NEW_EXECUTION)
+    runtime.load_execution_history.return_value = []
+    monkeypatch.setattr(app.state, "checkpoint_runtime", runtime, raising=False)
+    return runtime
 
 
 def request(headers):
@@ -25,9 +39,10 @@ def request(headers):
     return req
 
 
-def test_endpoint_reads_business_action_headers_and_preserves_trace():
+def test_endpoint_reads_business_action_headers_and_preserves_trace(monkeypatch):
     req = request({
         "X-Trace-Id": "java-trace",
+        "X-Agent-Thread-Id": "rt_" + ("a" * 64),
         "X-Allow-Business-Actions": "true",
         "X-Business-Date": "2026-07-16",
     })
@@ -41,8 +56,14 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         "missing_fields": ["start_date", "end_date"],
         "action_proposal": None,
     }
-    with patch("app.main.run_langgraph_agent", return_value=result) as run, \
-            patch("app.main.AGENT_LOOP_ENABLED", False):
+    runtime = Mock()
+    runtime.build_thread_id.return_value = "rt_" + ("a" * 64) + ":planner-v1"
+    runtime.get_graph.return_value = Mock()
+    runtime.try_acquire_thread.return_value = True
+    runtime.inspect_recovery.return_value = RecoveryDecision(RecoveryMode.NEW_EXECUTION)
+    runtime.load_execution_history.return_value = []
+    monkeypatch.setattr(app.state, "checkpoint_runtime", runtime, raising=False)
+    with patch("app.main.run_langgraph_agent", return_value=result) as run:
         response = langgraph_chat(ChatRequest(message="申请一天年假，原因为私事"), req)
     run.assert_called_once_with(
         "申请一天年假，原因为私事",
@@ -51,8 +72,12 @@ def test_endpoint_reads_business_action_headers_and_preserves_trace():
         business_date=date(2026, 7, 16),
         trace_id="java-trace",
         employee_id="",
-        use_planner=False,
+        use_planner=True,
         memory_context=None,
+        execution_history=[],
+        graph=runtime.get_graph.return_value,
+        runtime_thread_id="rt_" + ("a" * 64) + ":planner-v1",
+        execution_mode="LEGACY_SINGLE",
     )
     assert response.traceId == "java-trace"
     assert response.missing_fields == ["start_date", "end_date"]
