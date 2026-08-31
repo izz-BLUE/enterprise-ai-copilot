@@ -5,7 +5,8 @@ set -Eeuo pipefail
 # 恢复固定 zhangsan / E10001 本地演示状态；不访问或修改用户、外部 fixture、migration 和 sequence。
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.local.yml"
+COMPOSE_FILE="${RESET_COMPOSE_FILE:-${SCRIPT_DIR}/docker-compose.local.yml}"
+COMPOSE_ENV_FILE="${RESET_COMPOSE_ENV_FILE:-}"
 
 TARGET_USER_ID="U10001"
 TARGET_USERNAME="zhangsan"
@@ -25,8 +26,16 @@ usage() {
 说明：
   默认会在执行前要求输入 RESET；--yes 仅用于已确认目标的非交互执行。
   --dry-run 只执行 SELECT 和严格只读 SQLite 检查，不修改任何数据。
+  RESET_COMPOSE_FILE 可用于显式指定 Compose 文件；默认使用 docker-compose.local.yml。
+  RESET_COMPOSE_ENV_FILE 可选用于显式指定 Compose env 文件，不设置时不传入 --env-file。
   LANGGRAPH_CHECKPOINT_DB 可用于指定本地 checkpoint 数据库名，默认 enterprise_ai_runtime。
   演示年假余额固定恢复为 10.0，不接受运行时覆盖。
+
+生产 dry-run 示例：
+  RESET_COMPOSE_FILE=/opt/enterprise-ai-copilot/deploy/docker-compose.prod.yml \
+  RESET_COMPOSE_ENV_FILE=/opt/enterprise-ai-copilot/deploy/.env \
+  LANGGRAPH_CHECKPOINT_DB=enterprise_ai_copilot \
+  bash /opt/enterprise-ai-copilot/deploy/reset-demo-state.sh --dry-run
 EOF
 }
 
@@ -59,7 +68,10 @@ while (($# > 0)); do
     shift
 done
 
-[[ -f "$COMPOSE_FILE" ]] || fail "找不到 Local Compose：$COMPOSE_FILE"
+[[ -f "$COMPOSE_FILE" ]] || fail "找不到 Compose 文件：$COMPOSE_FILE"
+if [[ -n "$COMPOSE_ENV_FILE" ]]; then
+    [[ -f "$COMPOSE_ENV_FILE" ]] || fail "找不到 Compose env 文件：$COMPOSE_ENV_FILE"
+fi
 [[ "$CHECKPOINT_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "checkpoint 数据库名无效：$CHECKPOINT_DB"
 command -v docker >/dev/null 2>&1 || fail "需要 docker 命令"
 
@@ -75,7 +87,11 @@ assert_target_constants() {
 assert_target_constants
 
 compose() {
-    docker compose -f "$COMPOSE_FILE" "$@"
+    if [[ -n "$COMPOSE_ENV_FILE" ]]; then
+        docker compose --env-file "$COMPOSE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
+    else
+        docker compose -f "$COMPOSE_FILE" "$@"
+    fi
 }
 
 business_psql() {
