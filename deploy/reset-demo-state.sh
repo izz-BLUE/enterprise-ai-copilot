@@ -32,6 +32,7 @@ usage() {
   演示年假余额固定恢复为 10.0，不接受运行时覆盖。
 
 生产 dry-run 示例：
+  COMPOSE_PROJECT_NAME=enterprise-ai-copilot \
   RESET_COMPOSE_FILE=/opt/enterprise-ai-copilot/deploy/docker-compose.prod.yml \
   RESET_COMPOSE_ENV_FILE=/opt/enterprise-ai-copilot/deploy/.env \
   LANGGRAPH_CHECKPOINT_DB=enterprise_ai_copilot \
