@@ -26,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -299,7 +300,11 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
     }
 
     private AnnualLeaveActionProposal leaveProposal() {
-        LocalDate start = LocalDate.of(2026, 9, 1);
+        LocalDate start = actionService.businessDate().plusDays(2);
+        while (start.getDayOfWeek() == DayOfWeek.SATURDAY
+                || start.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            start = start.plusDays(1);
+        }
         return new AnnualLeaveActionProposal(BusinessActionType.ANNUAL_LEAVE_REQUEST,
                 start, start, "事务测试请假", HalfDay.NONE);
     }
