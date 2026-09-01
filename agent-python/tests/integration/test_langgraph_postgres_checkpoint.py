@@ -135,21 +135,25 @@ def _run_history_round(
     thread_id,
     decisions,
     *,
+    question='继续刚才的报销任务',
+    allow_business_actions=True,
     execution_history=None,
     memory_context=None,
     invoice_result=None,
     malicious=False,
 ):
+    # Expense-target fixtures provide an explicit trip/invoice question and
+    # disable business actions so they do not exercise reason-first behavior.
     with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
             patch('app.agents.tool_executor_node.travel_record_tool') as travel, \
             patch('app.agents.tool_executor_node.invoice_verify_tool') as invoice:
         travel.invoke.return_value = _travel_result(malicious=malicious)
         invoice.invoke.return_value = invoice_result or _invoice_result(malicious=malicious)
         return run_langgraph_agent(
-            '继续刚才的报销任务',
+            question,
             use_planner=True,
             employee_id='E10001',
-            allow_business_actions=True,
+            allow_business_actions=allow_business_actions,
             business_date=date(2026, 8, 27),
             graph=runtime.get_graph(use_planner=True),
             runtime_thread_id=thread_id,
@@ -442,7 +446,7 @@ def test_h1_first_round_writes_normalized_execution_history(checkpoint_runtime):
         _tool('travel_record_tool', {}, 'need_travel_history'),
         _tool('invoice_verify_tool', {'invoice_id': 'INV-HISTORY-001'}, 'need_invoice_verify'),
         _finish(),
-    ])
+    ], question='报销TRIP-HISTORY-001对应发票', allow_business_actions=False)
 
     snapshot = checkpoint_runtime.get_graph(use_planner=True).get_state(_config(thread_id))
     assert [entry['tool_name'] for entry in result['tool_history']] == [
@@ -463,9 +467,10 @@ def test_h2_execution_history_survives_runtime_restart():
     runtime_a.start()
     try:
         _run_history_round(runtime_a, thread_id, [
+            _tool('travel_record_tool', {}, 'need_travel_history'),
             _tool('invoice_verify_tool', {'invoice_id': 'INV-HISTORY-001'}, 'need_invoice_verify'),
             _finish(),
-        ])
+        ], question='报销TRIP-HISTORY-001对应发票', allow_business_actions=False)
     finally:
         runtime_a.shutdown()
 
@@ -479,7 +484,12 @@ def test_h2_execution_history_survives_runtime_restart():
             thread_id=thread_id,
             memory_context={'taskType': 'EXPENSE_REQUEST', 'status': 'ACTIVE'},
         )
-        assert history[0]['summary']['invoice_id'] == 'INV-HISTORY-001'
+        invoices = [
+            entry for entry in history
+            if entry['tool_name'] == 'invoice_verify_tool'
+        ]
+        assert len(invoices) == 1
+        assert invoices[0]['summary']['invoice_id'] == 'INV-HISTORY-001'
     finally:
         runtime_b.shutdown()
 
@@ -487,9 +497,10 @@ def test_h2_execution_history_survives_runtime_restart():
 def test_h3_active_memory_hydrates_history_but_resets_current_tool_history(checkpoint_runtime):
     thread_id = _thread_id('p3-2-h3') + ':planner-v1'
     _run_history_round(checkpoint_runtime, thread_id, [
+        _tool('travel_record_tool', {}, 'need_travel_history'),
         _tool('invoice_verify_tool', {'invoice_id': 'INV-HISTORY-001'}, 'need_invoice_verify'),
         _finish(),
-    ])
+    ], question='报销TRIP-HISTORY-001对应发票', allow_business_actions=False)
     active_memory = {'taskType': 'EXPENSE_REQUEST', 'status': 'ACTIVE'}
     history = checkpoint_runtime.load_execution_history(
         graph=checkpoint_runtime.get_graph(use_planner=True),
@@ -500,10 +511,10 @@ def test_h3_active_memory_hydrates_history_but_resets_current_tool_history(check
     finish = _finish('continued')
     with patch('app.agents.planner_node.call_llm', return_value=finish) as planner:
         result = run_langgraph_agent(
-            '继续刚才的报销任务',
+            '查看已保存的执行历史',
             use_planner=True,
             employee_id='E10001',
-            allow_business_actions=True,
+            allow_business_actions=False,
             business_date=date(2026, 8, 27),
             graph=checkpoint_runtime.get_graph(use_planner=True),
             runtime_thread_id=thread_id,
@@ -569,7 +580,7 @@ def test_h6_only_successful_eligible_tools_enter_history(checkpoint_runtime):
         invoice.invoke.side_effect = TimeoutError('invoice timeout')
         rag.invoke.return_value = json.dumps({'success': True, 'answer': 'ok'})
         result = run_langgraph_agent(
-            '继续刚才的报销任务', use_planner=True, employee_id='E10001',
+            '报销TRIP-HISTORY-001对应发票', use_planner=True, employee_id='E10001',
             graph=checkpoint_runtime.get_graph(use_planner=True),
             runtime_thread_id=thread_id,
         )
@@ -590,9 +601,11 @@ def test_h6_only_successful_eligible_tools_enter_history(checkpoint_runtime):
 def test_h7_latest_invoice_verification_replaces_old_summary(checkpoint_runtime):
     thread_id = _thread_id('p3-2-h7') + ':planner-v1'
     _run_history_round(checkpoint_runtime, thread_id, [
+        _tool('travel_record_tool', {}, 'need_travel_history'),
         _tool('invoice_verify_tool', {'invoice_id': 'INV-HISTORY-001'}, 'need_invoice_verify'),
         _finish(),
-    ], invoice_result=_invoice_result(valid=True))
+    ], question='报销TRIP-HISTORY-001对应发票', allow_business_actions=False,
+        invoice_result=_invoice_result(valid=True))
     history = checkpoint_runtime.load_execution_history(
         graph=checkpoint_runtime.get_graph(use_planner=True),
         thread_id=thread_id,
@@ -600,9 +613,11 @@ def test_h7_latest_invoice_verification_replaces_old_summary(checkpoint_runtime)
     )
     result = _run_history_round(
         checkpoint_runtime, thread_id, [
+            _tool('travel_record_tool', {}, 'need_travel_history'),
             _tool('invoice_verify_tool', {'invoice_id': 'INV-HISTORY-001'}, 'need_invoice_verify'),
             _finish(),
-        ], execution_history=history,
+        ], question='报销TRIP-HISTORY-001对应发票', allow_business_actions=False,
+        execution_history=history,
         memory_context={'taskType': 'EXPENSE_REQUEST', 'status': 'ACTIVE'},
         invoice_result=_invoice_result(valid=False),
     )

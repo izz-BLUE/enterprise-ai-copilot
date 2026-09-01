@@ -162,7 +162,9 @@ def _enable_expense_tools(monkeypatch):
 
 
 def test_r1_to_r16_real_postgres_crash_restart_resume_and_fail_closed():
-    question = '帮我报销上海出差费用。'
+    # This test validates checkpoint crash/restart semantics, not Expense
+    # reason extraction or the reason-first continuation contract.
+    question = '报销TRIP-P3-3-001对应发票'
     business_date = date(2026, 8, 27)
     thread_id = _thread_id('p3-3-r1-r16')
     calls = {'planner': 0}
@@ -178,12 +180,12 @@ def test_r1_to_r16_real_postgres_crash_restart_resume_and_fail_closed():
                 run_langgraph_agent(
                     question,
                     use_planner=True,
-                    allow_business_actions=True,
                     business_date=business_date,
                     employee_id='E10001',
                     trace_id='trace-A',
                     graph=crash_graph,
                     runtime_thread_id=thread_id,
+                    allow_business_actions=False,
                 )
 
         crashed = crash_graph.get_state(_config(thread_id))
