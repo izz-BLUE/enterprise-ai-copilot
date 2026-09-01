@@ -31,6 +31,7 @@ public final class PendingAction {
     private final Instant createdAt;
     private final Instant expiresAt;
     private final Instant completedAt;
+    private final HitlReconciliationStatus hitlReconciliationStatus;
     // V2 §十八: action_payload_json 是业务 payload 的 canonical 边界。
     // 该字段为 JSON 文本（String），nullable（历史数据可能缺失）。
     private final String actionPayloadJson;
@@ -61,6 +62,25 @@ public final class PendingAction {
                          String failureCode, Instant createdAt, Instant expiresAt,
                          Instant completedAt, String actionPayloadJson,
                          String agentExecutionId, String hitlWaitId) {
+        this(actionId, actionType, originTraceId, ownerUserId, conversationId,
+                employeeId, displayName, startDate, endDate, halfDay, reason, days,
+                balanceBefore, balanceAfter, confirmationNonceDigest, status,
+                idempotencyKey, requestId, executionMessage, failureCode, createdAt,
+                expiresAt, completedAt, actionPayloadJson, agentExecutionId, hitlWaitId,
+                null);
+    }
+
+    public PendingAction(String actionId, BusinessActionType actionType, String originTraceId,
+                         String ownerUserId, String conversationId,
+                         String employeeId, String displayName, LocalDate startDate,
+                         LocalDate endDate, HalfDay halfDay, String reason, BigDecimal days,
+                         BigDecimal balanceBefore, BigDecimal balanceAfter,
+                         byte[] confirmationNonceDigest, ActionStatus status,
+                         UUID idempotencyKey, String requestId, String executionMessage,
+                         String failureCode, Instant createdAt, Instant expiresAt,
+                         Instant completedAt, String actionPayloadJson,
+                         String agentExecutionId, String hitlWaitId,
+                         HitlReconciliationStatus hitlReconciliationStatus) {
         this.actionId = actionId;
         this.actionType = actionType;
         this.originTraceId = originTraceId;
@@ -86,6 +106,7 @@ public final class PendingAction {
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
         this.completedAt = completedAt;
+        this.hitlReconciliationStatus = hitlReconciliationStatus;
         this.actionPayloadJson = actionPayloadJson;
     }
 
@@ -173,6 +194,7 @@ public final class PendingAction {
     public Instant createdAt() { return createdAt; }
     public Instant expiresAt() { return expiresAt; }
     public Instant completedAt() { return completedAt; }
+    public HitlReconciliationStatus hitlReconciliationStatus() { return hitlReconciliationStatus; }
     /** 业务 payload JSON 文本（V2 §十八），可为 null（历史数据）。 */
     public String actionPayloadJson() { return actionPayloadJson; }
 }

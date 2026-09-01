@@ -162,7 +162,7 @@ class LangGraphAgentActionMappingTest {
                 new ChatRequest("根据最近一次已批准出差准备报销", "expense-reason-conv"), request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        verify(memoryService).upsertActiveExpenseReasonContinuation(
+        verify(memoryService).startNewActiveExpenseReasonCycle(
                 "U10001", "expense-reason-conv", "根据最近一次已批准出差准备报销");
         verify(memoryService, never()).upsertActiveFromAgent(
                 anyString(), anyString(), anyString(), anyMap(), anyString());

@@ -100,6 +100,19 @@ public class JdbcAiTaskMemoryRepository implements AiTaskMemoryRepository {
     public boolean reactivateTerminalForNextTask(String userId, String conversationId,
                                                  String taskType, String taskStateJson,
                                                  String summary) {
+        return reactivateTerminal(userId, conversationId, taskType, taskStateJson, summary);
+    }
+
+    @Override
+    public boolean reactivateTerminalForNewCycle(String userId, String conversationId,
+                                                 String taskType, String taskStateJson,
+                                                 String summary) {
+        return reactivateTerminal(userId, conversationId, taskType, taskStateJson, summary);
+    }
+
+    private boolean reactivateTerminal(String userId, String conversationId,
+                                       String taskType, String taskStateJson,
+                                       String summary) {
         int affected = jdbc.update("""
                 UPDATE ai_task_memory
                 SET task_type = :taskType, status = 'ACTIVE',

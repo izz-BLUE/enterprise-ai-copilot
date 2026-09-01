@@ -122,7 +122,7 @@ flowchart LR
 
 两种 wait 都需要严格 schema、correlation 和当前 runtime thread。HITL Confirm/Cancel 与 external resume 都不运行 Memory proposal pipeline。
 
-普通 Chat 开始前，Java 先检查同一 owner/conversation 的 `PENDING_CONFIRMATION` TTL。过期的 `WAITING_USER` 在 Java 短事务内变为 `EXPIRED`，对应 Memory 变为 `ABANDONED` 并写审计；事务提交后才通过原有 HITL resume endpoint 发送确定性的 `EXPIRED` decision，收口旧 Graph，然后继续当前 Chat。未过期 wait 仍阻断新 Chat；resume 失败时当前 Chat 不启动，后续请求重试同一 continuation。
+普通 Chat 开始前，Java 先检查同一 owner/conversation 的 `PENDING_CONFIRMATION` TTL。过期的 `WAITING_USER` 在 Java 短事务内变为 `EXPIRED`，对应 Memory 变为 `ABANDONED` 并写审计；有完整 HITL correlation 的新过期 action 同时进入独立的 `PENDING_RECONCILIATION` 投递状态。事务提交后才通过原有 HITL resume endpoint 发送确定性的 `EXPIRED` decision；成功后将投递状态持久化为 `RECONCILED`，后续 Chat 不再重复选择该 action。未过期 wait 仍阻断新 Chat；临时 resume 失败时当前 Chat 不启动，状态保持待投递并允许后续安全重试；`hitl_marker_invalid` 等不安全 409 不直接视为成功。
 
 ## 7. Mock OA、webhook 与 reconciliation
 

@@ -104,6 +104,7 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 业务数据库的关键事实：
 
 - `PendingAction`：确认凭据、owner、conversation、action type、状态和结果；
+- `PendingAction.hitl_reconciliation_status`：仅表示 EXPIRED HITL continuation 是否仍待投递；它与业务 action 的 `status=EXPIRED` 分离，成功投递后持久化为 `RECONCILED`；
 - `LeaveRequest` / leave account：年假业务事实；
 - `ExpenseClaim` / `ExpenseItem`：报销金额、trip/invoice 摘要、外部 provider/request、wait 和 resume markers；
 - `source_action_id` 唯一约束防止一个动作生成多个业务写入。
@@ -160,7 +161,7 @@ sequenceDiagram
 
 TASK_RUNTIME 的 Expense confirm 顺序是：Java PendingAction 成功 → Python 当前 task 使用 trusted `TASK_RUNTIME` context resume 并 END → Java 绑定 external correlation、将 TaskExecution 置为 `WAITING_EXTERNAL` 并提交 OA → 同组下一 Task 可由 Java 启动。OA callback/reconciliation 只通过 `ExpenseClaim.source_action_id` 定位并更新业务结果及对应 TaskExecution，禁止回写 parent queue/checkpoint、下一 task checkpoint、PendingAction 或 Memory。
 
-普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，事务提交后复用 `EXPIRED` `Command(resume)` 收口旧 Graph，再继续当前 Chat；未过期 wait 仍保持阻断。TASK_RUNTIME 的 external callback 不关闭整个 `(user_id, conversation_id)` Memory，因为此时 ACTIVE Memory 可能属于下一 Task；普通 Java terminal authority 的 task memory 收口和下一 Task 的新 ACTIVE Memory 仍按各自 Java 生命周期执行。
+普通 Chat 不会跨过 active wait；同一 runtime thread 的 persisted wait 优先于新问题。进入普通 Chat 前，Java 会在持有同一 runtime-thread guard 的情况下检查当前 owner/conversation 的 `PENDING_CONFIRMATION` TTL。若已过期，Java 在短事务内提交 `PendingAction=EXPIRED`、`Memory=ABANDONED` 和审计记录，并为有完整 HITL correlation 的新过期 action 标记 `PENDING_RECONCILIATION`；事务提交后最多投递一次确定性的 `EXPIRED` `Command(resume)`，成功后将投递状态原子收口为 `RECONCILED`，后续 Chat 不再选择该 action。临时失败仍保持待投递并允许重试；不把 `hitl_marker_invalid` 等不安全 409 直接当作成功。未过期 wait 仍保持阻断。TASK_RUNTIME 的 external callback 不关闭整个 `(user_id, conversation_id)` Memory，因为此时 ACTIVE Memory 可能属于下一 Task；普通 Java terminal authority 的 task memory 收口和下一 Task 的新 ACTIVE Memory 仍按各自 Java 生命周期执行。
 
 ## 7. 确认时重新校验与 TOCTOU
 
@@ -213,7 +214,7 @@ POSTGRES 请求使用 `durability="sync"`。恢复检查只读取 latest snapsho
 | Python finalizer 在 external result Checkpoint 之后崩溃（LEGACY_SINGLE） | Checkpoint 包含 external result | `EXTERNAL_CONTINUATION` → 确定性 finalize |
 | 下一个 Task 活跃时收到 TASK_RUNTIME external callback | ExpenseClaim 是业务权威；TaskExecution 仅用于关联/生命周期 | 只更新 ExpenseClaim + 关联的 TaskExecution；不调用 Python external resume，也不写 Memory/checkpoint |
 | 同一 runtime thread 收到并发工作 | Java/Python 进程内 guard | busy/retry；不宣称多实例所有权 |
-| 过期的 `WAITING_USER` 阻断新 Chat | Java `PendingAction` TTL + Memory 终态转换 | 提交 `EXPIRED`/`ABANDONED`，然后重放精确的 `EXPIRED` HITL resume，再启动新 Chat |
+| 过期的 `WAITING_USER` 阻断新 Chat | Java `PendingAction` TTL + `hitl_reconciliation_status` + Memory 终态转换 | 提交 `EXPIRED`/`ABANDONED`，成功投递后持久化 `RECONCILED`，然后启动新 Chat；临时失败才重试 |
 
 ## 10. Memory 与历史边界
 
@@ -230,7 +231,7 @@ Java VerifiedIdentity + conversationId
   → Java authenticated lifecycle write
 ```
 
-Trigger 规则：`action_proposal` 或 Memory-eligible Tool 成功才触发；现有 ACTIVE Memory 本身不触发，纯 RAG/eval/余额/leave request/expense status/read-only MCP 成功也不触发。Python write policy 只产生 `UPSERT + ACTIVE`，不接受 `COMPLETE`、`ABANDON` 或终态业务写入；Java 负责 terminal lifecycle 和 owner scope。
+Trigger 规则：`action_proposal` 或 Memory-eligible Tool 成功才触发；现有 ACTIVE Memory 本身不触发，纯 RAG/eval/余额/leave request/expense status/read-only MCP 成功也不触发。Python write policy 只产生 `UPSERT + ACTIVE`，不接受 `COMPLETE`、`ABANDON` 或终态业务写入；Java 负责 terminal lifecycle 和 owner scope。普通 Agent proposal/upsert 不重新激活终态 Memory；Java 仅在已确定当前响应开启新的 Expense reason clarification cycle 时，通过显式新周期入口创建 `ACTIVE` 的 `EXPENSE_REQUEST` Memory，并以当前新 Q1 作为 `original_request`。后续 Q2 只补 `reason`，不能覆盖 Q1。
 
 | 名称 | 语义 | 不能做什么 |
 |---|---|---|

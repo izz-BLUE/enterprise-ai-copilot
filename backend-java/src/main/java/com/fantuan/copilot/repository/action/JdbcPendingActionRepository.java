@@ -3,6 +3,7 @@ package com.fantuan.copilot.repository.action;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.HitlReconciliationStatus;
 import com.fantuan.copilot.model.action.PendingAction;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -25,7 +26,7 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
             employee_id, display_name, start_date, end_date, half_day, reason, days,
             balance_before, balance_after, confirmation_nonce_digest, status, idempotency_key,
             request_id, execution_message, failure_code, created_at, expires_at, completed_at,
-            action_payload_json, agent_execution_id, hitl_wait_id
+            action_payload_json, agent_execution_id, hitl_wait_id, hitl_reconciliation_status
             """;
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -109,6 +110,7 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                         + "AND conversation_id = :conversation "
                         + "AND status = 'EXPIRED' "
                         + "AND agent_execution_id IS NOT NULL AND hitl_wait_id IS NOT NULL "
+                        + "AND hitl_reconciliation_status = 'PENDING_RECONCILIATION' "
                         + "ORDER BY completed_at DESC NULLS LAST, action_id DESC LIMIT 1",
                 Map.of("owner", ownerUserId, "conversation", conversationId), rowMapper)
                 .stream().findFirst();
@@ -180,15 +182,30 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
     @Override
     public void markExpired(String actionId, Instant completedAt) {
         jdbc.update("UPDATE business_action SET status = 'EXPIRED', failure_code = 'ACTION_EXPIRED', "
+                        + "hitl_reconciliation_status = CASE WHEN agent_execution_id IS NOT NULL "
+                        + "AND hitl_wait_id IS NOT NULL THEN 'PENDING_RECONCILIATION' ELSE NULL END, "
                         + "completed_at = :completedAt WHERE action_id = :id "
                         + "AND status = 'PENDING_CONFIRMATION'",
                 Map.of("id", actionId, "completedAt", Timestamp.from(completedAt)));
     }
 
     @Override
+    public boolean markHitlReconciliationReconciled(String actionId) {
+        int changed = jdbc.update("UPDATE business_action "
+                        + "SET hitl_reconciliation_status = 'RECONCILED' "
+                        + "WHERE action_id = :id AND status = 'EXPIRED' "
+                        + "AND hitl_reconciliation_status = 'PENDING_RECONCILIATION'",
+                Map.of("id", actionId));
+        return changed == 1;
+    }
+
+    @Override
     public int expirePending(Instant now) {
         return jdbc.update("UPDATE business_action SET status = 'EXPIRED', "
-                        + "failure_code = 'ACTION_EXPIRED', completed_at = :now "
+                        + "failure_code = 'ACTION_EXPIRED', "
+                        + "hitl_reconciliation_status = CASE WHEN agent_execution_id IS NOT NULL "
+                        + "AND hitl_wait_id IS NOT NULL THEN 'PENDING_RECONCILIATION' ELSE NULL END, "
+                        + "completed_at = :now "
                         + "WHERE status = 'PENDING_CONFIRMATION' AND expires_at <= :now",
                 Map.of("now", Timestamp.from(now)));
     }
@@ -208,6 +225,8 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 WHERE action_id IN (
                     SELECT action_id FROM business_action
                     WHERE status IN ('CANCELLED', 'EXPIRED', 'FAILED')
+                      AND (status <> 'EXPIRED'
+                           OR hitl_reconciliation_status IS DISTINCT FROM 'PENDING_RECONCILIATION')
                     ORDER BY completed_at DESC NULLS LAST, action_id DESC
                     OFFSET :maxCompleted)
                 """, Map.of("maxCompleted", maxCompleted));
@@ -260,7 +279,9 @@ public class JdbcPendingActionRepository implements PendingActionRepository {
                 rs.getString("execution_message"), rs.getString("failure_code"),
                 instant(rs, "created_at"), instant(rs, "expires_at"), instant(rs, "completed_at"),
                 rs.getString("action_payload_json"), rs.getString("agent_execution_id"),
-                rs.getString("hitl_wait_id"));
+                rs.getString("hitl_wait_id"),
+                rs.getString("hitl_reconciliation_status") == null ? null
+                        : HitlReconciliationStatus.valueOf(rs.getString("hitl_reconciliation_status")));
     }
 
     private Instant instant(ResultSet rs, String column) throws SQLException {

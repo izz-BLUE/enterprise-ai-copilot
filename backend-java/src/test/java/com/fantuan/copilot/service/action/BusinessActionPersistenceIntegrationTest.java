@@ -9,6 +9,7 @@ import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.HitlReconciliationStatus;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
@@ -99,8 +100,9 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         // P2-A V6: action_payload_json 泛化迁移；V7: expense_claim / expense_item；
         // P3-4 V8：持久化 HITL wait correlation；P3-5B1 V9：OA 关联列/索引；
         // P3-5B2b V10：外部审批最近检查时间戳；
-        // P3-5B3 V11：外部恢复投递标记；Phase 2 V12：Java Task Runtime。
-        assertEquals(12, migrations);
+        // P3-5B3 V11：外部恢复投递标记；Phase 2 V12：Java Task Runtime；
+        // Expired HITL continuation delivery V13。
+        assertEquals(13, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());
@@ -419,11 +421,16 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         assertEquals(TaskStatus.ABANDONED,
                 memoryService.find(USER_A.userId(), CONV_LIFECYCLE).orElseThrow().status());
 
-        Instant completedAt = actions.find(expiredView.actionId()).orElseThrow().completedAt();
-        PendingAction replay = actionService.reconcileExpiredForChat(
-                USER_A.userId(), CONV_LIFECYCLE, "chat-reconcile-retry").orElseThrow();
-        assertEquals(expiredView.actionId(), replay.actionId());
-        assertEquals(ActionStatus.EXPIRED, replay.status());
+        PendingAction expiredRecord = actions.find(expiredView.actionId()).orElseThrow();
+        assertEquals(HitlReconciliationStatus.PENDING_RECONCILIATION,
+                expiredRecord.hitlReconciliationStatus());
+        assertTrue(actions.markHitlReconciliationReconciled(expiredView.actionId()));
+        assertEquals(HitlReconciliationStatus.RECONCILED,
+                actions.find(expiredView.actionId()).orElseThrow().hitlReconciliationStatus());
+        Instant completedAt = expiredRecord.completedAt();
+        assertTrue(actionService.reconcileExpiredForChat(
+                USER_A.userId(), CONV_LIFECYCLE, "chat-reconcile-retry").isEmpty(),
+                "已成功收口的 expired HITL 不应再次被选择做 continuation");
         assertEquals(completedAt, actions.find(expiredView.actionId()).orElseThrow().completedAt());
 
         PendingActionView replacement = actionService.createHitlPending(

@@ -114,6 +114,64 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     }
 
     @Test
+    void ordinaryExpenseProposalPreservesOriginalRequestAfterReasonFollowUp() {
+        String q1 = "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。";
+
+        service.startNewActiveExpenseReasonCycle(U1, CONV_A, q1);
+        service.upsertActiveFromAgent(U1, CONV_A, "EXPENSE_REQUEST",
+                java.util.Map.of("waiting_for", "user_confirmation",
+                        "reason", "客户拜访"),
+                "已生成报销申请草稿，等待确认");
+
+        AiTaskMemory proposal = service.find(U1, CONV_A).orElseThrow();
+        assertTrue(proposal.taskStateJson().contains("\"original_request\":\""
+                + q1 + "\""), "原因补充后的普通 proposal 写入不得丢失 Q1");
+        assertTrue(proposal.taskStateJson().contains("\"reason\":\"客户拜访\""));
+    }
+
+    @Test
+    void terminalExpenseMemoryCanStartExplicitNewReasonCycle() {
+        String oldRequest = "旧的报销申请";
+        String newRequest = "帮我准备差旅报销申请。";
+
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, oldRequest);
+        service.abandon(U1, CONV_A);
+        service.startNewActiveExpenseReasonCycle(U1, CONV_A, newRequest);
+
+        AiTaskMemory row = service.find(U1, CONV_A).orElseThrow();
+        assertEquals(TaskStatus.ACTIVE, row.status());
+        assertEquals("EXPENSE_REQUEST", row.taskType());
+        assertEquals("{\"waiting_for\":\"reason\",\"original_request\":\""
+                + newRequest + "\"}", row.taskStateJson());
+    }
+
+    @Test
+    void ordinaryExpenseContinuationStillCannotReactivateTerminalMemory() {
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, "旧的报销申请");
+        service.abandon(U1, CONV_A);
+
+        assertThrows(MemoryWriteException.class, () ->
+                service.upsertActiveExpenseReasonContinuation(U1, CONV_A, "新的报销申请"));
+        assertEquals(TaskStatus.ABANDONED,
+                service.find(U1, CONV_A).orElseThrow().status());
+    }
+
+    @Test
+    void terminalExpenseMemoryDoesNotLeakIntoNewLeaveTask() {
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, "旧的报销申请");
+        service.abandon(U1, CONV_A);
+
+        service.upsertActiveForNextTask(U1, CONV_A, "LEAVE_REQUEST",
+                java.util.Map.of("waiting_for", "date"), "等待请假日期");
+
+        AiTaskMemory next = service.find(U1, CONV_A).orElseThrow();
+        assertEquals(TaskStatus.ACTIVE, next.status());
+        assertEquals("LEAVE_REQUEST", next.taskType());
+        assertEquals("{\"waiting_for\":\"date\"}", next.taskStateJson());
+        assertFalse(next.taskStateJson().contains("旧的报销申请"));
+    }
+
+    @Test
     void completedToCompletedIsIdempotentReplay() {
         service.upsert(U1, CONV_A, "GENERIC", TaskStatus.ACTIVE, "{}", "active");
         service.complete(U1, CONV_A);

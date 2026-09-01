@@ -53,7 +53,7 @@ public final class AgentMemoryCoordinator {
     public void persistExpenseReasonContinuation(String originalRequest, String userId,
                                                  String conversationId, String traceId) {
         try {
-            memoryService.upsertActiveExpenseReasonContinuation(userId, conversationId,
+            memoryService.startNewActiveExpenseReasonCycle(userId, conversationId,
                     originalRequest);
         } catch (RuntimeException exception) {
             log.warn("[{}] Expense reason continuation 持久化失败: type={}", traceId,

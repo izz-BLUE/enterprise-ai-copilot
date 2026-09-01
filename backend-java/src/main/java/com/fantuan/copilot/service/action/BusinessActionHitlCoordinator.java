@@ -11,6 +11,7 @@ import com.fantuan.copilot.gateway.python.PythonAgentGateway;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
+import com.fantuan.copilot.model.action.HitlReconciliationStatus;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
@@ -754,7 +755,15 @@ public class BusinessActionHitlCoordinator {
         try {
             PythonAgentResponse response = postResume(action.ownerUserId(), identity,
                     action.conversationId(), presentedToken, traceId, payload);
-            return isSuccessful(response) && response.externalWait() == null;
+            boolean successful = isSuccessful(response) && response.externalWait() == null;
+            if (successful && action.status() == ActionStatus.EXPIRED
+                    && action.hitlReconciliationStatus() == HitlReconciliationStatus.PENDING_RECONCILIATION
+                    && !actions.markHitlReconciliationReconciled(action.actionId())) {
+                log.warn("[{}] HITL_RECONCILIATION_STATE_NOT_PERSISTED actionIdPrefix={}",
+                        traceId, BusinessActionService.auditRef(action.actionId()));
+                return false;
+            }
+            return successful;
         } catch (RuntimeException exception) {
             log.warn("[{}] HITL_CONTINUATION_PENDING actionIdPrefix={} errorType={}",
                     traceId, BusinessActionService.auditRef(action.actionId()),

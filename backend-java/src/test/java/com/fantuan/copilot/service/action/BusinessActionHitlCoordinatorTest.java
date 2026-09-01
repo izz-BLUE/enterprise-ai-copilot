@@ -11,10 +11,12 @@ import com.fantuan.copilot.dto.action.HitlWaitMarker;
 import com.fantuan.copilot.dto.action.ExternalWaitMarker;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.gateway.python.PythonAgentGateway;
+import com.fantuan.copilot.gateway.python.PythonAgentTransportException;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.HitlReconciliationStatus;
 import com.fantuan.copilot.model.action.PendingAction;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
@@ -94,6 +96,14 @@ class BusinessActionHitlCoordinatorTest {
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
     }
 
+    private void stubResumePostDependencies(boolean allowBusinessActions) {
+        when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
+                .thenReturn(RUNTIME_THREAD_ID);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(allowBusinessActions);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+    }
+
     @Test
     void unexpiredOrMissingChatActionDoesNotResumePythonCheckpoint() {
         when(actionService.reconcileExpiredForChat(
@@ -116,6 +126,9 @@ class BusinessActionHitlCoordinatorTest {
         when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(false);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
         PendingAction expired = terminalAction(ActionStatus.EXPIRED);
+        when(expired.hitlReconciliationStatus()).thenReturn(
+                HitlReconciliationStatus.PENDING_RECONCILIATION);
+        when(actions.markHitlReconciliationReconciled(ACTION_ID)).thenReturn(true);
         when(actionService.reconcileExpiredForChat(
                 IDENTITY.userId(), CONVERSATION_ID, "chat-expired"))
                 .thenReturn(Optional.of(expired));
@@ -134,8 +147,83 @@ class BusinessActionHitlCoordinatorTest {
         assertEquals(ActionStatus.EXPIRED, payload.getValue().actionStatus());
         assertEquals(ACTION_ID, payload.getValue().actionId());
         assertEquals("该申请草稿已过期，请重新生成。", payload.getValue().message());
+        verify(actions).markHitlReconciliationReconciled(ACTION_ID);
         verify(threadGuard, never()).tryAcquire(anyString());
         verify(threadGuard, never()).release(anyString());
+    }
+
+    @Test
+    void successfulExpiredResumeIsNotRepeatedAfterReconciliation() {
+        stubResumePostDependencies(false);
+        PendingAction expired = terminalAction(ActionStatus.EXPIRED);
+        when(expired.hitlReconciliationStatus()).thenReturn(
+                HitlReconciliationStatus.PENDING_RECONCILIATION);
+        when(actions.markHitlReconciliationReconciled(ACTION_ID)).thenReturn(true);
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-first"))
+                .thenReturn(Optional.of(expired));
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-second"))
+                .thenReturn(Optional.empty());
+        doReturn(new PythonAgentResponse("expired", "action", true, "business_action", "",
+                List.of(), true, "resume-trace", null, List.of(), null))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-first"));
+
+        assertTrue(coordinator.reconcileExpiredBeforeChat(
+                "chat-first", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+        assertTrue(coordinator.reconcileExpiredBeforeChat(
+                "chat-second", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        verify(pythonAgentGateway, times(1)).post(eq("/agent/langgraph/hitl/resume"), any(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-first"));
+        verify(actions, times(1)).markHitlReconciliationReconciled(ACTION_ID);
+    }
+
+    @Test
+    void failedExpiredResumeRemainsRetryableAndIsNotMarkedReconciled() {
+        stubResumePostDependencies(false);
+        PendingAction expired = terminalAction(ActionStatus.EXPIRED);
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-failed"))
+                .thenReturn(Optional.of(expired));
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-failed-retry"))
+                .thenReturn(Optional.of(expired));
+        doThrow(new RuntimeException("python unavailable"))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-failed"));
+        doThrow(new RuntimeException("python still unavailable"))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class),
+                        eq("chat-failed-retry"));
+
+        assertFalse(coordinator.reconcileExpiredBeforeChat(
+                "chat-failed", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+        assertFalse(coordinator.reconcileExpiredBeforeChat(
+                "chat-failed-retry", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        verify(actions, never()).markHitlReconciliationReconciled(ACTION_ID);
+        verify(pythonAgentGateway, times(2)).post(eq("/agent/langgraph/hitl/resume"), any(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), anyString());
+    }
+
+    @Test
+    void incompatibleExpiredResumeRemainsFailClosed() {
+        stubResumePostDependencies(false);
+        PendingAction expired = terminalAction(ActionStatus.EXPIRED);
+        when(actionService.reconcileExpiredForChat(
+                IDENTITY.userId(), CONVERSATION_ID, "chat-unsafe"))
+                .thenReturn(Optional.of(expired));
+        doThrow(new PythonAgentTransportException(HttpStatus.CONFLICT,
+                "Python Agent recovery conflict", null))
+                .when(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), any(),
+                        any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("chat-unsafe"));
+
+        assertFalse(coordinator.reconcileExpiredBeforeChat(
+                "chat-unsafe", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        verify(actions, never()).markHitlReconciliationReconciled(ACTION_ID);
     }
 
     @Test

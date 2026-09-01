@@ -27,6 +27,8 @@ public interface PendingActionRepository {
     void markCancelled(String actionId, String message, Instant completedAt);
     void markFailed(String actionId, String failureCode, Instant completedAt);
     void markExpired(String actionId, Instant completedAt);
+    /** 记录 expired HITL continuation 已成功投递到 Python checkpoint。 */
+    boolean markHitlReconciliationReconciled(String actionId);
     /** 待过期动作快照：供调用方在批量过期前做 Memory 收口（需 owner/conversation 关联信息）。 */
     List<PendingAction> findExpired(Instant now);
     int expirePending(Instant now);

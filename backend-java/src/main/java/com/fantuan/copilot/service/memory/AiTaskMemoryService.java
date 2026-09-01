@@ -26,7 +26,8 @@ import java.util.Optional;
  *     并拒绝任何疑似敏感字段写入；字符串值做敏感内容脱敏（与 Python 同规则兜底）。
  *  4. 状态机：无记录仅允许 ACTIVE；ACTIVE 可写入任意状态；
  *     COMPLETED / ABANDONED 仅允许同终态幂等重放；其余转换由仓储原子 SQL 拒绝
- *     （抛 MEMORY_STATE_CONFLICT 409），终态不可能被后写重新激活。
+ *     （抛 MEMORY_STATE_CONFLICT 409），普通后写不能重新激活终态；只有
+ *     Java 明确授权的下一 task / 新业务周期入口可以建立新上下文。
  *  5. P0 阶段不引入 Safety Guard / Memory Write Guard / Prompt 注入 / Planner 联动。
  */
 @Service
@@ -132,12 +133,36 @@ public class AiTaskMemoryService {
 
         String safeTaskType = sanitizeTaskType(taskType);
         Map<String, Object> sanitizedState = sanitizeTaskStateMap(taskState);
+        preserveActiveExpenseOriginalRequest(userId, conversationId, safeTaskType,
+                sanitizedState);
         String safeJson = serializeTaskState(sanitizedState);
         String safeSummary = sanitizeSummary(summary);
 
         if (!repository.upsert(userId, conversationId, safeTaskType, TaskStatus.ACTIVE,
                 safeJson, safeSummary)) {
             throw stateConflict(userId, conversationId, TaskStatus.ACTIVE);
+        }
+    }
+
+    /**
+     * Expense reason clarification 的 Q1 是 Java 侧 canonical context。
+     * Python 后续返回的普通 Memory proposal 只允许补充当前字段，不能删除或改写 Q1。
+     */
+    private void preserveActiveExpenseOriginalRequest(String userId, String conversationId,
+                                                      String taskType,
+                                                      Map<String, Object> state) {
+        if (!EXPENSE_REQUEST_TASK_TYPE.equals(taskType)) {
+            return;
+        }
+        Optional<AiTaskMemory> existing = repository.find(userId, conversationId);
+        if (existing.isEmpty()
+                || existing.get().status() != TaskStatus.ACTIVE
+                || !EXPENSE_REQUEST_TASK_TYPE.equals(existing.get().taskType())) {
+            return;
+        }
+        String originalRequest = existingOriginalRequest(existing.get());
+        if (originalRequest != null) {
+            state.put("original_request", originalRequest);
         }
     }
 
@@ -170,6 +195,34 @@ public class AiTaskMemoryService {
         state.put("original_request", effectiveOriginal);
         upsertActiveFromAgent(userId, conversationId, EXPENSE_REQUEST_TASK_TYPE, state,
                 "等待补充报销原因");
+    }
+
+    /**
+     * Java-authorized start of a new Expense clarification cycle. A terminal
+     * Memory may only be reactivated through this explicit lifecycle API;
+     * ordinary Agent proposal upsert remains terminal-safe.
+     */
+    public void startNewActiveExpenseReasonCycle(String userId, String conversationId,
+                                                 String originalRequest) {
+        requireOwner("userId", userId);
+        requireOwner("conversationId", conversationId);
+        requireOriginalRequest(originalRequest);
+
+        Optional<AiTaskMemory> existing = repository.find(userId, conversationId);
+        if (existing.isEmpty() || existing.get().status() == TaskStatus.ACTIVE) {
+            upsertActiveExpenseReasonContinuation(userId, conversationId, originalRequest);
+            return;
+        }
+
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("waiting_for", "reason");
+        state.put("original_request", originalRequest);
+        String safeJson = serializeTaskState(sanitizeTaskStateMap(state));
+        String safeSummary = sanitizeSummary("等待补充报销原因");
+        if (!repository.reactivateTerminalForNewCycle(userId, conversationId,
+                EXPENSE_REQUEST_TASK_TYPE, safeJson, safeSummary)) {
+            throw stateConflict(userId, conversationId, TaskStatus.ACTIVE);
+        }
     }
 
     /**
