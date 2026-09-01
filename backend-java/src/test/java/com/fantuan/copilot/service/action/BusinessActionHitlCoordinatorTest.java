@@ -18,6 +18,7 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.HitlReconciliationStatus;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
@@ -40,6 +41,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -75,12 +77,31 @@ class BusinessActionHitlCoordinatorTest {
     @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
 
     private BusinessActionHitlCoordinator coordinator;
+    private BusinessActionHandlerRegistry handlerRegistry;
 
     @BeforeEach
     void setUp() {
+        BusinessActionHandler leave = org.mockito.Mockito.mock(BusinessActionHandler.class,
+                org.mockito.Mockito.withSettings().lenient());
+        when(leave.supports()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        when(leave.taskType()).thenReturn(TaskType.LEAVE_REQUEST);
+        when(leave.deterministicRegistrationRejectionCodes())
+                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION"));
+        when(leave.staleFailureCodes()).thenReturn(Set.of("ACTION_STALE"));
+        BusinessActionHandler expense = org.mockito.Mockito.mock(BusinessActionHandler.class,
+                org.mockito.Mockito.withSettings().lenient());
+        when(expense.supports()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(expense.taskType()).thenReturn(TaskType.EXPENSE_CLAIM);
+        when(expense.deterministicRegistrationRejectionCodes())
+                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+                        "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED"));
+        when(expense.staleFailureCodes()).thenReturn(Set.of("EXPENSE_TRIP_STALE",
+                "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE"));
+        handlerRegistry = new BusinessActionHandlerRegistry(List.of(leave, expense));
         coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService,
-                threadGuard, adminAccessService, externalApprovalCoordinator);
+                threadGuard, adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry, null, null);
     }
 
     private void stubResumeDependencies() {
@@ -425,8 +446,10 @@ class BusinessActionHitlCoordinatorTest {
         when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
         when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(true);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
-        BusinessActionProposal proposal = registrationProposal();
-        HitlWaitMarker wait = registrationWait();
+        BusinessActionType actionType = "BUSINESS_RULE_VIOLATION".equals(errorCode)
+                ? BusinessActionType.ANNUAL_LEAVE_REQUEST : BusinessActionType.EXPENSE_CLAIM;
+        BusinessActionProposal proposal = registrationProposal(actionType);
+        HitlWaitMarker wait = registrationWait(actionType);
         when(actionService.createHitlPending(
                 proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
@@ -467,8 +490,8 @@ class BusinessActionHitlCoordinatorTest {
     @MethodSource("transientRegistrationRejections")
     void transientRegistrationRejectionDoesNotResumeOrCloseMemory(
             HttpStatus status, String errorCode) {
-        BusinessActionProposal proposal = registrationProposal();
-        HitlWaitMarker wait = registrationWait();
+        BusinessActionProposal proposal = registrationProposal(BusinessActionType.EXPENSE_CLAIM);
+        HitlWaitMarker wait = registrationWait(BusinessActionType.EXPENSE_CLAIM);
         when(actionService.createHitlPending(
                 proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
@@ -484,8 +507,8 @@ class BusinessActionHitlCoordinatorTest {
 
     @Test
     void memoryFailureKeepsDeterministicRegistrationWaitingAndSkipsGraphResume() {
-        BusinessActionProposal proposal = registrationProposal();
-        HitlWaitMarker wait = registrationWait();
+        BusinessActionProposal proposal = registrationProposal(BusinessActionType.EXPENSE_CLAIM);
+        HitlWaitMarker wait = registrationWait(BusinessActionType.EXPENSE_CLAIM);
         when(actionService.createHitlPending(
                 proposal, "trace", ADMIN_TOKEN, IDENTITY,
                 CONVERSATION_ID, wait.executionId(), wait.waitId()))
@@ -511,8 +534,8 @@ class BusinessActionHitlCoordinatorTest {
         when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(false);
         when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(false);
         when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
-        BusinessActionProposal proposal = registrationProposal();
-        HitlWaitMarker wait = registrationWait();
+        BusinessActionProposal proposal = registrationProposal(BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        HitlWaitMarker wait = registrationWait(BusinessActionType.ANNUAL_LEAVE_REQUEST);
         PendingAction expired = terminalAction(ActionStatus.EXPIRED);
         PendingActionView view = new PendingActionView(
                 ACTION_ID, BusinessActionType.ANNUAL_LEAVE_REQUEST, ActionStatus.EXPIRED,
@@ -580,16 +603,21 @@ class BusinessActionHitlCoordinatorTest {
                 "ex_" + "b".repeat(32), "wait_" + "a".repeat(64));
     }
 
-    private static BusinessActionProposal registrationProposal() {
+    private static BusinessActionProposal registrationProposal(BusinessActionType actionType) {
+        if (actionType == BusinessActionType.EXPENSE_CLAIM) {
+            BusinessActionProposal proposal = org.mockito.Mockito.mock(BusinessActionProposal.class);
+            when(proposal.actionType()).thenReturn(actionType);
+            return proposal;
+        }
         return new AnnualLeaveActionProposal(
-                BusinessActionType.ANNUAL_LEAVE_REQUEST,
+                actionType,
                 LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 1), "私事", HalfDay.NONE);
     }
 
-    private static HitlWaitMarker registrationWait() {
+    private static HitlWaitMarker registrationWait(BusinessActionType actionType) {
         return new HitlWaitMarker(
                 1, "BUSINESS_ACTION_CONFIRMATION", "wait_" + "a".repeat(64),
-                "ex_" + "b".repeat(32), BusinessActionType.ANNUAL_LEAVE_REQUEST);
+                "ex_" + "b".repeat(32), actionType);
     }
 
     private static Stream<String> deterministicRegistrationRejections() {

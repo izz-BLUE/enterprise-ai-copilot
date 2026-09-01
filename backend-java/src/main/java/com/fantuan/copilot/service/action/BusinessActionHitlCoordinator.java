@@ -21,7 +21,6 @@ import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.model.task.TaskExecution;
 import com.fantuan.copilot.model.task.TaskExecutionStatus;
-import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.service.task.TaskRuntimeException;
 import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +53,7 @@ public class BusinessActionHitlCoordinator {
     private final AdminAccessService adminAccessService;
     private final ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
     private final ExpenseConfirmRevalidationService expenseRevalidation;
+    private final BusinessActionHandlerRegistry handlerRegistry;
     private final TaskRuntimeService taskRuntimeService;
     private final AgentMemoryCoordinator memoryCoordinator;
 
@@ -66,6 +66,7 @@ public class BusinessActionHitlCoordinator {
                                          AdminAccessService adminAccessService,
                                          ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
                                          ExpenseConfirmRevalidationService expenseRevalidation,
+                                         BusinessActionHandlerRegistry handlerRegistry,
                                          TaskRuntimeService taskRuntimeService,
                                          AiTaskMemoryService memoryService) {
         this.actionService = actionService;
@@ -76,6 +77,7 @@ public class BusinessActionHitlCoordinator {
         this.adminAccessService = adminAccessService;
         this.externalApprovalCoordinator = externalApprovalCoordinator;
         this.expenseRevalidation = expenseRevalidation;
+        this.handlerRegistry = handlerRegistry;
         this.taskRuntimeService = taskRuntimeService;
         this.memoryCoordinator = memoryService == null ? null : new AgentMemoryCoordinator(memoryService);
     }
@@ -89,7 +91,8 @@ public class BusinessActionHitlCoordinator {
                                          AdminAccessService adminAccessService,
                                          ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
         this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null, null, null);
+                adminAccessService, externalApprovalCoordinator, null,
+                new BusinessActionHandlerRegistry(java.util.List.of()), null, null);
     }
 
     /** 兼容执行报销重新校验的测试的构造方法。 */
@@ -103,7 +106,24 @@ public class BusinessActionHitlCoordinator {
                                          ExpenseConfirmRevalidationService expenseRevalidation) {
         this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, expenseRevalidation,
-                null, null);
+                new BusinessActionHandlerRegistry(java.util.List.of()), null, null);
+    }
+
+    /** 兼容既有 Task Runtime 聚焦测试的构造方法。 */
+    public BusinessActionHitlCoordinator(BusinessActionService actionService,
+                                         PendingActionRepository actions,
+                                         PythonAgentGateway pythonAgentGateway,
+                                         AgentRuntimeThreadIdService threadIdService,
+                                         AgentRuntimeThreadExecutionGuard threadGuard,
+                                         AdminAccessService adminAccessService,
+                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
+                                         ExpenseConfirmRevalidationService expenseRevalidation,
+                                         TaskRuntimeService taskRuntimeService,
+                                         AiTaskMemoryService memoryService) {
+        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
+                new BusinessActionHandlerRegistry(java.util.List.of()), taskRuntimeService,
+                memoryService);
     }
 
     /**
@@ -172,7 +192,7 @@ public class BusinessActionHitlCoordinator {
             }
             return view;
         } catch (ActionException exception) {
-            if (isDeterministicRegistrationRejection(exception)) {
+            if (isDeterministicRegistrationRejection(proposal, exception)) {
                 // 此路径不存在 PendingAction。只关闭 Java 已有的 ACTIVE task memory，
                 // 并拒绝持久化 wait；绝不为了关联而伪造 action 记录。
                 // Memory 是 Graph 终态化之前由 Java 负责的生命周期前置步骤。
@@ -500,7 +520,9 @@ public class BusinessActionHitlCoordinator {
             }
             if (response.actionProposal() != null) {
                 if (!taskRuntimeService.matchesTaskType(task,
-                        taskType(response.actionProposal().actionType()))
+                        handlerRegistry.taskTypeFor(response.actionProposal().actionType())
+                                .orElseThrow(() -> new TaskRuntimeException(
+                                        "Task Runtime Proposal action type 不受支持。")))
                         || response.hitlWait() == null) {
                     throw new TaskRuntimeException("Task Runtime Proposal 与任务关联不匹配。 ");
                 }
@@ -605,13 +627,6 @@ public class BusinessActionHitlCoordinator {
                 Boolean.toString(actionService.isAllowed(presentedToken, identity)));
         headers.set("X-Business-Date", actionService.businessDate().toString());
         return headers;
-    }
-
-    private TaskType taskType(BusinessActionType actionType) {
-        return switch (actionType) {
-            case ANNUAL_LEAVE_REQUEST -> TaskType.LEAVE_REQUEST;
-            case EXPENSE_CLAIM -> TaskType.EXPENSE_CLAIM;
-        };
     }
 
     private boolean isSuccessful(PythonAgentResponse response) {
@@ -822,17 +837,13 @@ public class BusinessActionHitlCoordinator {
      * 只有明确且确定性的 Proposal 校验失败才可以关闭持久化 wait。
      * 新业务错误码必须经过审查后有意加入；仅凭 HTTP status 永远不足以完成分类。
      */
-    private static boolean isDeterministicRegistrationRejection(ActionException exception) {
-        if (exception == null || exception.errorCode() == null) {
-            return false;
-        }
-        return switch (exception.errorCode()) {
-            case "BUSINESS_RULE_VIOLATION",
-                    "EXPENSE_ITEMS_REQUIRED",
-                    "EXPENSE_AMOUNT_INVALID",
-                    "EXPENSE_INVOICES_REQUIRED" -> true;
-            default -> false;
-        };
+    private boolean isDeterministicRegistrationRejection(BusinessActionProposal proposal,
+                                                         ActionException exception) {
+        return exception != null
+                && exception.errorCode() != null
+                && proposal != null
+                && handlerRegistry.acceptsDeterministicRegistrationRejection(
+                        proposal.actionType(), exception.errorCode());
     }
 
     private static String boundedMessage(String message) {

@@ -1,6 +1,7 @@
 package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.model.action.BusinessActionType;
+import com.fantuan.copilot.model.task.TaskType;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,5 +29,23 @@ public class BusinessActionHandlerRegistry {
 
     public Optional<BusinessActionHandler> handlerFor(BusinessActionType actionType) {
         return Optional.ofNullable(handlers.get(actionType));
+    }
+
+    public Optional<TaskType> taskTypeFor(BusinessActionType actionType) {
+        return handlerFor(actionType).map(BusinessActionHandler::taskType);
+    }
+
+    public boolean acceptsDeterministicRegistrationRejection(BusinessActionType actionType,
+                                                              String errorCode) {
+        return handlerFor(actionType)
+                .map(handler -> handler.deterministicRegistrationRejectionCodes()
+                        .contains(errorCode))
+                .orElse(false);
+    }
+
+    public boolean acceptsStaleFailureCode(BusinessActionType actionType, String errorCode) {
+        return handlerFor(actionType)
+                .map(handler -> handler.staleFailureCodes().contains(errorCode))
+                .orElse(false);
     }
 }

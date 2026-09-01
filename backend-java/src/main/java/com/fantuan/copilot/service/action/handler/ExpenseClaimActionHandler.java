@@ -11,6 +11,8 @@ import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.ExpenseItem;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionHandler;
 import com.fantuan.copilot.service.action.ExpenseActionPayload;
@@ -25,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 /**
  * EXPENSE_CLAIM 业务动作 Handler（V2 §十七 ExpenseClaimActionHandler）。
@@ -64,6 +67,27 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
     @Override
     public BusinessActionType supports() {
         return BusinessActionType.EXPENSE_CLAIM;
+    }
+
+    @Override
+    public TaskType taskType() {
+        return TaskType.EXPENSE_CLAIM;
+    }
+
+    @Override
+    public TaskExecutionStatus statusAfterConfirmation() {
+        return TaskExecutionStatus.WAITING_EXTERNAL;
+    }
+
+    @Override
+    public Set<String> deterministicRegistrationRejectionCodes() {
+        return Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+                "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED");
+    }
+
+    @Override
+    public Set<String> staleFailureCodes() {
+        return Set.of("EXPENSE_TRIP_STALE", "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE");
     }
 
     @Override
