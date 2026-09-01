@@ -839,9 +839,16 @@ public class BusinessActionHitlCoordinator {
      */
     private boolean isDeterministicRegistrationRejection(BusinessActionProposal proposal,
                                                          ActionException exception) {
-        return exception != null
-                && exception.errorCode() != null
-                && proposal != null
+        if (exception == null || exception.errorCode() == null) {
+            return false;
+        }
+        // 这是平台级 Proposal 校验错误，不能依赖 actionType 查 Handler；
+        // actionType 缺失时也必须走确定性拒绝收口。
+        if ("BUSINESS_RULE_VIOLATION".equals(exception.errorCode())) {
+            return true;
+        }
+        return proposal != null
+                && proposal.actionType() != null
                 && handlerRegistry.acceptsDeterministicRegistrationRejection(
                         proposal.actionType(), exception.errorCode());
     }

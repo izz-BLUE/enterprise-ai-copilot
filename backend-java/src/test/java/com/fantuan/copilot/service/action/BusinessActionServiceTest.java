@@ -67,6 +67,22 @@ class BusinessActionServiceTest {
     }
 
     @Test
+    void leaveActionStaleIsRejectedAsExternalStaleFailureCode() {
+        Fixture f = fixture();
+        PendingActionView view = f.service.createPending(
+                standardProposal(), "origin", ADMIN, USER_A, null);
+        ArgumentCaptor<PendingAction> captor = ArgumentCaptor.forClass(PendingAction.class);
+        verify(f.actions).saveNew(captor.capture());
+        when(f.actions.findForUpdate(view.actionId())).thenReturn(Optional.of(captor.getValue()));
+
+        assertThrows(IllegalArgumentException.class, () -> f.service.failStaleConfirmation(
+                view.actionId(), view.confirmationNonce(), ADMIN, "trace", USER_A,
+                "ACTION_STALE"));
+
+        verify(f.actions, never()).markFailed(anyString(), anyString(), any());
+    }
+
+    @Test
     void featureFlagAdminBalanceConflictAndCapacityAreEnforced() {
         Fixture f = fixture();
         f.properties.setEnabled(false);

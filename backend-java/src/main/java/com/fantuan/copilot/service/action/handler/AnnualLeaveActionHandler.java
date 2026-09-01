@@ -71,12 +71,12 @@ public class AnnualLeaveActionHandler implements BusinessActionHandler {
 
     @Override
     public Set<String> deterministicRegistrationRejectionCodes() {
-        return Set.of("BUSINESS_RULE_VIOLATION");
+        return Set.of();
     }
 
     @Override
     public Set<String> staleFailureCodes() {
-        return Set.of("ACTION_STALE");
+        return Set.of();
     }
 
     @Override

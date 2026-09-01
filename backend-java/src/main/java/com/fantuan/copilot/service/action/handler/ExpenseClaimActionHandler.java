@@ -81,7 +81,7 @@ public class ExpenseClaimActionHandler implements BusinessActionHandler {
 
     @Override
     public Set<String> deterministicRegistrationRejectionCodes() {
-        return Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+        return Set.of("EXPENSE_ITEMS_REQUIRED",
                 "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED");
     }
 

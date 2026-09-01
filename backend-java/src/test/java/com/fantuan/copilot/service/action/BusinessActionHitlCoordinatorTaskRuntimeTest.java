@@ -489,16 +489,15 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
                 org.mockito.Mockito.withSettings().lenient());
         when(leave.supports()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
         when(leave.taskType()).thenReturn(TaskType.LEAVE_REQUEST);
-        when(leave.deterministicRegistrationRejectionCodes())
-                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION"));
-        when(leave.staleFailureCodes()).thenReturn(Set.of("ACTION_STALE"));
+        when(leave.deterministicRegistrationRejectionCodes()).thenReturn(Set.of());
+        when(leave.staleFailureCodes()).thenReturn(Set.of());
 
         BusinessActionHandler expense = mock(BusinessActionHandler.class,
                 org.mockito.Mockito.withSettings().lenient());
         when(expense.supports()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
         when(expense.taskType()).thenReturn(TaskType.EXPENSE_CLAIM);
         when(expense.deterministicRegistrationRejectionCodes())
-                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+                .thenReturn(Set.of("EXPENSE_ITEMS_REQUIRED",
                         "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED"));
         when(expense.staleFailureCodes()).thenReturn(Set.of("EXPENSE_TRIP_STALE",
                 "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE"));

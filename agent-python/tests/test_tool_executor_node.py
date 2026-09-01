@@ -108,6 +108,18 @@ def _travel_history(*invoice_ids):
     }]
 
 
+def _travel_history_for_trips(*trips):
+    return [{
+        'tool_name': 'travel_record_tool',
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'items': list(trips),
+        }, ensure_ascii=False),
+    }]
+
+
 class TestToolExecution:
     def test_rag_tool_success(self):
         with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
@@ -737,6 +749,122 @@ class TestEnterpriseOaToolExecution:
         assert json.loads(result['observation'])['reason'] == (
             'invalid_selected_trip_invoice_scope'
         )
+
+    def test_invoice_verify_tool_forged_non_expense_call_fails_closed(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'invoice_id': 'INV-001', 'valid': True},
+        )
+        decision = _tool_decision(
+            INVOICE_VERIFY_TOOL_NAME,
+            {'invoice_id': 'INV-001'},
+            reason_code='need_invoice_verify',
+        )
+
+        result = tool_executor_node(state(
+            question='公司的年假制度是什么？',
+            employee_id='E10001',
+            planner_decision=decision,
+        ))
+
+        assert result['stop_reason'] == 'invalid_selected_trip_invoice_scope'
+        assert result['tool_call_count'] == 0
+        assert fake.invoice_calls == []
+
+    def test_invoice_verify_tool_invoice_id_alone_cannot_bypass_scope(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'invoice_id': 'INV-001', 'valid': True},
+        )
+        decision = _tool_decision(
+            INVOICE_VERIFY_TOOL_NAME,
+            {'invoice_id': 'INV-001'},
+            reason_code='need_invoice_verify',
+        )
+
+        result = tool_executor_node(state(
+            question='请查询发票 INV-001。',
+            employee_id='E10001',
+            planner_decision=decision,
+            tool_history=[{
+                'tool_name': INVOICE_VERIFY_TOOL_NAME,
+                'arguments': {'invoice_id': 'INV-001'},
+                'status': 'success',
+                'observation': json.dumps({'success': True, 'invoice_id': 'INV-001'}),
+            }],
+        ))
+
+        assert result['stop_reason'] == 'invalid_selected_trip_invoice_scope'
+        assert result['tool_call_count'] == 0
+        assert fake.invoice_calls == []
+
+    def test_invoice_verify_tool_rejects_invoice_from_selected_trip_mismatch(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'invoice_id': 'INV-B', 'valid': True},
+        )
+        decision = _tool_decision(
+            INVOICE_VERIFY_TOOL_NAME,
+            {'invoice_id': 'INV-B'},
+            reason_code='need_invoice_verify',
+        )
+        history = _travel_history_for_trips(
+            {
+                'trip_id': 'TRIP-A', 'destination': '上海',
+                'start_date': '2026-08-18', 'end_date': '2026-08-20',
+                'status': 'APPROVED', 'expense_documents': [{'invoice_id': 'INV-A'}],
+            },
+            {
+                'trip_id': 'TRIP-B', 'destination': '北京',
+                'start_date': '2026-08-25', 'end_date': '2026-08-27',
+                'status': 'APPROVED', 'expense_documents': [{'invoice_id': 'INV-B'}],
+            },
+        )
+
+        result = tool_executor_node(state(
+            question='请报销 TRIP-A 的对应发票。',
+            employee_id='E10001',
+            planner_decision=decision,
+            tool_history=history,
+        ))
+
+        assert result['stop_reason'] == 'invalid_selected_trip_invoice_scope'
+        assert result['tool_call_count'] == 0
+        assert fake.invoice_calls == []
+
+    def test_invoice_verify_tool_allows_invoice_from_selected_trip(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'invoice_id': 'INV-A', 'valid': True},
+        )
+        decision = _tool_decision(
+            INVOICE_VERIFY_TOOL_NAME,
+            {'invoice_id': 'INV-A'},
+            reason_code='need_invoice_verify',
+        )
+        history = _travel_history_for_trips(
+            {
+                'trip_id': 'TRIP-A', 'destination': '上海',
+                'start_date': '2026-08-18', 'end_date': '2026-08-20',
+                'status': 'APPROVED', 'expense_documents': [{'invoice_id': 'INV-A'}],
+            },
+            {
+                'trip_id': 'TRIP-B', 'destination': '北京',
+                'start_date': '2026-08-25', 'end_date': '2026-08-27',
+                'status': 'APPROVED', 'expense_documents': [{'invoice_id': 'INV-B'}],
+            },
+        )
+
+        result = tool_executor_node(state(
+            question='请报销 TRIP-A 的对应发票。',
+            employee_id='E10001',
+            planner_decision=decision,
+            tool_history=history,
+        ))
+
+        assert result['stop_reason'] == 'tool_executed'
+        assert result['tool_call_count'] == 1
+        assert fake.invoice_calls == [{'invoice_id': 'INV-A', 'employee_id': 'E10001'}]
 
     def test_invoice_verify_tool_rejects_employee_id_in_arguments(self):
         """V2 §十一：invoice_verify 强制 identity_required=true；Planner arguments

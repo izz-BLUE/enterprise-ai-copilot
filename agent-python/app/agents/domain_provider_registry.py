@@ -337,9 +337,11 @@ class ExpenseProvider:
         if tool_name not in self.dependency_tools:
             return None
         if not self.matches(context):
-            # 保持旧 Executor 兼容：Planner 会把非 Expense Proposal 改道到
-            # RAG；直接调用时仍由既有 schema/Tool 规则兜底，不凭空扩大拒绝面。
-            return None
+            # travel_record_tool 保持旧的跨域兼容行为；invoice_verify_tool
+            # 必须继续经过 selected-trip scope 第二道门，不能因非 Expense
+            # prompt/continuation 而绕过边界。
+            if tool_name != INVOICE_VERIFY_TOOL_NAME:
+                return None
         if context.action_proposal is not None:
             raise DomainToolCallRejected(
                 'expense_proposal_already_completed',

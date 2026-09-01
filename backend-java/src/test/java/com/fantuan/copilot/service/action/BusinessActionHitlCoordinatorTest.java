@@ -85,15 +85,14 @@ class BusinessActionHitlCoordinatorTest {
                 org.mockito.Mockito.withSettings().lenient());
         when(leave.supports()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
         when(leave.taskType()).thenReturn(TaskType.LEAVE_REQUEST);
-        when(leave.deterministicRegistrationRejectionCodes())
-                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION"));
-        when(leave.staleFailureCodes()).thenReturn(Set.of("ACTION_STALE"));
+        when(leave.deterministicRegistrationRejectionCodes()).thenReturn(Set.of());
+        when(leave.staleFailureCodes()).thenReturn(Set.of());
         BusinessActionHandler expense = org.mockito.Mockito.mock(BusinessActionHandler.class,
                 org.mockito.Mockito.withSettings().lenient());
         when(expense.supports()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
         when(expense.taskType()).thenReturn(TaskType.EXPENSE_CLAIM);
         when(expense.deterministicRegistrationRejectionCodes())
-                .thenReturn(Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+                .thenReturn(Set.of("EXPENSE_ITEMS_REQUIRED",
                         "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED"));
         when(expense.staleFailureCodes()).thenReturn(Set.of("EXPENSE_TRIP_STALE",
                 "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE"));
@@ -483,6 +482,59 @@ class BusinessActionHitlCoordinatorTest {
         assertEquals(payload.getValue(), retryPayload.getAllValues().get(1));
         verify(actionService, times(2)).abandonMemoryAfterHitlRejection(
                 IDENTITY, CONVERSATION_ID);
+        verifyNoInteractions(actions);
+    }
+
+    @Test
+    void nullActionTypeBusinessRuleViolationStillAbandonsMemoryAndResumesRejected() {
+        when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
+                .thenReturn(RUNTIME_THREAD_ID);
+        when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
+        when(actionService.isAllowed(ADMIN_TOKEN, IDENTITY)).thenReturn(true);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        BusinessActionProposal proposal = org.mockito.Mockito.mock(BusinessActionProposal.class);
+        when(proposal.actionType()).thenReturn(null);
+        HitlWaitMarker wait = registrationWait(BusinessActionType.EXPENSE_CLAIM);
+        when(actionService.createHitlPending(
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
+                CONVERSATION_ID, wait.executionId(), wait.waitId()))
+                .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "BUSINESS_RULE_VIOLATION", "action_type 缺失", null, null));
+
+        ActionException exception = assertThrows(ActionException.class, () -> coordinator.registerWait(
+                proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        assertEquals("BUSINESS_RULE_VIOLATION", exception.errorCode());
+        verify(actionService).abandonMemoryAfterHitlRejection(IDENTITY, CONVERSATION_ID);
+        ArgumentCaptor<HitlResumePayload> payload = ArgumentCaptor.forClass(HitlResumePayload.class);
+        verify(pythonAgentGateway).post(eq("/agent/langgraph/hitl/resume"), payload.capture(),
+                any(HttpHeaders.class), eq(PythonAgentResponse.class), eq("trace"));
+        assertEquals(HitlResumePayload.HitlDecision.REJECTED, payload.getValue().decision());
+        assertNull(payload.getValue().actionId());
+        assertNull(payload.getValue().requestId());
+        assertEquals(ActionStatus.FAILED, payload.getValue().actionStatus());
+        assertEquals(wait.waitId(), payload.getValue().waitId());
+        assertEquals(wait.executionId(), payload.getValue().executionId());
+        verifyNoInteractions(actions);
+    }
+
+    @Test
+    void unsupportedNonNullRegistrationSubtypeErrorDoesNotCloseWaitingState() {
+        BusinessActionProposal proposal = registrationProposal(BusinessActionType.EXPENSE_CLAIM);
+        HitlWaitMarker wait = registrationWait(BusinessActionType.EXPENSE_CLAIM);
+        when(actionService.createHitlPending(
+                proposal, "trace", ADMIN_TOKEN, IDENTITY,
+                CONVERSATION_ID, wait.executionId(), wait.waitId()))
+                .thenThrow(new ActionException(HttpStatus.BAD_REQUEST,
+                        "INVALID_REQUEST", "暂不支持的 action subtype", null, null));
+
+        ActionException exception = assertThrows(ActionException.class, () -> coordinator.registerWait(
+                proposal, wait, "trace", ADMIN_TOKEN, IDENTITY, CONVERSATION_ID));
+
+        assertEquals("INVALID_REQUEST", exception.errorCode());
+        verify(actionService, never()).abandonMemoryAfterHitlRejection(any(), anyString());
+        verify(pythonAgentGateway, never()).post(anyString(), any(), any(HttpHeaders.class),
+                eq(PythonAgentResponse.class), anyString());
         verifyNoInteractions(actions);
     }
 

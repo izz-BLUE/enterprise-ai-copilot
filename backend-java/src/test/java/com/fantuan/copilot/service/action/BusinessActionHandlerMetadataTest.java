@@ -15,6 +15,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -31,14 +32,14 @@ class BusinessActionHandlerMetadataTest {
         assertEquals(BusinessActionType.ANNUAL_LEAVE_REQUEST, leave.supports());
         assertEquals(TaskType.LEAVE_REQUEST, leave.taskType());
         assertEquals(TaskExecutionStatus.COMPLETED, leave.statusAfterConfirmation());
-        assertEquals(Set.of("BUSINESS_RULE_VIOLATION"),
+        assertEquals(Set.of(),
                 leave.deterministicRegistrationRejectionCodes());
-        assertEquals(Set.of("ACTION_STALE"), leave.staleFailureCodes());
+        assertEquals(Set.of(), leave.staleFailureCodes());
 
         assertEquals(BusinessActionType.EXPENSE_CLAIM, expense.supports());
         assertEquals(TaskType.EXPENSE_CLAIM, expense.taskType());
         assertEquals(TaskExecutionStatus.WAITING_EXTERNAL, expense.statusAfterConfirmation());
-        assertEquals(Set.of("BUSINESS_RULE_VIOLATION", "EXPENSE_ITEMS_REQUIRED",
+        assertEquals(Set.of("EXPENSE_ITEMS_REQUIRED",
                 "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED"),
                 expense.deterministicRegistrationRejectionCodes());
         assertEquals(Set.of("EXPENSE_TRIP_STALE", "EXPENSE_INVOICE_STALE",
@@ -59,5 +60,16 @@ class BusinessActionHandlerMetadataTest {
                 BusinessActionType.EXPENSE_CLAIM, "BUSINESS_RULE_VIOLATION"));
         assertFalse(registry.acceptsStaleFailureCode(
                 BusinessActionType.EXPENSE_CLAIM, "EXPENSE_INVOICE_STALE"));
+        assertFalse(registry.acceptsStaleFailureCode(
+                BusinessActionType.ANNUAL_LEAVE_REQUEST, "ACTION_STALE"));
+    }
+
+    @Test
+    void registryRejectsDuplicateActionTypes() {
+        BusinessActionHandler leave = new AnnualLeaveActionHandler(
+                mock(LeaveAccountRepository.class), mock(LeaveExecutionGateway.class));
+
+        assertThrows(IllegalStateException.class,
+                () -> new BusinessActionHandlerRegistry(List.of(leave, leave)));
     }
 }
