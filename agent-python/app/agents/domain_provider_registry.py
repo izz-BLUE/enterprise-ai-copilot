@@ -489,10 +489,9 @@ class ExpenseProvider:
         if (
             context.step_count == 0
             and decision.action == 'tool'
-            and decision.tool_name == TRAVEL_RECORD_TOOL_NAME
-            and decision.expense_reason is None
+            and decision.tool_name in (TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME)
+            and self._normalize_reason(decision.expense_reason) is None
             and expense_input_service.is_expense_claim_intent(context.question)
-            and TRAVEL_RECORD_TOOL_NAME in tools
             and EXPENSE_PROPOSAL_TOOL_NAME in tools
         ):
             decision = PlannerDecision.model_validate({
@@ -755,14 +754,26 @@ class DomainProviderRegistry:
     def postprocess_decision(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> tuple[PlannerDecision, dict[str, object]]:
-        provider = self.resolve(context)
-        if provider is None and decision.action == 'tool' and decision.tool_name:
-            # Proposal 误路由到未匹配领域时仍交给该 Provider 做 fail-closed
-            # 改道；这不是 capability elevation。
-            provider = self.provider_for_tool(decision.tool_name)
-        if provider is None:
+        resolved_provider = self.resolve(context)
+        tool_owner_provider = None
+        if decision.action == 'tool' and decision.tool_name:
+            tool_owner_provider = self.provider_for_tool(decision.tool_name)
+
+        providers = []
+        if tool_owner_provider is not None:
+            providers.append(tool_owner_provider)
+        if resolved_provider is not None and resolved_provider is not tool_owner_provider:
+            providers.append(resolved_provider)
+        if not providers:
             return decision, {}
-        return provider.postprocess_decision(decision, tools, context)
+
+        updates: dict[str, object] = {}
+        for provider in providers:
+            decision, provider_updates = provider.postprocess_decision(
+                decision, tools, context
+            )
+            updates.update(provider_updates)
+        return decision, updates
 
     def completion_contract(self, tools: Sequence[str]) -> str:
         contracts = [

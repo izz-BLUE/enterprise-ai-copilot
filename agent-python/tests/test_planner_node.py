@@ -172,6 +172,25 @@ def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
     assert result['request_expense_reason'] is None
 
 
+def test_missing_reason_forces_reason_first_before_invoice(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
+    raw = (
+        '{"action":"tool","tool_name":"invoice_verify_tool",'
+        '"arguments":{"invoice_id":"INV-1"},"reason_code":"need_invoice_verify",'
+        '"expense_reason":null}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='根据最近一次已批准出差和对应发票准备报销。',
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
+    assert result['planner_decision']['arguments'] == {}
+    assert result['request_expense_reason'] is None
+
+
 def test_new_request_resets_frozen_reason_and_continuation_can_extract(monkeypatch):
     monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
     raw = (

@@ -12,6 +12,7 @@ from app.agents.domain_provider_registry import (
     DOMAIN_PROVIDER_REGISTRY,
     DomainContext,
     DomainProviderAmbiguityError,
+    DomainProviderRegistry,
     ExpenseProvider,
     LeaveProvider,
 )
@@ -65,6 +66,170 @@ def _context(**changes) -> DomainContext:
     }
     values.update(changes)
     return DomainContext(**values)
+
+
+def _decision(tool_name: str, *, expense_reason: str | None = None) -> PlannerDecision:
+    arguments = {}
+    reason_code = 'need_expense_proposal'
+    if tool_name == TRAVEL_RECORD_TOOL_NAME:
+        reason_code = 'need_travel_history'
+    elif tool_name == INVOICE_VERIFY_TOOL_NAME:
+        arguments = {'invoice_id': 'INV-1'}
+        reason_code = 'need_invoice_verify'
+    elif tool_name == RAG_TOOL_NAME:
+        arguments = {'question': QUESTION}
+        reason_code = 'need_knowledge'
+    return PlannerDecision.model_validate({
+        'action': 'tool',
+        'tool_name': tool_name,
+        'arguments': arguments,
+        'reason_code': reason_code,
+        'expense_reason': expense_reason,
+    })
+
+
+@pytest.mark.parametrize('tool_name', [TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
+def test_expense_provider_reason_first_covers_travel_and_invoice(tool_name):
+    decision, updates = ExpenseProvider().postprocess_decision(
+        _decision(tool_name),
+        [tool_name, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION),
+    )
+
+    assert decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert updates == {'request_expense_reason': None}
+
+
+@pytest.mark.parametrize('tool_name', [TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
+def test_expense_provider_reason_first_normalizes_whitespace_reason(tool_name):
+    decision, updates = ExpenseProvider().postprocess_decision(
+        _decision(tool_name, expense_reason='   '),
+        [tool_name, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION),
+    )
+
+    assert decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert updates == {'request_expense_reason': None}
+
+
+@pytest.mark.parametrize('tool_name', [TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
+def test_expense_provider_reason_first_preserves_valid_reason(tool_name):
+    decision, updates = ExpenseProvider().postprocess_decision(
+        _decision(tool_name, expense_reason='客户拜访'),
+        [tool_name, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION),
+    )
+
+    assert decision.tool_name == tool_name
+    assert decision.expense_reason == '客户拜访'
+    assert updates == {'request_expense_reason': '客户拜访'}
+
+
+def test_expense_provider_continuation_reason_is_not_overridden_by_reason_first():
+    decision, updates = ExpenseProvider().postprocess_decision(
+        _decision(TRAVEL_RECORD_TOOL_NAME, expense_reason='客户拜访'),
+        [TRAVEL_RECORD_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(
+            question='客户拜访',
+            continuation_original_request=QUESTION,
+        ),
+    )
+
+    assert decision.tool_name == TRAVEL_RECORD_TOOL_NAME
+    assert decision.expense_reason == '客户拜访'
+    assert updates == {'request_expense_reason': '客户拜访'}
+
+
+class _CountingExpenseProvider(ExpenseProvider):
+    def __init__(self):
+        self.postprocess_calls = 0
+
+    def postprocess_decision(self, decision, tools, context):
+        self.postprocess_calls += 1
+        return super().postprocess_decision(decision, tools, context)
+
+
+class _CountingLeaveProvider(LeaveProvider):
+    def __init__(self):
+        self.postprocess_calls = 0
+
+    def postprocess_decision(self, decision, tools, context):
+        self.postprocess_calls += 1
+        return super().postprocess_decision(decision, tools, context)
+
+
+def test_registry_runs_expense_owner_before_leave_provider_for_misrouted_proposal():
+    expense = _CountingExpenseProvider()
+    leave = _CountingLeaveProvider()
+    registry = DomainProviderRegistry((expense, leave))
+
+    decision, updates = registry.postprocess_decision(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question='帮我请明天年假'),
+    )
+
+    assert decision.tool_name == RAG_TOOL_NAME
+    assert decision.arguments == {'question': '帮我请明天年假'}
+    assert updates == {'request_expense_reason': None}
+    assert expense.postprocess_calls == 1
+    assert leave.postprocess_calls == 1
+
+
+def test_registry_keeps_generic_expense_proposal_redirect():
+    decision, _ = DOMAIN_PROVIDER_REGISTRY.postprocess_decision(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [RAG_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question='公司的年假制度是什么'),
+    )
+
+    assert decision.tool_name == RAG_TOOL_NAME
+
+
+def test_registry_runs_expense_provider_once_for_expense_proposal():
+    expense = _CountingExpenseProvider()
+    registry = DomainProviderRegistry((expense, LeaveProvider()))
+
+    decision, updates = registry.postprocess_decision(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME, expense_reason='客户拜访'),
+        [RAG_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION, request_expense_reason='客户拜访'),
+    )
+
+    assert decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert updates == {'request_expense_reason': '客户拜访'}
+    assert expense.postprocess_calls == 1
+
+
+def test_registry_runs_expense_provider_for_expense_rag_freeze():
+    expense = _CountingExpenseProvider()
+    registry = DomainProviderRegistry((expense, LeaveProvider()))
+
+    decision, updates = registry.postprocess_decision(
+        _decision(RAG_TOOL_NAME, expense_reason='错误的新原因'),
+        [RAG_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(
+            question=QUESTION,
+            request_expense_reason='客户拜访',
+            step_count=1,
+        ),
+    )
+
+    assert decision.tool_name == RAG_TOOL_NAME
+    assert decision.expense_reason == '客户拜访'
+    assert updates == {'request_expense_reason': '客户拜访'}
+    assert expense.postprocess_calls == 1
+
+
+def test_registry_postprocess_ambiguity_still_fails_closed():
+    registry = DomainProviderRegistry((ExpenseProvider(), LeaveProvider()))
+
+    with pytest.raises(DomainProviderAmbiguityError):
+        registry.postprocess_decision(
+            _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+            [RAG_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+            DomainContext(question='帮我请明天年假，并报销最近一次出差。'),
+        )
 
 
 def test_provider_cannot_reexpose_capability_hidden_tool():
