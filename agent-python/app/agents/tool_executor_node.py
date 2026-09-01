@@ -36,6 +36,7 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
+from app.services import expense_input_service
 from app.tools.enterprise_tools import (
     expense_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
     expense_status_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
@@ -286,6 +287,36 @@ def _build_expense_proposal_context(tool_history: list[dict]) -> dict:
     }
 
 
+def _invoice_scope_allowed(question: str, tool_history: list[dict], invoice_id: str) -> bool:
+    """只允许当前成功 travel facts 中 selected trip 的 invoice。"""
+    context = expense_input_service.ExpenseProposalContextLike(_build_expense_proposal_context(tool_history))
+    try:
+        selected_trip_id = expense_input_service.analyze_expense_input(question, context=context).trip_id
+    except expense_input_service.ExpenseInputError:
+        return False
+    return any(
+        item.get('trip_id') == selected_trip_id
+        and invoice_id in {
+            doc.get('invoice_id') for doc in (item.get('expense_documents') or [])
+            if isinstance(doc, dict) and doc.get('invoice_id')
+        }
+        for item in expense_input_service.find_trip_records(context)
+    )
+
+
+def _is_completed_success(item: dict) -> bool:
+    """只把真正完成的 Proposal 计入相同调用去重。"""
+    if item.get('status') != 'success':
+        return False
+    if item.get('tool_name') != EXPENSE_PROPOSAL_TOOL_NAME:
+        return True
+    try:
+        payload = json.loads(item.get('observation'))
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get('action_proposal') is not None
+
+
 def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     """expense_proposal_tool 的 pre-inject 钩子。
 
@@ -501,7 +532,7 @@ def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
         if (
             item.get('tool_name') == decision.tool_name
             and item.get('arguments') == decision.arguments
-            and item.get('status') == 'success'
+            and _is_completed_success(item)
         ):
             return True
     return False
@@ -589,6 +620,25 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             return _blocked(state, runtime, 'not_allowed', '当前业务日期不可用。',
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
+
+    invoice_id = (decision.arguments or {}).get('invoice_id')
+    if (
+        decision.tool_name == INVOICE_VERIFY_TOOL_NAME
+        and not _invoice_scope_allowed(
+            state.get('continuation_original_request') or state.get('question', ''),
+            state.get('tool_history', []),
+            invoice_id,
+        )
+    ):
+        return _blocked(
+            state,
+            runtime,
+            'invalid_selected_trip_invoice_scope',
+            f'invoice_id={invoice_id} 不属于当前 selected trip 的 expense_documents，'
+            '或 selected trip 无法确定，已拒绝验真。',
+            tool_name=decision.tool_name,
+            arguments=decision.arguments,
+        )
 
     # 4. Tool 调用预算（基于实际发起执行的次数）
     if tool_call_count >= MAX_TOOL_CALLS:

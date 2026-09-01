@@ -136,6 +136,67 @@ class LangGraphAgentActionMappingTest {
     }
 
     @Test
+    void expenseReasonClarificationPersistsWithoutMemoryLlmProposal() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三", AuthRole.EMPLOYEE, true,
+                VerifiedIdentity.Source.JWT);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        when(identityContext.require(any())).thenReturn(identity);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        PythonAgentResponse python = new PythonAgentResponse(
+                "请提供本次报销原因。", "action", true, "business_action", "", List.of(),
+                true, "python-trace", null, List.of("reason"), null);
+        when(gateway.post(anyString(), any(), any(), eq(PythonAgentResponse.class), anyString()))
+                .thenReturn(python);
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, mock(AdminAccessService.class), actionService, identityContext,
+                memoryService, new AdminLogBuffer());
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("expense-reason-trace");
+
+        ResponseEntity<AgentChatResponse> response = controller.langgraphChat(
+                new ChatRequest("根据最近一次已批准出差准备报销", "expense-reason-conv"), request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        verify(memoryService).upsertActiveExpenseReasonContinuation(
+                "U10001", "expense-reason-conv", "根据最近一次已批准出差准备报销");
+        verify(memoryService, never()).upsertActiveFromAgent(
+                anyString(), anyString(), anyString(), anyMap(), anyString());
+    }
+
+    @Test
+    void leaveReasonClarificationDoesNotCreateExpenseContinuation() {
+        PythonAgentGateway gateway = mock(PythonAgentGateway.class);
+        BusinessActionService actionService = mock(BusinessActionService.class);
+        when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        VerifiedIdentity identity = new VerifiedIdentity(
+                "U10001", "zhangsan", "E10001", "张三", AuthRole.EMPLOYEE, true,
+                VerifiedIdentity.Source.JWT);
+        IdentityContext identityContext = mock(IdentityContext.class);
+        when(identityContext.require(any())).thenReturn(identity);
+        AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
+        when(gateway.post(anyString(), any(), any(), eq(PythonAgentResponse.class), anyString()))
+                .thenReturn(new PythonAgentResponse(
+                        "请提供请假原因。", "action", true, "business_action", "", List.of(),
+                        true, "python-trace", null, List.of("reason"), null));
+
+        LangGraphAgentController controller = new LangGraphAgentController(
+                gateway, mock(AdminAccessService.class), actionService, identityContext,
+                memoryService, new AdminLogBuffer());
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getAttribute("traceId")).thenReturn("leave-reason-trace");
+
+        controller.langgraphChat(new ChatRequest("申请年假", "leave-reason-conv"), request);
+
+        verify(memoryService, never()).upsertActiveExpenseReasonContinuation(
+                anyString(), anyString(), anyString());
+    }
+
+    @Test
     void invalidIdentityIsRejectedBeforePythonWithoutLeakingPresentedValue() {
         RestTemplate restTemplate = mock(RestTemplate.class);
         PythonAgentBulkhead bulkhead = new PythonAgentBulkhead(1, 10);

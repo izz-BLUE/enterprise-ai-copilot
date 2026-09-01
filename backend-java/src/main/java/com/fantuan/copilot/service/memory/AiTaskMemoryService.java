@@ -4,6 +4,7 @@ import com.fantuan.copilot.model.memory.AiTaskMemory;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.repository.memory.AiTaskMemoryRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class AiTaskMemoryService {
     static final int MAX_SUMMARY_CHARS = 500;
     static final int MAX_TASK_TYPE_CHARS = 64;
     static final String DEFAULT_TASK_TYPE = "GENERIC";
+    static final String EXPENSE_REQUEST_TASK_TYPE = "EXPENSE_REQUEST";
 
     /**
      * taskState 中禁止出现的顶层 / 嵌套 trusted key 集合。
@@ -139,6 +141,37 @@ public class AiTaskMemoryService {
         }
     }
 
+    public void upsertActiveExpenseReasonContinuation(String userId, String conversationId,
+                                                      String originalRequest) {
+        requireOwner("userId", userId);
+        requireOwner("conversationId", conversationId);
+        requireOriginalRequest(originalRequest);
+
+        Optional<AiTaskMemory> existing = repository.find(userId, conversationId);
+        String effectiveOriginal = originalRequest;
+        if (existing.isPresent()) {
+            AiTaskMemory memory = existing.get();
+            if (memory.status() != TaskStatus.ACTIVE) {
+                throw stateConflict(userId, conversationId, TaskStatus.ACTIVE);
+            }
+            if (!EXPENSE_REQUEST_TASK_TYPE.equals(memory.taskType())) {
+                throw new IllegalArgumentException(
+                        "当前 ACTIVE Memory 不是 EXPENSE_REQUEST，拒绝覆盖");
+            }
+            effectiveOriginal = existingOriginalRequest(memory);
+            if (effectiveOriginal == null) {
+                throw new IllegalArgumentException(
+                        "已有 Expense continuation 缺少 original_request，拒绝猜测");
+            }
+        }
+
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("waiting_for", "reason");
+        state.put("original_request", effectiveOriginal);
+        upsertActiveFromAgent(userId, conversationId, EXPENSE_REQUEST_TASK_TYPE, state,
+                "等待补充报销原因");
+    }
+
     /**
      * Java Task Runtime 专用的下一 task Memory 入口。
      * 普通 Agent proposal 仍禁止终态重新激活；这里只有在前一 task 已由
@@ -225,6 +258,12 @@ public class AiTaskMemoryService {
         return value;
     }
 
+    private static void requireOriginalRequest(String originalRequest) {
+        if (originalRequest == null || originalRequest.isBlank()) {
+            throw new IllegalArgumentException("original_request 不能为空");
+        }
+    }
+
     private static String sanitizeTaskStateJson(String raw) {
         String value = raw == null ? "{}" : raw;
         // octet_length：以 UTF-8 字节数与 DB CHECK 对齐。
@@ -269,6 +308,23 @@ public class AiTaskMemoryService {
             cleaned.put(key, scrubValue(entry.getValue()));
         }
         return cleaned;
+    }
+
+    private String existingOriginalRequest(AiTaskMemory memory) {
+        try {
+            JsonNode value = objectMapper.readTree(memory.taskStateJson()).get("original_request");
+            if (value == null || value.isNull()) {
+                return null;
+            }
+            if (!value.isTextual() || value.asText().isBlank()) {
+                throw new IllegalArgumentException("original_request 格式无效，拒绝覆盖");
+            }
+            String text = value.asText();
+            requireOriginalRequest(text);
+            return text;
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("已有 task_state_json 不是有效 JSON", exception);
+        }
     }
 
     @SuppressWarnings("unchecked")

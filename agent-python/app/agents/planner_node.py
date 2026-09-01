@@ -14,6 +14,7 @@ from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
 from app.agents.runtime_context import AgentRuntimeContext
+from app.agents.tool_executor_node import _build_expense_proposal_context
 from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
 from app.schemas.execution_history_schema import validate_execution_history
 from app.schemas.planner_schema import (
@@ -31,6 +32,7 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
+from app.services import expense_input_service
 from app.services.annual_leave_input_service import is_annual_leave_action_intent
 from app.services.expense_input_service import is_expense_claim_intent
 from app.services.llm_service import LLMProviderError, call_llm
@@ -104,7 +106,7 @@ TOOL_DESCRIPTIONS: dict[str, str] = {
     # P2-A Expense Workflow V1: 4 个新 Tool 描述
     TRAVEL_RECORD_TOOL_NAME: (
         '查询当前登录用户自己的出差记录。返回每条 trip 及其关联的 '
-        'expense_documents(invoice reference,需 invoice_verify_tool 验真)。'
+        'expense_documents(invoice reference,需单独验真)。'
         '每个 trip 的 expense_documents 只属于该 trip，不能跨 trip 合并。'
         '无 LLM 入参,身份与 limit 由程序层注入。'
     ),
@@ -342,11 +344,16 @@ TOOL_USAGE_RULES: dict[str, str] = {
         f'{TRAVEL_RECORD_TOOL_NAME} 或 {INVOICE_VERIFY_TOOL_NAME} 收集其它字段。\n'
         '- 用户要求“对应发票 / 相关发票 / 全部发票”时，若返回多条 trip，必须先根据用户 selector '
         '选出唯一 selected trip；每个 trip 的 expense_documents 只属于该 trip，不能跨 trip 合并。\n'
+        f'- {TRAVEL_RECORD_TOOL_NAME} 成功后，只要 selected trip 的 expense_documents 仍有任一 invoice 未成功验真，'
+        f'下一步只能从该 selected trip 的未验真 invoice 中选择 {INVOICE_VERIFY_TOOL_NAME}；验真顺序不限。\n'
         f'- {INVOICE_VERIFY_TOOL_NAME} 的范围严格等于 selected trip 的 expense_documents；只对其中的 '
         'invoice_id 验真，不得验证其它 trip 的 invoice references，也不得为了“完整检查”继续调用。\n'
         f'- selected trip 的 expense_documents 全部成功验真后，必须立即调用 '
         f'{EXPENSE_PROPOSAL_TOOL_NAME}；selected trip 没有 expense_documents 时不得借用其它 trip 的发票。\n'
         f'- 所有需要的发票验真成功后才能调用 {EXPENSE_PROPOSAL_TOOL_NAME}；不得跳过验真直接生成草稿。\n'
+        f'- {EXPENSE_PROPOSAL_TOOL_NAME} 返回 success=true 但 action_proposal=null 且 missing_fields 非空时，'
+        '只是 clarification/incomplete，不是 Proposal 完成；若缺少 invoice_ids，'
+        '继续完成 selected-trip 验真，禁止重复 Proposal。\n'
         '- 该 Tool 只生成待用户确认的草稿或 clarification，不会提交任何写操作。'
     ),
 }
@@ -502,6 +509,70 @@ def visible_tools(
         # expense_status_tool 走 Java /api/internal/expense/status（Phase 8）。
         tools.append(EXPENSE_STATUS_TOOL_NAME)
     return tools
+
+
+_EXPENSE_DEPENDENCY_TOOLS = frozenset({
+    TRAVEL_RECORD_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
+    EXPENSE_PROPOSAL_TOOL_NAME,
+})
+
+
+def expense_legal_action_set(
+    tools: list[str],
+    *,
+    question: str,
+    tool_history: list[dict],
+    request_expense_reason: str | None,
+    action_proposal: object,
+    continuation_original_request: str | None = None,
+) -> list[str]:
+    """按当前可信 Expense facts 过滤 Planner 的 Expense dependency Tools。"""
+    is_expense_action = is_expense_claim_intent(question) or bool(
+        continuation_original_request
+    )
+    if not is_expense_action:
+        return list(tools)
+    if action_proposal is not None:
+        return [name for name in tools if name not in _EXPENSE_DEPENDENCY_TOOLS]
+
+    # 初次 reason clarification 仍保留既有只读能力边界；Q2 continuation
+    # 的结构化 waiting_for + 非空当前输入则表示 reason 已进入本轮补槽。
+    reason_available = request_expense_reason is not None or bool(
+        continuation_original_request and question.strip()
+    )
+    if not reason_available:
+        return list(tools)
+
+    source_question = continuation_original_request or question
+    context = expense_input_service.ExpenseProposalContextLike(
+        _build_expense_proposal_context(tool_history)
+    )
+    try:
+        analysis = expense_input_service.analyze_expense_input(
+            source_question, context=context
+        )
+    except expense_input_service.ExpenseInputError:
+        return [
+            name for name in tools
+            if name not in {INVOICE_VERIFY_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME}
+        ]
+
+    if not expense_input_service.find_trip_records(context) or analysis.trip_id is None:
+        return [
+            name for name in tools
+            if name not in {INVOICE_VERIFY_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME}
+        ]
+
+    target_invoice_ids = set(analysis.invoice_ids)
+    verified_invoice_ids = {
+        invoice.get('invoice_id')
+        for invoice in expense_input_service.find_invoice_records(context)
+        if invoice.get('invoice_id')
+    }
+    if target_invoice_ids - verified_invoice_ids:
+        return [name for name in tools if name != EXPENSE_PROPOSAL_TOOL_NAME]
+    return [name for name in tools if name != INVOICE_VERIFY_TOOL_NAME]
 
 
 def build_planner_prompt(
@@ -868,12 +939,14 @@ def _validate_business_completion(
     question: str,
     current_visible_tools: list[str],
     tool_history: object,
+    continuation_original_request: str | None = None,
 ) -> None:
     """确保业务申请不会因只读事实成功而被 Planner 提前标记完成。
 
     这里只读取当前请求的 tool_history。execution_history / memory_context
-    是历史上下文，不是本次请求的业务完成事实。Proposal Tool 成功即完成
-    Proposal 阶段；后续 missing_fields 仍可由 finish 正常收敛为 Clarification。
+    是历史上下文，不是本次请求的业务完成事实。Proposal clarification 不等于
+    Proposal 完成；缺 reason/trip 等用户信息时仍可由 finish 收敛为 Clarification，
+    但 selected trip 已确定且只缺 invoice_ids 时必须继续当前验真链路。
     """
     if decision.action != 'finish':
         return
@@ -890,12 +963,33 @@ def _validate_business_completion(
     ):
         raise PlannerDecisionError(_LEAVE_PROPOSAL_COMPLETION_ERROR)
 
-    if (
-        is_expense_claim_intent(question)
-        and EXPENSE_PROPOSAL_TOOL_NAME in current_visible_tools
-        and EXPENSE_PROPOSAL_TOOL_NAME not in successful_tools
-    ):
-        raise PlannerDecisionError(_EXPENSE_PROPOSAL_COMPLETION_ERROR)
+    expense_action_intent = (
+        is_expense_claim_intent(question) or continuation_original_request is not None
+    )
+    if expense_action_intent and EXPENSE_PROPOSAL_TOOL_NAME in current_visible_tools:
+        latest_proposal = next(
+            (
+                item for item in reversed(tool_history)
+                if isinstance(item, dict)
+                and item.get('tool_name') == EXPENSE_PROPOSAL_TOOL_NAME
+                and item.get('status') == 'success'
+            ),
+            None,
+        ) if isinstance(tool_history, list) else None
+        if latest_proposal is not None:
+            try:
+                payload = json.loads(latest_proposal.get('observation'))
+            except (json.JSONDecodeError, TypeError):
+                payload = None
+            missing_fields = payload.get('missing_fields', []) if isinstance(payload, dict) else []
+            if (
+                isinstance(payload, dict)
+                and payload.get('action_proposal') is None
+                and missing_fields == ['invoice_ids']
+            ):
+                raise PlannerDecisionError(_EXPENSE_PROPOSAL_COMPLETION_ERROR)
+        if EXPENSE_PROPOSAL_TOOL_NAME not in successful_tools:
+            raise PlannerDecisionError(_EXPENSE_PROPOSAL_COMPLETION_ERROR)
 
 
 def _log_planner_validation_failure(
@@ -998,6 +1092,15 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             category='business_action',
         )
 
+    current_visible_tools = expense_legal_action_set(
+        current_visible_tools,
+        question=question,
+        tool_history=state.get('tool_history', []),
+        request_expense_reason=state.get('request_expense_reason'),
+        action_proposal=state.get('action_proposal'),
+        continuation_original_request=continuation_original_request,
+    )
+
     user_prompt = build_planner_prompt(
         question,
         current_visible_tools,
@@ -1089,6 +1192,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                 question=question,
                 current_visible_tools=current_visible_tools,
                 tool_history=state.get('tool_history', []),
+                continuation_original_request=continuation_original_request,
             )
             decision.validate_decision()
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:

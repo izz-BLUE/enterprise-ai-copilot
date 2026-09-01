@@ -12,6 +12,7 @@ from app.agents.tool_executor_node import tool_executor_node as _tool_executor_n
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
@@ -84,6 +85,27 @@ def _tool_decision(tool_name, arguments, **changes):
 
 
 RAG_RESULT = '{"answer":"年假制度：入职满1年5天。","success":true,"sources":["hr/annual_leave.md"]}'
+
+
+def _travel_history(*invoice_ids):
+    return [{
+        'tool_name': 'travel_record_tool',
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'items': [{
+                'trip_id': 'TRIP-20260818-001',
+                'destination': '上海',
+                'start_date': '2026-08-18',
+                'end_date': '2026-08-20',
+                'status': 'APPROVED',
+                'expense_documents': [
+                    {'invoice_id': invoice_id} for invoice_id in invoice_ids
+                ],
+            }],
+        }, ensure_ascii=False),
+    }]
 
 
 class TestToolExecution:
@@ -310,6 +332,34 @@ class TestSuccessDedup:
         assert second['stop_reason'] == 'tool_executed'
         assert second['tool_call_count'] == 2  # 重试计数
         assert rag.invoke.call_count == 2
+        assert second['tool_history'][1]['status'] == 'success'
+
+    def test_expense_clarification_is_not_marked_completed(self):
+        clarification = json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['invoice_ids'],
+        }, ensure_ascii=False)
+        decision = _tool_decision(EXPENSE_PROPOSAL_TOOL_NAME, {})
+        common = dict(
+            question='根据最近一次已批准的出差和对应发票准备报销。',
+            employee_id='E10001',
+            allow_business_actions=True,
+            business_date=__import__('datetime').date(2026, 8, 26),
+            request_expense_reason='客户拜访',
+            planner_decision=decision,
+        )
+        with patch('app.agents.tool_executor_node.expense_proposal_tool') as proposal:
+            proposal.invoke.return_value = clarification
+            first = tool_executor_node(state(**common))
+            second = tool_executor_node(state(
+                **common,
+                tool_call_count=first['tool_call_count'],
+                tool_history=first['tool_history'],
+            ))
+        assert second['stop_reason'] == 'tool_executed'
+        assert proposal.invoke.call_count == 2
         assert second['tool_history'][1]['status'] == 'success'
 
 
@@ -629,8 +679,10 @@ class TestEnterpriseOaToolExecution:
             reason_code='need_invoice_verify',
         )
         result = tool_executor_node(state(
+            question='根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。',
             employee_id='E10001',
             planner_decision=decision,
+            tool_history=_travel_history('INV-001', 'INV-002'),
         ))
         assert result['stop_reason'] == 'tool_executed'
         assert fake.invoice_calls == [{'invoice_id': 'INV-001', 'employee_id': 'E10001'}]
@@ -654,13 +706,37 @@ class TestEnterpriseOaToolExecution:
             reason_code='need_invoice_verify',
         )
         result = tool_executor_node(state(
+            question='根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。',
             employee_id='E10001',
             planner_decision=decision,
+            tool_history=_travel_history('INV-005'),
         ))
         assert result['stop_reason'] == 'tool_executed'
         observation = json.loads(result['observation'])
         assert observation['success'] is False
         assert observation['error_code'] == 'OA_MCP_INVOICE_OWNERSHIP'
+
+    def test_invoice_verify_tool_rejects_invoice_from_other_trip(self):
+        fake = self._patch_fake_client(
+            travel_response={'success': True, 'items': []},
+            invoice_response={'success': True, 'invoice_id': 'INV-006', 'valid': True},
+        )
+        decision = _tool_decision(
+            INVOICE_VERIFY_TOOL_NAME,
+            {'invoice_id': 'INV-006'},
+            reason_code='need_invoice_verify',
+        )
+        result = tool_executor_node(state(
+            question='根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。',
+            employee_id='E10001',
+            planner_decision=decision,
+            tool_history=_travel_history('INV-001', 'INV-002'),
+        ))
+        assert result['stop_reason'] == 'invalid_selected_trip_invoice_scope'
+        assert fake.invoice_calls == []
+        assert json.loads(result['observation'])['reason'] == (
+            'invalid_selected_trip_invoice_scope'
+        )
 
     def test_invoice_verify_tool_rejects_employee_id_in_arguments(self):
         """V2 §十一：invoice_verify 强制 identity_required=true；Planner arguments

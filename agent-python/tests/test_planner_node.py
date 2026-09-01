@@ -175,8 +175,8 @@ def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
 def test_new_request_resets_frozen_reason_and_continuation_can_extract(monkeypatch):
     monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
     raw = (
-        '{"action":"tool","tool_name":"expense_proposal_tool",'
-        '"arguments":{},"reason_code":"need_expense_proposal",'
+        '{"action":"tool","tool_name":"travel_record_tool",'
+        '"arguments":{},"reason_code":"need_travel_history",'
         '"expense_reason":"客户拜访"}'
     )
     with patch('app.agents.planner_node.call_llm', return_value=raw):
@@ -576,6 +576,17 @@ class TestPromptInputs:
         assert LEAVE_BALANCE_TOOL_NAME in user
         assert LEAVE_REQUEST_TOOL_NAME in user
         assert LEAVE_PROPOSAL_TOOL_NAME in user
+
+    def test_expense_prompt_requires_selected_trip_invoice_prerequisite(self):
+        system = build_planner_system_prompt([
+            RAG_TOOL_NAME,
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ])
+        assert 'selected trip 的未验真 invoice' in system
+        assert '验真顺序不限' in system
+        assert 'clarification/incomplete' in system
 
     def test_hidden_tool_decision_is_rejected_by_planner_gate(self):
         with patch('app.agents.planner_node.call_llm', return_value=EVAL_RAW) as llm:

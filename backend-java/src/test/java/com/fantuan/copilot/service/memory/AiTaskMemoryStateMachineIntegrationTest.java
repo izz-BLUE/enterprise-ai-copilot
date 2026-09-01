@@ -87,6 +87,33 @@ class AiTaskMemoryStateMachineIntegrationTest extends PostgresIntegrationTestBas
     }
 
     @Test
+    void expenseReasonContinuationStoresRawRequestAsCanonicalState() {
+        String q1 = "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。";
+
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, q1);
+
+        AiTaskMemory row = service.find(U1, CONV_A).orElseThrow();
+        assertEquals("EXPENSE_REQUEST", row.taskType());
+        assertEquals(TaskStatus.ACTIVE, row.status());
+        assertEquals("{\"waiting_for\":\"reason\",\"original_request\":\""
+                + q1 + "\"}", row.taskStateJson());
+    }
+
+    @Test
+    void expenseReasonContinuationIsWriteOnceAcrossFollowUpInput() {
+        String q1 = "根据最近一次已批准出差准备报销。";
+        String q2 = "客户拜访";
+
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, q1);
+        service.upsertActiveExpenseReasonContinuation(U1, CONV_A, q2);
+
+        AiTaskMemory clarification = service.find(U1, CONV_A).orElseThrow();
+        assertTrue(clarification.taskStateJson().contains("\"waiting_for\":\"reason\""));
+        assertTrue(clarification.taskStateJson().contains("\"original_request\":\""
+                + q1 + "\""));
+    }
+
+    @Test
     void completedToCompletedIsIdempotentReplay() {
         service.upsert(U1, CONV_A, "GENERIC", TaskStatus.ACTIVE, "{}", "active");
         service.complete(U1, CONV_A);

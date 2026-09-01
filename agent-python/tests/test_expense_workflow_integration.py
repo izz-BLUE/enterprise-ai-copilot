@@ -238,7 +238,7 @@ class TestExpenseReasonContinuation:
         with patch(
             "app.agents.planner_node.call_llm",
             return_value=_tool(
-                "expense_proposal_tool", {}, "need_expense_proposal",
+                "travel_record_tool", {}, "need_travel_history",
                 expense_reason="客户拜访",
             ),
         ):
@@ -246,7 +246,7 @@ class TestExpenseReasonContinuation:
                 checkpoint_safe_state(state), runtime_for_state(state),
             )
 
-        assert result["planner_decision"]["tool_name"] == "expense_proposal_tool"
+        assert result["planner_decision"]["tool_name"] == "travel_record_tool"
         assert result["planner_decision"]["expense_reason"] == "客户拜访"
         assert result["request_expense_reason"] == "客户拜访"
 
@@ -525,6 +525,8 @@ class TestPlannerSelection:
                   expense_reason="客户拜访"),
             _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
                   "need_invoice_verify"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify"),
             _tool("expense_proposal_tool", {}, "need_expense_proposal",
                   expense_reason="客户拜访"),
             _finish("已生成报销申请草稿，请确认后提交。"),
@@ -534,7 +536,7 @@ class TestPlannerSelection:
              patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
              patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
             travel.invoke.return_value = TRAVEL_ANSWER
-            inv.invoke.return_value = INVOICE_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
             prop.invoke.return_value = json.dumps({
                 "success": True, "kind": "proposal",
                 "action_proposal": {
@@ -544,7 +546,7 @@ class TestPlannerSelection:
                     "reimbursable_amount": "1500.00",
                     "cost_center": "COST-DEFAULT",
                     "reason": "报销上周上海出差酒店",
-                    "invoice_ids": ["INV-001"],
+                    "invoice_ids": ["INV-001", "INV-002"],
                     "expense_items": [],
                     "stay_nights": 2,
                 },
@@ -556,7 +558,7 @@ class TestPlannerSelection:
                 allow_business_actions=True, business_date=date(2026, 8, 26))
         names = [h["tool_name"] for h in result["tool_history"]]
         assert names == ["travel_record_tool", "invoice_verify_tool",
-                         "expense_proposal_tool"]
+                         "invoice_verify_tool", "expense_proposal_tool"]
         # finalize contract: last proposal tool → route=action
         assert result["route"] == "action"
         assert result["category"] == "business_action"
@@ -565,15 +567,22 @@ class TestPlannerSelection:
         assert prop.invoke.call_args.args[0]["expense_reason"] == "客户拜访"
         assert result["tool_history"][-1]["arguments"] == {}
 
-    def test_multi_trip_expense_chain_verifies_only_selected_trip_invoices(self):
+    @pytest.mark.parametrize('invoice_order', [
+        ['INV-001', 'INV-002'],
+        ['INV-002', 'INV-001'],
+    ])
+    def test_multi_trip_expense_chain_verifies_only_selected_trip_invoices(
+        self, invoice_order,
+    ):
         """Planner 只应验真 selected trip 的 INV-001 / INV-002。"""
         decisions = [
             _tool("travel_record_tool", {}, "need_travel_history",
                   expense_reason="客户拜访"),
-            _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
-                  "need_invoice_verify", expense_reason="客户拜访"),
-            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
-                  "need_invoice_verify", expense_reason="客户拜访"),
+            *[
+                _tool("invoice_verify_tool", {"invoice_id": invoice_id},
+                      "need_invoice_verify", expense_reason="客户拜访")
+                for invoice_id in invoice_order
+            ],
             _tool("expense_proposal_tool", {}, "need_expense_proposal",
                   expense_reason="客户拜访"),
             _finish("已生成报销申请草稿，请确认后提交。"),
@@ -599,7 +608,10 @@ class TestPlannerSelection:
              patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
              patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
             travel.invoke.return_value = TRAVEL_MULTI_TRIP_ANSWER
-            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
+            inv.invoke.side_effect = [
+                INVOICE_ANSWER if invoice_id == "INV-001" else INVOICE_2_ANSWER
+                for invoice_id in invoice_order
+            ]
             prop.invoke.return_value = proposal_payload
             result = run_langgraph_agent(
                 "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。",
@@ -614,9 +626,7 @@ class TestPlannerSelection:
             "travel_record_tool", "invoice_verify_tool", "invoice_verify_tool",
             "expense_proposal_tool",
         ]
-        assert [call.args[0]["invoice_id"] for call in inv.invoke.call_args_list] == [
-            "INV-001", "INV-002",
-        ]
+        assert [call.args[0]["invoice_id"] for call in inv.invoke.call_args_list] == invoice_order
         assert result["action_proposal"]["invoice_ids"] == ["INV-001", "INV-002"]
 
     def test_task_runtime_clarification_callback_supplies_planner_reason(self):
@@ -804,6 +814,8 @@ class TestStressScenarios:
                   expense_reason="客户拜访"),
             _tool("invoice_verify_tool", {"invoice_id": "INV-001"},
                   "need_invoice_verify"),
+            _tool("invoice_verify_tool", {"invoice_id": "INV-002"},
+                  "need_invoice_verify"),
             _tool("expense_proposal_tool", {}, "need_expense_proposal",
                   expense_reason="客户拜访"),
             _tool("expense_proposal_tool", {}, "need_expense_proposal",
@@ -815,7 +827,7 @@ class TestStressScenarios:
              patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
              patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
             travel.invoke.return_value = TRAVEL_ANSWER
-            inv.invoke.return_value = INVOICE_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
             prop.invoke.return_value = json.dumps({
                 "success": True, "kind": "proposal",
                 "action_proposal": {
@@ -828,14 +840,15 @@ class TestStressScenarios:
                 "帮我报销上周上海出差的酒店和打车费用",
                 use_planner=True, employee_id="E10001",
                 allow_business_actions=True, business_date=date(2026, 8, 26))
-        # Stress C：相同签名（expense_proposal_tool + arguments={}）已成功 →
-        # 再次规划被 already_completed 阻断（success signature dedup）。
+        # Proposal 已创建后不再进入 Expense dependency Tool；第二次 Proposal
+        # 已从 Planner capability 清单移除，不会到达 Executor。
         blocked_proposal = [h for h in result["tool_history"]
                             if h["tool_name"] == "expense_proposal_tool"
                             and h["status"] == "blocked"]
-        assert len(blocked_proposal) == 1
+        assert blocked_proposal == []
         # proposal tool 只真正执行一次
         assert prop.invoke.call_count == 1
+        assert result["stop_reason"] == "invalid_decision"
 
     def test_stress_f_old_leave_memory_does_not_hijack_expense_query(self):
         """Stress F：ACTIVE LEAVE_REQUEST Memory + 报销状态问题 → 不回到 leave_proposal。"""

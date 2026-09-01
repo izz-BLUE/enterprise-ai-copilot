@@ -367,6 +367,8 @@ public class LangGraphAgentController {
             return AgentResponseFactory.actionFailure(traceId,
                     "HITL wait 上下文无效。");
         }
+        boolean expenseReasonClarification = isExpenseReasonClarification(
+                pythonResponse, request.message());
         if (pythonResponse.actionProposal() != null) {
             // 持久化 HITL wait 可能属于已经终态化的 Java action，而其 checkpoint
             // 仍需要 reconciliation。即使 capability 已撤销，也让 coordinator
@@ -448,8 +450,10 @@ public class LangGraphAgentController {
         if (taskExecution != null && pendingAction == null
                 && pythonResponse.missingFields() != null
                 && !pythonResponse.missingFields().isEmpty()) {
-            memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
-                    conversationId, traceId);
+            if (!expenseReasonClarification) {
+                memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
+                        conversationId, traceId);
+            }
             persistResponseMemory = false;
         }
         if (taskExecution != null && pendingAction == null
@@ -467,6 +471,11 @@ public class LangGraphAgentController {
             }
             persistResponseMemory = false;
         }
+        if (expenseReasonClarification) {
+            memoryCoordinator.persistExpenseReasonContinuation(request.message(),
+                    identity.userId(), conversationId, traceId);
+            persistResponseMemory = false;
+        }
         if (persistResponseMemory) {
             memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
                     conversationId, traceId);
@@ -480,6 +489,20 @@ public class LangGraphAgentController {
             builder.cacheControl(org.springframework.http.CacheControl.noStore());
         }
         return builder.body(publicResponse);
+    }
+
+    private boolean isExpenseReasonClarification(PythonAgentResponse response,
+                                                  String requestMessage) {
+        return isExpenseRequest(requestMessage)
+                && "action".equals(response.route())
+                && "business_action".equals(response.category())
+                && response.actionProposal() == null
+                && response.missingFields() != null
+                && response.missingFields().equals(java.util.List.of("reason"));
+    }
+
+    private boolean isExpenseRequest(String message) {
+        return message != null && (message.contains("报销") || message.contains("报账"));
     }
 
     private com.fantuan.copilot.model.task.TaskType taskType(
