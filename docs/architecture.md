@@ -24,7 +24,7 @@ flowchart TB
 |---|---|---|
 | React | 登录、conversationId、普通聊天、Proposal 确认 UI | 认证事实、权限判断、业务状态 |
 | Java | JWT/身份、Admin gate、trace、超时/并发、PendingAction、业务事务、Memory 生命周期、外部状态权威 | LLM 推理、RAG 召回、Planner 决策 |
-| Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume | 最终业务授权、业务数据库写入、Memory 终态生命周期 |
+| Python | Safety Guard、RAG、LLM、Planner、Tool Executor、Checkpoint resume、Purchase 本地只读事实 | 最终业务授权、业务数据库写入、Memory 终态生命周期 |
 | Enterprise OA MCP | 读取当前 trip/invoice 事实 | 报销写入、审批状态权威 |
 | Mock OA | 独立 SQLite 的模拟外部审批服务 | Enterprise AI Copilot 的业务事实、Java action 权威 |
 | PostgreSQL | Java 业务表和 LangGraph checkpoint | 让 LLM 获得权限或替代 Java 状态机 |
@@ -56,11 +56,11 @@ START → safety → planner ⇄ tool_executor → finalize → END
 
 Safety Guard Lite 是深度防御过滤器，不是 authorization 或业务 validation。安全拒答不进入 Planner。Planner 每次输出一个严格 decision，当前最多 6 次 decision；Tool Executor 当前最多真正执行 5 次 Tool，成功、失败和超时均消耗执行预算。
 
-可见 Tool 由 Runtime Context 和服务配置动态生成：`rag_answer_tool` 始终可见；Java read 配置可用时加入 leave/expense status；Enterprise OA MCP 可用时加入 travel/invoice；`allow_eval` 加入 eval；`allow_business_actions` 且有 employee 时加入 leave/expense proposal，公开 `demo` 身份不满足该 capability。注册表和执行器仍是最后防线。
+可见 Tool 由 Runtime Context 和服务配置动态生成：`rag_answer_tool` 始终可见；Java read 配置可用时加入 leave/expense status；Enterprise OA MCP 可用时加入 travel/invoice；`allow_eval` 加入 eval；`allow_business_actions` 且有 employee 时，匹配采购申请的问题还会加入 `purchase_budget_tool`、`purchase_policy_tool` 和 `purchase_proposal_tool`，同时加入 leave/expense proposal；公开 `demo` 身份不满足该 capability。注册表和执行器仍是最后防线。
 
-`leave_proposal_tool` 和 `expense_proposal_tool` 只生成 Proposal 或 Clarification。它们不调用业务写 API、不生成 nonce、不改变 Java 状态。报销金额、住宿上限和 Proposal facts 由程序确定性计算，LLM 不能计算或伪造。
+`leave_proposal_tool`、`expense_proposal_tool` 和 `purchase_proposal_tool` 只生成 Proposal 或 Clarification。它们不调用业务写 API、不生成 nonce、不改变 Java 状态。报销金额、住宿上限、采购预算/政策和 Proposal facts 由程序确定性计算，LLM 不能计算或伪造。
 
-这两个 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只用于 Python → Java 的只读业务 Tool 链路。
+这三个 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只用于 Python → Java 的只读业务 Tool 链路。
 
 ### Legacy Router-first（测试/离线兼容）
 
@@ -89,7 +89,7 @@ data/hr|bank|it/*.md
 
 ## 5. Java 权威与动作状态
 
-受控动作当前支持 `ANNUAL_LEAVE_REQUEST` 和 `EXPENSE_CLAIM`。Python 只提交内部 Proposal；Java `BusinessActionService` 在创建时重新校验 action type、owner、日期/字段、权限、容量和业务规则。
+受控动作当前支持 `ANNUAL_LEAVE_REQUEST`、`EXPENSE_CLAIM` 和 `PURCHASE_REQUEST`。Python 只提交内部 Proposal；Java `BusinessActionService` 在创建时重新校验 action type、owner、日期/字段、权限、容量和业务规则。
 
 ```text
 PENDING_CONFIRMATION
@@ -99,7 +99,7 @@ PENDING_CONFIRMATION
   └─ TTL     → EXPIRED
 ```
 
-Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数据库只保存 SHA-256 digest。Confirm 要求 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key`；成功重放返回原 `requestId`，不重复写 LeaveRequest 或 ExpenseClaim。Confirm/cancel/expire/失败时，Java 同步负责对应 Memory 的 terminal transition；Python 不写 terminal Memory。
+Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数据库只保存 SHA-256 digest。Confirm 要求 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key`；成功重放返回原 `requestId`，不重复写 LeaveRequest、ExpenseClaim 或 PurchaseRequest。Confirm/cancel/expire/失败时，Java 同步负责对应 Memory 的 terminal transition；Python 不写 terminal Memory。
 
 业务数据库的关键事实：
 
@@ -107,7 +107,12 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 - `PendingAction.hitl_reconciliation_status`：仅表示 EXPIRED HITL continuation 是否仍待投递；它与业务 action 的 `status=EXPIRED` 分离，成功投递后持久化为 `RECONCILED`；
 - `LeaveRequest` / leave account：年假业务事实；
 - `ExpenseClaim` / `ExpenseItem`：报销金额、trip/invoice 摘要、外部 provider/request、wait 和 resume markers；
+- `PurchaseRequest`：确认后的采购申请 item、预算、justification 与 `SUBMITTED` 状态；
 - `source_action_id` 唯一约束防止一个动作生成多个业务写入。
+
+### Purchase Extension Proof
+
+采购申请走最小的第三领域路径：Planner 先从用户输入冻结 `item / requested_budget / justification`，再顺序调用本地确定性 `purchase_budget_tool` 和 `purchase_policy_tool`，最后由 `purchase_proposal_tool` 生成待确认 Proposal。Java Handler 在注册和确认时都重新读取预算、重新评估政策并写入 `business_action.action_payload_json`；Confirm 在同一事务通过 sandbox Gateway 创建 `purchase_request`，Action 变为 `SUCCEEDED`、Task Runtime 状态为 `COMPLETED`，不进入 `WAITING_EXTERNAL`。
 
 ### 多任务 Runtime（Phase 2）
 

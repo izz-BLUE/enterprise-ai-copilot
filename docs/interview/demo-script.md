@@ -1,6 +1,6 @@
 # 面试 Demo 脚本
 
-建议时长 8–10 分钟。主线演示差旅报销，年假只做第二个短例子；如果外部依赖不可用，直接切换到已录制的请求/响应和架构图，不声称真实 OA 已接入。
+建议时长 8–10 分钟。主线演示差旅报销，年假和采购分别做第二、第三个短例子；如果外部依赖不可用，直接切换到已录制的请求/响应和架构图，不声称真实 OA 已接入。
 
 ## 0. 开场（30 秒）
 
@@ -103,6 +103,20 @@ leave_proposal_tool
 
 强调 Proposal 不扣余额，Confirm 才触发 Java 事务；重复 Confirm 重放 requestId，Cancel/Expire 不写 LeaveRequest。
 
-## 9. 收尾（30 秒）
+## 9. 采购第三领域 Proof（45 秒）
+
+输入：`帮我申请购买一台开发用 MacBook，预算15000，原因是移动端开发。`
+
+```text
+purchase_budget_tool → purchase_policy_tool
+  → purchase_proposal_tool
+  → PendingAction
+  → confirm
+  → PurchaseRequest + BusinessAction SUCCEEDED
+```
+
+强调预算和政策由确定性代码及 Java confirm-time revalidation 提供，LLM 不能伪造可信事实；错误用户、重复 Confirm 和未知 subtype 都 fail-closed，采购不进入 Mock OA 外部审批。
+
+## 10. 收尾（30 秒）
 
 > 项目当前是小规格单机和短时受控验证，不承诺生产 SLA。它的工程亮点是明确的 authority boundary、可恢复的双 wait、外部状态的 authoritative GET，以及 Memory、execution history、Checkpoint 和业务 DB 的分层；真正生产化还需要正式身份、真实 OA 的 provider-side version/CAS/幂等契约；如需可靠的 after-commit command/event delivery，再评估 Transactional Outbox；此外还需要分布式协调、完整观测和容量基线。

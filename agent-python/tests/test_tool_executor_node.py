@@ -509,6 +509,9 @@ class TestToolRegistryBudget:
             EXPENSE_PROPOSAL_TOOL_NAME,
             EXPENSE_STATUS_TOOL_NAME,
             INVOICE_VERIFY_TOOL_NAME,
+            PURCHASE_BUDGET_TOOL_NAME,
+            PURCHASE_POLICY_TOOL_NAME,
+            PURCHASE_PROPOSAL_TOOL_NAME,
             TRAVEL_RECORD_TOOL_NAME,
         )
         names = set(_TOOL_REGISTRY.keys())
@@ -524,6 +527,9 @@ class TestToolRegistryBudget:
             INVOICE_VERIFY_TOOL_NAME,
             EXPENSE_PROPOSAL_TOOL_NAME,
             EXPENSE_STATUS_TOOL_NAME,
+            PURCHASE_BUDGET_TOOL_NAME,
+            PURCHASE_POLICY_TOOL_NAME,
+            PURCHASE_PROPOSAL_TOOL_NAME,
         }
 
     def test_max_tool_calls_is_five(self):

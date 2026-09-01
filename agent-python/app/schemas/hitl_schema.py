@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ActionType = Literal['ANNUAL_LEAVE_REQUEST', 'EXPENSE_CLAIM']
+ActionType = Literal['ANNUAL_LEAVE_REQUEST', 'EXPENSE_CLAIM', 'PURCHASE_REQUEST']
 HitlDecision = Literal['CONFIRMED', 'CANCELLED', 'EXPIRED', 'REJECTED']
 HitlActionStatus = Literal['SUCCEEDED', 'CANCELLED', 'EXPIRED', 'FAILED']
 
@@ -70,7 +70,7 @@ def proposal_action_type(value: dict | None) -> ActionType | None:
     if not isinstance(value, dict):
         return None
     action_type = value.get('action_type')
-    if action_type in ('ANNUAL_LEAVE_REQUEST', 'EXPENSE_CLAIM'):
+    if action_type in ('ANNUAL_LEAVE_REQUEST', 'EXPENSE_CLAIM', 'PURCHASE_REQUEST'):
         return action_type
     return None
 

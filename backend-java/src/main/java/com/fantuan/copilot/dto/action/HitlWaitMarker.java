@@ -23,6 +23,7 @@ public record HitlWaitMarker(
                 && waitId != null && WAIT_ID.matcher(waitId).matches()
                 && executionId != null && EXECUTION_ID.matcher(executionId).matches()
                 && (actionType == BusinessActionType.ANNUAL_LEAVE_REQUEST
-                    || actionType == BusinessActionType.EXPENSE_CLAIM);
+                    || actionType == BusinessActionType.EXPENSE_CLAIM
+                    || actionType == BusinessActionType.PURCHASE_REQUEST);
     }
 }

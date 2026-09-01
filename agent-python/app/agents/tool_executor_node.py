@@ -38,6 +38,9 @@ from app.schemas.planner_schema import (
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
+    PURCHASE_BUDGET_TOOL_NAME,
+    PURCHASE_POLICY_TOOL_NAME,
+    PURCHASE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
@@ -50,6 +53,9 @@ from app.tools.enterprise_tools import (
     leave_balance_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
     leave_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
     leave_request_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    purchase_budget_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    purchase_policy_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
+    purchase_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
     travel_record_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
 )
 from app.tools.rag_tools import eval_report_tool, rag_answer_tool  # noqa: F401 - 见上方 registry 查找。
@@ -141,6 +147,9 @@ class _ExecutorContext:
     # ACTIVE Expense continuation 的 Q1 仅供 expense_proposal_tool 的
     # 差旅/发票确定性解析；普通 Tool 仍只接收当前请求 question。
     expense_request_question: str | None = None
+    purchase_item: str | None = None
+    purchase_budget: Any = None
+    purchase_justification: str | None = None
     tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
 
 
@@ -261,6 +270,51 @@ def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     return merged
 
 
+_PURCHASE_SYSTEM_ARG_KEYS = frozenset({
+    'employee_id', 'trace_id', 'item_name', 'requested_budget',
+    'justification', 'context',
+})
+
+
+def _inject_purchase_budget(args: dict, ctx: _ExecutorContext) -> dict:
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_LEAVE_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['employee_id'] = ctx.employee_id
+    merged['trace_id'] = ctx.trace_id
+    return merged
+
+
+def _inject_purchase_semantics(args: dict, ctx: _ExecutorContext) -> dict:
+    merged = dict(args or {})
+    leaked = set(args or {}).intersection(_PURCHASE_SYSTEM_ARG_KEYS)
+    if leaked:
+        raise PlannerDecisionError(
+            f'{ctx.tool_name} 不得在 arguments 中夹带系统字段 {sorted(leaked)}'
+        )
+    merged['item_name'] = ctx.purchase_item or ''
+    merged['requested_budget'] = (
+        str(ctx.purchase_budget) if ctx.purchase_budget is not None else ''
+    )
+    merged['justification'] = ctx.purchase_justification or ''
+    return merged
+
+
+def _purchase_fact_context(tool_history: list[dict]) -> dict:
+    from app.services.purchase_facts_service import purchase_fact_context
+
+    return purchase_fact_context(tool_history)
+
+
+def _inject_purchase_proposal(args: dict, ctx: _ExecutorContext) -> dict:
+    merged = _inject_purchase_semantics(args, ctx)
+    merged['context'] = _purchase_fact_context(ctx.tool_history)
+    return merged
+
+
 # --- Proposal 后置钩子 ------------------------------------------------------
 
 def _leave_proposal_post(parsed: dict, tool_name: str) -> dict:
@@ -276,6 +330,27 @@ def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
     """把 expense proposal Tool 的结构化结果回写到 AgentState。"""
     return {
         'action_proposal': parsed.get('action_proposal'),
+        'missing_fields': parsed.get('missing_fields', []),
+    }
+
+
+def _restore_purchase_decimal_fields(payload: dict | None) -> dict | None:
+    if not isinstance(payload, dict):
+        return payload
+    for key in ('requested_budget', 'available_budget'):
+        value = payload.get(key)
+        if isinstance(value, str):
+            try:
+                from decimal import Decimal
+                payload[key] = Decimal(value)
+            except Exception:
+                pass
+    return payload
+
+
+def _purchase_proposal_post(parsed: dict, tool_name: str) -> dict:
+    return {
+        'action_proposal': _restore_purchase_decimal_fields(parsed.get('action_proposal')),
         'missing_fields': parsed.get('missing_fields', []),
     }
 
@@ -382,6 +457,34 @@ def _build_registry() -> dict[str, ToolSpec]:
             system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
             no_employee_blocked_category='access_control',
             pre_inject=_inject_oamcp_read,
+        ),
+        PURCHASE_BUDGET_TOOL_NAME: ToolSpec(
+            name=PURCHASE_BUDGET_TOOL_NAME,
+            executable_ref='purchase_budget_tool',
+            identity_required=True,
+            resume_safe=True,
+            system_arg_keys=_LEAVE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_purchase_budget,
+        ),
+        PURCHASE_POLICY_TOOL_NAME: ToolSpec(
+            name=PURCHASE_POLICY_TOOL_NAME,
+            executable_ref='purchase_policy_tool',
+            identity_required=True,
+            resume_safe=True,
+            system_arg_keys=_PURCHASE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_purchase_semantics,
+        ),
+        PURCHASE_PROPOSAL_TOOL_NAME: ToolSpec(
+            name=PURCHASE_PROPOSAL_TOOL_NAME,
+            executable_ref='purchase_proposal_tool',
+            identity_required=True,
+            resume_safe=True,
+            system_arg_keys=_PURCHASE_SYSTEM_ARG_KEYS,
+            no_employee_blocked_category='business_action',
+            pre_inject=_inject_purchase_proposal,
+            proposal_post=_purchase_proposal_post,
         ),
     }
 
@@ -533,8 +636,8 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
         return _blocked(state, runtime, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
-    # 受控业务动作统一权限（LEAVE_PROPOSAL / EXPENSE_PROPOSAL，V2 §十二 HITL）
-    if decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME):
+    # 受控业务动作统一权限（Provider capability tools，V2 §十二 HITL）
+    if decision.tool_name in DOMAIN_PROVIDER_REGISTRY.business_action_tools:
         if not runtime.context['allow_business_actions']:
             logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
                            trace_id, decision.tool_name)
@@ -612,6 +715,18 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             # 最新 PlannerDecision 覆盖此前的 null 或有效原因。
             expense_reason=state.get('request_expense_reason'),
             expense_request_question=state.get('continuation_original_request'),
+            purchase_item=state.get(
+                'purchase_item',
+                (state.get('planner_decision') or {}).get('purchase_item'),
+            ),
+            purchase_budget=state.get(
+                'purchase_budget',
+                (state.get('planner_decision') or {}).get('purchase_budget'),
+            ),
+            purchase_justification=state.get(
+                'purchase_justification',
+                (state.get('planner_decision') or {}).get('purchase_justification'),
+            ),
             tool_history=tool_history,
         )
         if spec.pre_inject is not None:

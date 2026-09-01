@@ -6,6 +6,7 @@ from app.schemas.action_schema import AnnualLeaveActionProposal
 from app.schemas.expense_schema import ExpenseActionProposal
 from app.schemas.external_wait_schema import ExternalWaitMarker
 from app.schemas.hitl_schema import HitlWaitMarker
+from app.schemas.purchase_schema import PurchaseActionProposal
 
 
 class MemoryContext(BaseModel):
@@ -70,8 +71,8 @@ class AgentResponse(BaseModel):
     sources: list = Field(default_factory=list)
     success: bool
     traceId: str = ""
-    # P2-A: 业务动作 Proposal 多态（V2 §十五）—— AnnualLeave | Expense
-    action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | None = None
+    # 业务动作 Proposal 多态——AnnualLeave | Expense | Purchase
+    action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | PurchaseActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
     memory_proposal: AgentMemoryProposal | None = None
     # Java 内部字段。它不会复制到公开的 AgentChatResponse DTO。

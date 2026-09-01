@@ -79,6 +79,7 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         jdbc.execute("DELETE FROM task_execution");
         jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
+        jdbc.execute("DELETE FROM purchase_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE leave_request_number_seq RESTART WITH 1");
         jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'E10001'");
@@ -101,8 +102,8 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         // P3-4 V8：持久化 HITL wait correlation；P3-5B1 V9：OA 关联列/索引；
         // P3-5B2b V10：外部审批最近检查时间戳；
         // P3-5B3 V11：外部恢复投递标记；Phase 2 V12：Java Task Runtime；
-        // Expired HITL continuation delivery V13。
-        assertEquals(13, migrations);
+        // Expired HITL continuation delivery V13；P4-3 Purchase domain V14。
+        assertEquals(14, migrations);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());

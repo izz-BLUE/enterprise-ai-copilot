@@ -66,6 +66,7 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
         jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
+        jdbc.execute("DELETE FROM purchase_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.update("UPDATE leave_account SET annual_balance = 5.0 WHERE employee_id = 'E10001'");
     }

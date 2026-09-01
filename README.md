@@ -6,7 +6,7 @@
 
 Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程的工程化 RAG + Agent 平台。它把 Java 业务控制面与 Python AI 数据面分开：Java 负责认证、权限、持久化业务状态和最终授权；Python 负责 RAG、LLM 调用和 LangGraph 编排；React 提供操作界面。
 
-项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。年假申请是较短的第二条受控动作链路。
+项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。年假申请和采购申请分别验证了第二、第三业务域如何复用同一 Java authority。
 
 - 在线演示：<https://copilot.jintianchi.cn>
 - 最新 tagged release：[v0.4.1](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v0.4.1)；当前主线包含本文记录的更新版 Agent 工作流能力；本次 accuracy fix 不创建新的 tag/release。
@@ -82,6 +82,7 @@ Planner 只有规划权，没有业务执行授权。当前程序限制为最多
 | `travel_record_tool` / `invoice_verify_tool` | 通过 Enterprise OA MCP 读取当前差旅、发票事实 | 员工身份和 MCP 地址可用 |
 | `eval_report_tool` | 读取评估报告 | `allow_eval=true` |
 | `leave_proposal_tool` / `expense_proposal_tool` | 生成受控 Proposal，不执行写操作 | `allow_business_actions=true` 且有员工身份；公开 `demo` 身份固定只读 |
+| `purchase_budget_tool` / `purchase_policy_tool` / `purchase_proposal_tool` | 查询采购 fixture 并生成 Purchase Proposal，不执行写操作 | 采购申请意图、`allow_business_actions=true` 且有员工身份；公开 `demo` 身份固定只读 |
 
 Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 Python → Java 的只读业务 Tool 链路。
 
@@ -89,7 +90,7 @@ Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变�
 
 ### 受控业务动作与 Java authority
 
-年假和报销共用 `BusinessActionService` 生命周期：
+年假、报销和采购共用 `BusinessActionService` 生命周期：
 
 ```text
 Proposal
@@ -102,6 +103,19 @@ TTL     → EXPIRED
 ```
 
 Proposal 阶段没有副作用。Java 创建 PendingAction 时重新校验 action type、字段、业务日期、权限、容量和业务规则，生成一次性 `confirmationNonce`（数据库只存摘要），并返回脱敏确认视图。Confirm 必须通过 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key` 校验；重复确认重放原结果，不重复写业务表。Cancel/expire/失败也由 Java 结束对应 Memory 生命周期。
+
+### 采购申请 Proof
+
+```text
+用户申请购买开发设备
+  → Planner → purchase_budget_tool → purchase_policy_tool
+  → purchase_proposal_tool（只读事实 + Proposal，不写库）
+  → WAITING_USER / Java PendingAction → 用户 Confirm
+  → Java 重验预算/政策 → PurchaseRequest 持久化
+  → BusinessAction=SUCCEEDED / TaskExecution=COMPLETED
+```
+
+当前采购事实是本地 fixture：`E10001` 的可用预算为 `20000.00`，确认后写入 `purchase_request`，不进入 Mock OA 外部审批。
 
 ### 报销主流程
 
@@ -222,9 +236,10 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 
 | 范围 | 结果 |
 |---|---:|
-| Java 后端 | 334 通过 |
-| Python 完整套件 | 1402 通过 + 34 个预期跳过 |
+| Java 后端 | 406 通过 |
+| Python 完整套件 | 1512 通过 + 34 个预期跳过 |
 | PostgreSQL checkpoint / crash resume / HITL / external resume | 34 通过，0 跳过（17 + 7 + 5 + 5） |
+| PurchaseRequest PostgreSQL persistence proof | 4 通过 |
 | Enterprise OA MCP | 24 通过 |
 | Mock OA | 17 通过 |
 | 前端 | 44 通过 |
@@ -248,13 +263,13 @@ Repository automation 包含 CI（Java Backend、Mock OA Webhook、Python RAG Ev
 ## 文档导航
 
 - [架构](docs/architecture.md)：当前端到端架构、权威边界、恢复和接受限制
-- [受控业务动作](docs/controlled-business-actions.md)：年假/报销 Proposal、HITL、confirm-time revalidation、外部审批
+- [受控业务动作](docs/controlled-business-actions.md)：年假/报销/采购 Proposal、HITL、confirm-time revalidation、外部审批
 - [API](docs/api.md)：公开、内部、Python 和 Mock OA 接口审计
 - [记忆架构](docs/memory-architecture.md)：Memory、history、Checkpoint 分层
 - [记忆安全](docs/memory-security.md)：身份、终态写入和数据边界
 - [记忆验收](docs/memory-p0-acceptance.md)：Memory 验收清单
 - [部署](docs/deployment.md)：Compose、配置和网络边界
-- [Demo 指南](docs/demo-guide.md)：报销主 Demo 与年假次 Demo
+- [Demo 指南](docs/demo-guide.md)：报销主 Demo、年假次 Demo 与采购第三领域 Proof
 - [质量保证](docs/quality-assurance.md)：测试、CI、评估与限制
 - [路线图](docs/roadmap.md)：已完成能力与真正未来项
 - [面试材料](docs/interview/project-introduction.md)：项目介绍、架构走读、Demo 脚本、FAQ

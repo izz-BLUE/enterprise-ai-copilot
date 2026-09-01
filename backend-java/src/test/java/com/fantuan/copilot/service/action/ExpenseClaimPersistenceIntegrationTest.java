@@ -80,6 +80,7 @@ class ExpenseClaimPersistenceIntegrationTest extends PostgresIntegrationTestBase
         jdbc.execute("DELETE FROM ai_task_memory");
         // leave_request FK 指向 business_action：先清 leave_request 再清 action。
         jdbc.execute("DELETE FROM leave_request");
+        jdbc.execute("DELETE FROM purchase_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE expense_claim_number_seq RESTART WITH 1");
         properties.setMaxPending(100);

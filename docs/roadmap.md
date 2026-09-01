@@ -9,9 +9,10 @@
 - RAG：chunking、BGE embedding、FAISS、字符 BM25、RRF、sources 和 38-case evaluation；
 - Planner-first LangGraph；Router-first 仅作为测试/离线兼容实现；
 - strict PlannerDecision、动态 Tool capability gate、Tool budget 和成功签名去重；
-- `ANNUAL_LEAVE_REQUEST` 与 `EXPENSE_CLAIM` Proposal；
+- `ANNUAL_LEAVE_REQUEST`、`EXPENSE_CLAIM` 与 `PURCHASE_REQUEST` Proposal；
 - Java PendingAction：nonce digest、owner、TTL、幂等、事务、状态机和 Memory terminal lifecycle；
 - Expense Claim 与 Expense Item 持久化、确定性金额计算和 confirm-time revalidation；
+- Purchase Extension Proof：预算/政策只读事实、Proposal、Java PendingAction 确认和 `purchase_request` 持久化；
 - PostgreSQL `PostgresSaver` execution checkpoint、崩溃恢复、`graph.invoke(None)`；
 - 独立的 `WAITING_USER` 与 `WAITING_EXTERNAL`，Java-authoritative `Command(resume)`；
 - Mock OA SQLite、PENDING→APPROVED/REJECTED、HMAC webhook、authoritative GET、bounded reconciliation 和 external resume retry markers；

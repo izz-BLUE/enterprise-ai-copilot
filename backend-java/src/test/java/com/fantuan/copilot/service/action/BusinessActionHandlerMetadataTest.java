@@ -2,12 +2,14 @@ package com.fantuan.copilot.service.action;
 
 import com.fantuan.copilot.gateway.expense.ExpenseExecutionGateway;
 import com.fantuan.copilot.gateway.leave.LeaveExecutionGateway;
+import com.fantuan.copilot.gateway.purchase.PurchaseExecutionGateway;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.task.TaskExecutionStatus;
 import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.service.action.handler.AnnualLeaveActionHandler;
 import com.fantuan.copilot.service.action.handler.ExpenseClaimActionHandler;
+import com.fantuan.copilot.service.action.handler.PurchaseRequestActionHandler;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -28,6 +30,9 @@ class BusinessActionHandlerMetadataTest {
         BusinessActionHandler expense = new ExpenseClaimActionHandler(
                 mock(ExpenseExecutionGateway.class), mock(ExpensePrecheckService.class),
                 mock(ExpenseCalculationService.class), mock(ExpenseActionPayloadCodec.class));
+        BusinessActionHandler purchase = new PurchaseRequestActionHandler(
+                mock(PurchaseExecutionGateway.class), new PurchaseFactsService(),
+                mock(PurchaseActionPayloadCodec.class));
 
         assertEquals(BusinessActionType.ANNUAL_LEAVE_REQUEST, leave.supports());
         assertEquals(TaskType.LEAVE_REQUEST, leave.taskType());
@@ -44,18 +49,31 @@ class BusinessActionHandlerMetadataTest {
                 expense.deterministicRegistrationRejectionCodes());
         assertEquals(Set.of("EXPENSE_TRIP_STALE", "EXPENSE_INVOICE_STALE",
                 "EXPENSE_AMOUNT_STALE"), expense.staleFailureCodes());
+
+        assertEquals(BusinessActionType.PURCHASE_REQUEST, purchase.supports());
+        assertEquals(TaskType.PURCHASE_REQUEST, purchase.taskType());
+        assertEquals(TaskExecutionStatus.COMPLETED, purchase.statusAfterConfirmation());
+        assertTrue(purchase.deterministicRegistrationRejectionCodes()
+                .contains("PURCHASE_FACTS_MISMATCH"));
+        assertEquals(Set.of("PURCHASE_FACTS_STALE", "PURCHASE_POLICY_STALE",
+                "PURCHASE_BUDGET_STALE"), purchase.staleFailureCodes());
     }
 
     @Test
     void registryResolvesMetadataAndFailsClosedForUnknownAction() {
         BusinessActionHandler leave = new AnnualLeaveActionHandler(
                 mock(LeaveAccountRepository.class), mock(LeaveExecutionGateway.class));
-        BusinessActionHandlerRegistry registry = new BusinessActionHandlerRegistry(List.of(leave));
+        BusinessActionHandler purchase = new PurchaseRequestActionHandler(
+                mock(PurchaseExecutionGateway.class), new PurchaseFactsService(),
+                mock(PurchaseActionPayloadCodec.class));
+        BusinessActionHandlerRegistry registry = new BusinessActionHandlerRegistry(List.of(leave, purchase));
 
         assertEquals(TaskType.LEAVE_REQUEST,
                 registry.taskTypeFor(BusinessActionType.ANNUAL_LEAVE_REQUEST).orElseThrow());
         assertTrue(registry.handlerFor(BusinessActionType.EXPENSE_CLAIM).isEmpty());
         assertTrue(registry.taskTypeFor(BusinessActionType.EXPENSE_CLAIM).isEmpty());
+        assertEquals(TaskType.PURCHASE_REQUEST,
+                registry.taskTypeFor(BusinessActionType.PURCHASE_REQUEST).orElseThrow());
         assertFalse(registry.acceptsDeterministicRegistrationRejection(
                 BusinessActionType.EXPENSE_CLAIM, "BUSINESS_RULE_VIOLATION"));
         assertFalse(registry.acceptsStaleFailureCode(
