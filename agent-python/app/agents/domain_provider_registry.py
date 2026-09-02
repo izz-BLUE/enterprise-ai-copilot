@@ -136,6 +136,19 @@ def _successful_observations(tool_history: Sequence[dict], tool_name: str) -> li
     return result
 
 
+def _structured_observation_payload(item: dict) -> dict | None:
+    observation = item.get('observation')
+    if isinstance(observation, dict):
+        return observation
+    if not isinstance(observation, str):
+        return None
+    try:
+        payload = json.loads(observation)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _tool_invocation_has_business_success(item: dict) -> bool:
     """把 Tool invocation success 与结构化业务 success 分开判断。
 
@@ -145,19 +158,30 @@ def _tool_invocation_has_business_success(item: dict) -> bool:
     """
     if item.get('status') != 'success':
         return False
-    observation = item.get('observation')
-    if isinstance(observation, dict):
-        payload = observation
-    elif isinstance(observation, str):
-        try:
-            payload = json.loads(observation)
-        except (json.JSONDecodeError, TypeError):
-            return True
-    else:
-        return True
+    payload = _structured_observation_payload(item)
     if isinstance(payload, dict) and 'success' in payload:
         return payload.get('success') is True
     return True
+
+
+_STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE = (
+    '最后一次 Tool 明确返回 business success=false，不能标记 task_complete；'
+    '请根据当前能力和错误结果决定合理重试或 refuse/cannot_complete。'
+)
+
+
+def _latest_structured_tool_business_failure(
+    tool_history: Sequence[dict],
+) -> dict | None:
+    """返回最新一次明确的结构化业务失败，兼容 legacy/malformed observation。"""
+    for item in reversed(tool_history):
+        if item.get('status') != 'success':
+            continue
+        payload = _structured_observation_payload(item)
+        if isinstance(payload, dict) and 'success' in payload:
+            return item if payload.get('success') is False else None
+        return None
+    return None
 
 
 def build_expense_proposal_context(tool_history: Sequence[dict]) -> dict:
@@ -1107,6 +1131,12 @@ class DomainProviderRegistry:
     def validate_completion(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> None:
+        if (
+            decision.action == 'finish'
+            and decision.reason_code == 'task_complete'
+            and _latest_structured_tool_business_failure(context.tool_history) is not None
+        ):
+            raise PlannerDecisionError(_STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE)
         provider = self.resolve(context)
         if provider is not None:
             provider.validate_completion(decision, tools, context)
@@ -1167,6 +1197,10 @@ class DomainProviderRegistry:
             'finish 前未完成 purchase_proposal_tool Proposal 阶段': (
                 'planner_completion_validation', 'purchase_proposal_missing',
                 '当前用户目标包含采购申请，但尚未完成 purchase_proposal_tool；请继续规划剩余目标。',
+            ),
+            _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE: (
+                'planner_completion_validation', 'structured_tool_business_failure',
+                _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE,
             ),
         }
         return known.get(message)

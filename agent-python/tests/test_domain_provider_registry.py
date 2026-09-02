@@ -17,7 +17,11 @@ from app.agents.domain_provider_registry import (
     LeaveProvider,
     PurchaseProvider,
 )
-from app.agents.planner_node import MAX_PLANNER_STEPS, visible_tools
+from app.agents.planner_node import (
+    MAX_PLANNER_STEPS,
+    _planner_validation_metadata,
+    visible_tools,
+)
 from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
 from app.schemas.planner_schema import (
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -483,6 +487,84 @@ def test_registry_preserves_proposal_completion_semantics():
         LEAVE_PROPOSAL_TOOL_NAME,
         {'success': True, 'kind': 'clarification', 'action_proposal': None},
     )) is True
+
+
+@pytest.mark.parametrize('tool_name, question', [
+    (LEAVE_BALANCE_TOOL_NAME, '请查询我的年假余额'),
+    (LEAVE_REQUEST_TOOL_NAME, '请查询我的请假记录'),
+    (EXPENSE_STATUS_TOOL_NAME, '请查询我的报销状态'),
+    (RAG_TOOL_NAME, '公司的年假制度是什么'),
+])
+def test_platform_completion_guard_rejects_latest_read_business_failure(tool_name, question):
+    history = (_completion_item(tool_name, {
+        'success': False, 'error_code': 'FIXTURE_FAILURE',
+    }),)
+
+    with pytest.raises(ValueError, match='business success=false') as exc_info:
+        DOMAIN_PROVIDER_REGISTRY.validate_completion(
+            _finish_decision(), [tool_name],
+            DomainContext(question=question, tool_history=history),
+        )
+
+    assert DOMAIN_PROVIDER_REGISTRY.validation_metadata(str(exc_info.value)) == (
+        'planner_completion_validation',
+        'structured_tool_business_failure',
+        str(exc_info.value),
+    )
+    assert _planner_validation_metadata(exc_info.value) == (
+        'planner_completion_validation',
+        'structured_tool_business_failure',
+        str(exc_info.value),
+    )
+
+
+def test_platform_completion_guard_allows_read_failure_after_retry_success():
+    history = (
+        _completion_item(LEAVE_BALANCE_TOOL_NAME, {
+            'success': False, 'error_code': 'FIXTURE_FAILURE',
+        }),
+        _completion_item(LEAVE_BALANCE_TOOL_NAME, {
+            'success': True, 'annual_balance': 5,
+        }),
+    )
+
+    DOMAIN_PROVIDER_REGISTRY.validate_completion(
+        _finish_decision(), [LEAVE_BALANCE_TOOL_NAME],
+        DomainContext(question='请查询我的年假余额', tool_history=history),
+    )
+
+
+def test_platform_completion_guard_allows_business_negative_facts():
+    DOMAIN_PROVIDER_REGISTRY.validate_completion(
+        _finish_decision(), [INVOICE_VERIFY_TOOL_NAME],
+        DomainContext(
+            question='请校验发票 INV-1',
+            tool_history=(_completion_item(INVOICE_VERIFY_TOOL_NAME, {
+                'success': True, 'invoice_id': 'INV-1', 'valid': False,
+            }),),
+        ),
+    )
+    DOMAIN_PROVIDER_REGISTRY.validate_completion(
+        _finish_decision(), [PURCHASE_POLICY_TOOL_NAME],
+        DomainContext(
+            question='请查询采购政策',
+            tool_history=(_completion_item(PURCHASE_POLICY_TOOL_NAME, {
+                'success': True, 'policy_result': 'FAIL',
+            }),),
+        ),
+    )
+
+
+def test_platform_completion_guard_allows_rag_success():
+    DOMAIN_PROVIDER_REGISTRY.validate_completion(
+        _finish_decision(), [RAG_TOOL_NAME],
+        DomainContext(
+            question='公司的年假制度是什么',
+            tool_history=(_completion_item(RAG_TOOL_NAME, {
+                'success': True, 'answer': '年假制度。',
+            }),),
+        ),
+    )
 
 
 def test_purchase_provider_still_owns_purchase_completion_semantics():
