@@ -504,6 +504,28 @@ def _is_unregistered_capability_attempt(
         return False
 
 
+def _unresolved_terminal_refusal(
+    decision: PlannerDecision | None,
+    context: DomainContext,
+) -> dict | None:
+    """把未解析领域的 finish refusal 语义收口为合法 refuse。"""
+    if decision is None or decision.action != 'finish' or decision.reason_code not in {
+        'cannot_complete', 'not_allowed',
+    }:
+        return None
+    try:
+        if DOMAIN_PROVIDER_REGISTRY.resolve(context) is not None:
+            return None
+    except DomainProviderAmbiguityError:
+        return None
+    answer = (
+        '当前系统没有可用能力执行该请求。'
+        if decision.reason_code == 'cannot_complete'
+        else '当前系统不允许执行该请求。'
+    )
+    return _refuse_decision(answer, decision.reason_code)
+
+
 def _validate_business_completion(
     decision: PlannerDecision,
     *,
@@ -761,6 +783,9 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                     ),
                     'refused',
                 )
+            terminal_refusal = _unresolved_terminal_refusal(decision, domain_context)
+            if terminal_refusal is not None:
+                return _decision_result(state, terminal_refusal, 'refused')
             return _decision_result(
                 state,
                 _refuse_decision(
