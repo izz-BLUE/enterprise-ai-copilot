@@ -1,22 +1,22 @@
 # 质量保证与验证基线
 
-本文记录项目最终文档收口采用的验证口径。测试结果是已接受的工程基线，不等价于生产 SLA、长期容量或真实 OA 集成承诺。
+本文记录项目当前的验证范围与可复现门禁。通过数量会随测试集演进；未绑定具体 SHA 或 release 的历史计数不作为 current main 的固定基线。所有结果都不等价于生产 SLA、长期容量或真实 OA 集成承诺。
 
-## 1. 已接受基线
+## 1. 已接受验证范围
 
-| 范围 | 结果 |
+| 范围 | 当前验证口径 |
 |---|---:|
-| Java 后端 | 406 通过 |
-| Python 完整套件 | 1512 通过 + 34 个预期跳过 |
-| PostgreSQL checkpoint 集成 | 17 通过 |
-| PostgreSQL crash recovery | 7 通过 |
-| PostgreSQL HITL | 5 通过 |
-| PostgreSQL external resume | 5 通过 |
-| PostgreSQL 持久化 runtime 合计 | 34 通过，0 跳过 |
-| Enterprise OA MCP | 24 通过 |
-| Mock OA | 17 通过 |
-| 前端 | 44 通过 |
-| Lint/build | 通过 |
+| Java 后端 | CI 完整测试 |
+| Python 完整套件 | CI 完整测试（含集成与预期跳过） |
+| PostgreSQL checkpoint 集成 | CI 集成验证 |
+| PostgreSQL crash recovery | CI 集成验证 |
+| PostgreSQL HITL | CI 集成验证 |
+| PostgreSQL external resume | CI 集成验证 |
+| PostgreSQL 持久化 runtime 合计 | CI 持久化 runtime 集成验证 |
+| Enterprise OA MCP | fixture-backed read-only 集成验证 |
+| Mock OA | pytest、webhook 与配置校验 |
+| 前端 | CI build 与 browser tests |
+| Lint/build | CI 检查 |
 
 ## 2. 仓库自动化
 
