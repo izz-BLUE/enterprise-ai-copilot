@@ -72,9 +72,9 @@ def test_non_object_json_remains_invalid_decision_error():
     assert result['route'] == 'error'
 
 
-def test_registered_but_hidden_tool_remains_invalid_decision():
+def test_registered_but_hidden_tool_remains_invalid_for_unresolved_domain():
     result = _run(
-        '请帮我请明天年假。',
+        '请处理这个请求。',
         [
             '{"action":"tool","tool_name":"leave_proposal_tool",'
             '"arguments":{},"reason_code":"need_proposal"}',
@@ -188,6 +188,9 @@ def test_expense_provider_rejects_terminal_refusal_pair():
         '报销原因为客户拜访，帮我准备差旅报销申请。',
         ['{"action":"finish","answer":"当前无法完成。",'
          '"reason_code":"cannot_complete"}'] * 2,
+        allow_business_actions=True,
+        employee_id='E10001',
+        business_date=date(2026, 9, 2),
     )
 
     assert result['stop_reason'] == 'invalid_decision'

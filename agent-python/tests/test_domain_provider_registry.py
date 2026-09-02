@@ -511,6 +511,17 @@ def test_registry_preserves_proposal_completion_semantics():
     )) is True
 
 
+@pytest.mark.parametrize('question, expected', [
+    ('根据最近一次已批准的出差和对应发票准备报销。', True),
+    ('报销TRIP-HISTORY-001对应发票', False),
+    ('公司的报销流程是什么？', False),
+])
+def test_expense_provider_distinguishes_action_from_read_only_intent(question, expected):
+    assert ExpenseProvider().is_business_action_intent(
+        DomainContext(question=question)
+    ) is expected
+
+
 @pytest.mark.parametrize('tool_name, question', [
     (LEAVE_BALANCE_TOOL_NAME, '请查询我的年假余额'),
     (LEAVE_REQUEST_TOOL_NAME, '请查询我的请假记录'),

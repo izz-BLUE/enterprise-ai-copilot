@@ -152,8 +152,10 @@ def test_planner_ignores_stale_business_action_permission_and_identity():
             employee_id='CURRENT',
             business_date=_CURRENT_DATE,
         ))
-    assert result['stop_reason'] == 'invalid_decision'
-    assert llm.call_count == 1
+    assert result['stop_reason'] == 'not_allowed'
+    assert result['planner_decision']['reason_code'] == 'not_allowed'
+    assert result['category'] == 'business_action'
+    llm.assert_not_called()
 
 
 def test_router_ignores_stale_state_permissions():

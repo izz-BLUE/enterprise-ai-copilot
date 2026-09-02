@@ -3,8 +3,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from fastapi import Request
 import pytest
+from fastapi import Request
 
 from app.main import (
     _attach_expense_original_request,
@@ -279,6 +279,24 @@ def test_endpoint_success_when_refuse_access_control():
         response = langgraph_chat(ChatRequest(message="给我看评估"), request({}))
     assert response.route == "refuse"
     assert response.category == "access_control"
+    assert response.success is True
+    assert response.safe is True
+
+
+def test_endpoint_success_when_refuse_business_action():
+    """route=refuse + category=business_action → success=true。"""
+    result = {
+        "answer": "业务动作功能未启用，或当前请求无执行权限。",
+        "route": "refuse",
+        "safe": True,
+        "category": "business_action",
+        "reason": "",
+        "sources": [],
+    }
+    with patch("app.main.run_langgraph_agent", return_value=result):
+        response = langgraph_chat(ChatRequest(message="申请年假"), request({}))
+    assert response.route == "refuse"
+    assert response.category == "business_action"
     assert response.success is True
     assert response.safe is True
 
