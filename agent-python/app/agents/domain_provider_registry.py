@@ -699,8 +699,29 @@ class PurchaseProvider:
         value = (question or '').strip()
         if not value:
             return False
-        if any(word in value for word in ('流程', '制度', '规定', '政策', '标准', '怎么', '如何')):
+        has_purchase_term = any(word in value for word in ('采购', '购买', '买'))
+        if not has_purchase_term:
             return False
+
+        # 先识别明确的写操作，再处理政策/流程等知识查询词。这样“按照采购政策，
+        # 帮我申请购买……”不会因为背景词被误判为 RAG；而“申请采购需要什么流程”
+        # 仍会落到知识查询路径。
+        explicit_action_markers = (
+            '帮我申请', '帮我采购', '帮我购买', '帮我买',
+            '我想申请', '我想采购', '我想购买', '我想买',
+            '我要申请', '我要采购', '我要购买', '我要买',
+            '请申请',
+            '提交采购申请', '发起采购申请',
+        )
+        if any(marker in value for marker in explicit_action_markers):
+            return True
+
+        if any(word in value for word in (
+            '流程', '制度', '规定', '政策', '标准', '怎么', '如何',
+            '是什么', '有什么', '需要什么', '有哪些', '是否', '能否',
+        )):
+            return False
+
         return (
             '采购申请' in value
             or '申请采购' in value

@@ -360,7 +360,8 @@ missing_business_tables="$(business_psql <<'SQL'
 WITH required(table_name) AS (
     VALUES
         ('app_user'), ('leave_account'), ('business_action'), ('leave_request'),
-        ('ai_task_memory'), ('expense_claim'), ('expense_item'), ('task_execution')
+        ('ai_task_memory'), ('expense_claim'), ('expense_item'), ('purchase_request'),
+        ('task_execution')
 )
 SELECT COALESCE(string_agg(required.table_name, ',' ORDER BY required.table_name), '')
 FROM required
@@ -444,6 +445,18 @@ WHERE owner_user_id = '$TARGET_USER_ID'
 ORDER BY action_id;
 SQL
 )"
+TARGET_PURCHASE_IDS="$(business_psql <<SQL
+SELECT purchase.request_id
+FROM purchase_request purchase
+JOIN business_action action ON action.action_id = purchase.source_action_id
+WHERE purchase.owner_user_id = '$TARGET_USER_ID'
+  AND purchase.employee_id = '$TARGET_EMPLOYEE_ID'
+  AND action.owner_user_id = '$TARGET_USER_ID'
+  AND action.employee_id = '$TARGET_EMPLOYEE_ID'
+  AND action.action_type = 'PURCHASE_REQUEST'
+ORDER BY purchase.request_id;
+SQL
+)"
 TARGET_TASK_IDS="$(business_psql <<SQL
 SELECT task_id
 FROM task_execution
@@ -459,6 +472,7 @@ ORDER BY expense_id;
 SQL
 )"
 validate_id_list "target action ids" "$TARGET_ACTION_IDS"
+validate_id_list "target purchase request ids" "$TARGET_PURCHASE_IDS"
 validate_id_list "target task ids" "$TARGET_TASK_IDS"
 validate_id_list "target expense ids" "$TARGET_EXPENSE_IDS"
 
@@ -536,6 +550,37 @@ WHERE expense.employee_id IS DISTINCT FROM '$TARGET_EMPLOYEE_ID'
       SELECT 1
       FROM business_action action
       WHERE action.action_id = expense.source_action_id
+        AND action.owner_user_id = '$TARGET_USER_ID'
+        AND action.employee_id = '$TARGET_EMPLOYEE_ID'
+  );
+SELECT 'target_purchase_owner_non_E10001|' || count(*)
+FROM purchase_request purchase
+WHERE purchase.owner_user_id = '$TARGET_USER_ID'
+  AND purchase.employee_id IS DISTINCT FROM '$TARGET_EMPLOYEE_ID';
+SELECT 'target_purchase_employee_non_U10001|' || count(*)
+FROM purchase_request purchase
+WHERE purchase.employee_id = '$TARGET_EMPLOYEE_ID'
+  AND purchase.owner_user_id IS DISTINCT FROM '$TARGET_USER_ID';
+SELECT 'target_purchase_action_not_target|' || count(*)
+FROM purchase_request purchase
+WHERE purchase.owner_user_id = '$TARGET_USER_ID'
+  AND purchase.employee_id = '$TARGET_EMPLOYEE_ID'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM business_action action
+      WHERE action.action_id = purchase.source_action_id
+        AND action.owner_user_id = '$TARGET_USER_ID'
+        AND action.employee_id = '$TARGET_EMPLOYEE_ID'
+        AND action.action_type = 'PURCHASE_REQUEST'
+  );
+SELECT 'other_identity_purchase_via_target_action|' || count(*)
+FROM purchase_request purchase
+WHERE (purchase.owner_user_id IS DISTINCT FROM '$TARGET_USER_ID'
+       OR purchase.employee_id IS DISTINCT FROM '$TARGET_EMPLOYEE_ID')
+  AND EXISTS (
+      SELECT 1
+      FROM business_action action
+      WHERE action.action_id = purchase.source_action_id
         AND action.owner_user_id = '$TARGET_USER_ID'
         AND action.employee_id = '$TARGET_EMPLOYEE_ID'
   );
@@ -641,6 +686,7 @@ while IFS='|' read -r table_name table_count; do
     info "[CHECKPOINT] hit_$table_name=$table_count"
 done <<< "$CHECKPOINT_HITS_BEFORE"
 
+TARGET_PURCHASE_VALUES="$(sql_literal_list "$TARGET_PURCHASE_IDS")"
 TARGET_EXPENSE_VALUES="$(sql_literal_list "$TARGET_EXPENSE_IDS")"
 TARGET_COUNTS_BEFORE="$(business_psql <<SQL
 SELECT 'TaskExecution|' || count(*)
@@ -650,6 +696,9 @@ SELECT 'BusinessAction|' || count(*)
 FROM business_action
 WHERE owner_user_id = '$TARGET_USER_ID'
   AND employee_id = '$TARGET_EMPLOYEE_ID';
+SELECT 'PurchaseRequest|' || count(*)
+FROM purchase_request
+WHERE request_id IN ($TARGET_PURCHASE_VALUES);
 SELECT 'LeaveRequest|' || count(*)
 FROM leave_request
 WHERE employee_id = '$TARGET_EMPLOYEE_ID';
@@ -772,6 +821,12 @@ info "[POSTGRES] 清理业务表（单一事务，不重置 sequence）"
         printf '%s\n' "$TARGET_ACTION_IDS"
     fi
     printf '%s\n' '\.'
+    printf 'CREATE TEMP TABLE reset_target_purchases (request_id VARCHAR(64) PRIMARY KEY);\n'
+    printf 'COPY reset_target_purchases(request_id) FROM STDIN;\n'
+    if [[ -n "$TARGET_PURCHASE_IDS" ]]; then
+        printf '%s\n' "$TARGET_PURCHASE_IDS"
+    fi
+    printf '%s\n' '\.'
     printf 'CREATE TEMP TABLE reset_target_expenses (expense_id VARCHAR(64) PRIMARY KEY);\n'
     printf 'COPY reset_target_expenses(expense_id) FROM STDIN;\n'
     if [[ -n "$TARGET_EXPENSE_IDS" ]]; then
@@ -806,6 +861,13 @@ WITH deleted AS (
     RETURNING task_id
 )
 SELECT 'TaskExecutionDeleted|' || count(*) FROM deleted;
+
+WITH deleted AS (
+    DELETE FROM purchase_request
+    WHERE request_id IN (SELECT request_id FROM reset_target_purchases)
+    RETURNING request_id
+)
+SELECT 'PurchaseRequestDeleted|' || count(*) FROM deleted;
 
 WITH deleted AS (
     DELETE FROM business_action
@@ -843,6 +905,9 @@ SELECT 'BusinessAction|' || count(*)
 FROM business_action
 WHERE owner_user_id = '$TARGET_USER_ID'
   AND employee_id = '$TARGET_EMPLOYEE_ID';
+SELECT 'PurchaseRequest|' || count(*)
+FROM purchase_request
+WHERE request_id IN ($TARGET_PURCHASE_VALUES);
 SELECT 'LeaveRequest|' || count(*)
 FROM leave_request
 WHERE employee_id = '$TARGET_EMPLOYEE_ID';

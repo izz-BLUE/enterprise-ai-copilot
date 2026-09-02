@@ -112,7 +112,7 @@ Java 生成一次性 `confirmationNonce`，只在创建响应返回明文，数�
 
 ### Purchase Extension Proof
 
-采购申请走最小的第三领域路径：Planner 先从用户输入冻结 `item / requested_budget / justification`，再顺序调用本地确定性 `purchase_budget_tool` 和 `purchase_policy_tool`，最后由 `purchase_proposal_tool` 生成待确认 Proposal。Java Handler 在注册和确认时都重新读取预算、重新评估政策并写入 `business_action.action_payload_json`；Confirm 在同一事务通过 sandbox Gateway 创建 `purchase_request`，Action 变为 `SUCCEEDED`、Task Runtime 状态为 `COMPLETED`，不进入 `WAITING_EXTERNAL`。
+采购申请走最小的第三领域路径：Planner 先从用户输入冻结 `item / requested_budget / justification`，再顺序调用本地确定性 `purchase_budget_tool` 和 `purchase_policy_tool`，最后由 `purchase_proposal_tool` 生成待确认 Proposal。Java Handler 在注册和确认时都重新读取预算、重新评估政策并写入 `business_action.action_payload_json`；Confirm 在同一事务通过 sandbox Gateway 创建 `purchase_request`，Action 变为 `SUCCEEDED`，不进入 `WAITING_EXTERNAL`。Purchase 当前只支持 `LEGACY_SINGLE`，不创建 `TaskExecution`；Task Runtime 的 `PURCHASE_REQUEST` metadata 仅用于保持 Handler registry 合约完整。
 
 ### 多任务 Runtime（Phase 2）
 

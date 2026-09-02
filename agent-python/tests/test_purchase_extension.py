@@ -31,6 +31,24 @@ from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 PURCHASE_QUESTION = '请帮我申请购买一台 MacBook Pro，预算 6800 元，用于开发工作。'
 
 
+@pytest.mark.parametrize('question', [
+    '公司的采购政策是什么？',
+    '采购电脑有什么规定？',
+    '申请采购需要什么流程？',
+    '如何申请采购？',
+])
+def test_purchase_policy_and_process_questions_are_not_write_intent(question):
+    assert PurchaseProvider.is_purchase_request_intent(question) is False
+
+
+@pytest.mark.parametrize('question', [
+    '按照公司的采购政策，帮我申请购买一台 MacBook，预算15000，原因是移动端开发。',
+    '根据采购规定，帮我申请采购一台开发电脑，预算10000，原因是开发测试。',
+])
+def test_explicit_purchase_write_wins_over_policy_or_process_words(question):
+    assert PurchaseProvider.is_purchase_request_intent(question) is True
+
+
 def _decision(tool_name: str, reason_code: str, **semantic) -> str:
     return json.dumps({
         'action': 'tool',
@@ -176,11 +194,66 @@ def test_purchase_missing_fields_and_rejections_never_create_proposal():
         'item_name': '办公椅', 'requested_budget': '6800', 'justification': '个人娱乐',
         'context': {
             'purchase_budget': facts['purchase_budget'],
-            'purchase_policy': {'success': True, 'policy_result': 'FAIL', 'policy_reason': 'denied'},
+            'purchase_policy': {
+                'success': True, 'item_name': '办公椅', 'requested_budget': '6800',
+                'policy_result': 'FAIL', 'policy_reason': 'denied',
+            },
         },
     }))
     assert denied_policy['kind'] == 'rejection'
     assert denied_policy['action_proposal'] is None
+
+
+def _proposal_with_policy_fact(*, current_item='MacBook Pro', current_budget='6800',
+                               fact_item='MacBook Pro', fact_budget='6800') -> dict:
+    return json.loads(purchase_proposal_tool.invoke({
+        'item_name': current_item,
+        'requested_budget': current_budget,
+        'justification': '开发工作',
+        'context': {
+            'purchase_budget': {
+                'success': True,
+                'available_budget': '20000.00',
+            },
+            'purchase_policy': {
+                'success': True,
+                'item_name': fact_item,
+                'requested_budget': fact_budget,
+                'policy_result': 'PASS',
+            },
+        },
+    }))
+
+
+def test_purchase_proposal_fails_closed_when_policy_item_does_not_match():
+    result = _proposal_with_policy_fact(fact_item='MacBook Air')
+
+    assert result['success'] is False
+    assert result['error_code'] == 'PURCHASE_FACTS_MISMATCH'
+    assert result.get('action_proposal') is None
+
+
+def test_purchase_proposal_fails_closed_when_policy_budget_does_not_match():
+    result = _proposal_with_policy_fact(fact_budget='6800.01')
+
+    assert result['success'] is False
+    assert result['error_code'] == 'PURCHASE_FACTS_MISMATCH'
+    assert result.get('action_proposal') is None
+
+
+def test_purchase_proposal_accepts_equivalent_decimal_policy_budget():
+    result = _proposal_with_policy_fact(current_budget='15000.00', fact_budget='15000')
+
+    assert result['success'] is True
+    assert result['kind'] == 'proposal'
+
+
+def test_purchase_proposal_accepts_matching_policy_fact():
+    result = _proposal_with_policy_fact()
+
+    assert result['success'] is True
+    assert result['kind'] == 'proposal'
+    assert result['action_proposal']['item_name'] == 'MacBook Pro'
 
 
 def test_executor_second_gate_rejects_purchase_proposal_without_fresh_facts():

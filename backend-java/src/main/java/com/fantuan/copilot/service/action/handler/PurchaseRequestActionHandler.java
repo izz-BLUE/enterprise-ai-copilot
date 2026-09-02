@@ -68,8 +68,9 @@ public class PurchaseRequestActionHandler implements BusinessActionHandler {
 
     @Override
     public Set<String> staleFailureCodes() {
-        return Set.of("PURCHASE_FACTS_STALE", "PURCHASE_POLICY_STALE",
-                "PURCHASE_BUDGET_STALE");
+        // Purchase 的 stale 判断只发生在本 Handler 的 confirm-time revalidation；
+        // 当前没有事务外 authoritative revalidation / ExternalWait capability。
+        return Set.of();
     }
 
     @Override

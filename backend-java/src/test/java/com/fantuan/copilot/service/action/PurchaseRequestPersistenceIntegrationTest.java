@@ -80,6 +80,9 @@ class PurchaseRequestPersistenceIntegrationTest extends PostgresIntegrationTestB
         assertEquals(0, request.requestedBudget().compareTo(new BigDecimal("6800.00")));
         assertEquals(1, purchaseRequests.countBySourceActionId(pending.actionId()));
         assertEquals(ActionStatus.SUCCEEDED, actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task_execution WHERE action_id = ?",
+                Integer.class, pending.actionId()));
     }
 
     @Test
@@ -123,6 +126,21 @@ class PurchaseRequestPersistenceIntegrationTest extends PostgresIntegrationTestB
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM business_action WHERE action_type = 'PURCHASE_REQUEST'",
                 Integer.class));
+    }
+
+    @Test
+    void purchaseInternalStaleCodesAreNotAcceptedAsExternalFailureCapability() {
+        PendingActionView pending = actionService.createPending(
+                proposal(new BigDecimal("6800.00")), "purchase-stale-metadata", null,
+                USER_A, null);
+
+        assertThrows(IllegalArgumentException.class, () -> actionService.failStaleConfirmation(
+                pending.actionId(), pending.confirmationNonce(), null,
+                "purchase-stale-metadata-confirm", USER_A, "PURCHASE_POLICY_STALE"));
+
+        assertEquals(ActionStatus.PENDING_CONFIRMATION,
+                actions.find(pending.actionId()).orElseThrow().status());
+        assertEquals(0, purchaseRequests.countBySourceActionId(pending.actionId()));
     }
 
     private static PurchaseActionProposal proposal(BigDecimal budget) {

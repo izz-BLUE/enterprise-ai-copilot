@@ -392,7 +392,7 @@ def expense_proposal_tool(
     try:
         analysis = expense_input_service.analyze_expense_input(
             question, context=ctx_like)
-    except expense_input_service.ExpenseInputError as exc:
+    except expense_input_service.ExpenseInputError:
         return _payload(False, None, 'CLAIM_INTENT_REQUIRED', '无法识别报销意图。')
 
     if analysis.missing_fields:
@@ -642,7 +642,7 @@ def purchase_proposal_tool(
         budget = Decimal(str(requested_budget))
     except (InvalidOperation, ValueError):
         return _payload(False, None, 'PURCHASE_BUDGET_INVALID', '预算金额无效。')
-    if budget <= 0:
+    if not budget.is_finite() or budget <= 0:
         return _payload(False, None, 'PURCHASE_BUDGET_INVALID', '预算金额必须大于 0。')
 
     facts = context or {}
@@ -657,7 +657,8 @@ def purchase_proposal_tool(
         available = Decimal(str(budget_fact['available_budget']))
     except (KeyError, InvalidOperation, ValueError):
         return _payload(False, None, 'PURCHASE_FACTS_INVALID', '采购预算事实无效。')
-    policy_result = policy_fact.get('policy_result')
+    if not available.is_finite():
+        return _payload(False, None, 'PURCHASE_FACTS_INVALID', '采购预算事实无效。')
     if budget > available:
         return _payload(
             True,
@@ -668,6 +669,26 @@ def purchase_proposal_tool(
                 'message': f'采购预算不足：申请 {budget}，可用预算 {available}。',
             }, None, None,
         )
+
+    policy_item = policy_fact.get('item_name')
+    if not isinstance(policy_item, str) or policy_item.strip() != item_name.strip():
+        return _payload(
+            False, None, 'PURCHASE_FACTS_MISMATCH',
+            '采购政策事实与当前物品不一致。',
+        )
+    try:
+        policy_budget = Decimal(str(policy_fact['requested_budget']))
+    except (KeyError, InvalidOperation, ValueError):
+        return _payload(
+            False, None, 'PURCHASE_FACTS_MISMATCH',
+            '采购政策事实与当前预算不一致。',
+        )
+    if not policy_budget.is_finite() or policy_budget != budget:
+        return _payload(
+            False, None, 'PURCHASE_FACTS_MISMATCH',
+            '采购政策事实与当前预算不一致。',
+        )
+    policy_result = policy_fact.get('policy_result')
     if policy_result != 'PASS':
         return _payload(
             True,

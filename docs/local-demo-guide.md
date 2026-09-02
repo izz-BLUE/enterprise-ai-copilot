@@ -61,7 +61,7 @@ Java 侧按 [demo-guide.md](demo-guide.md) 打开 `DEMO_AUTH_ENABLED`、`BUSINES
 
 ## 恢复 zhangsan 演示状态
 
-脚本固定只针对 `U10001/zhangsan/E10001` 清理 Task Runtime、PendingAction、LeaveRequest、ExpenseClaim、Conversation Memory、LangGraph checkpoint 和 Mock OA approval，并把年假余额恢复为固定基线 `10.0`。执行前会先采集目标 ID，检查身份与关联一致性；任一异常都会 fail-closed，不会部分清理。执行前建议先停止 Java/Python 写入流量。
+脚本固定只针对 `U10001/zhangsan/E10001` 清理 Task Runtime、PendingAction、LeaveRequest、ExpenseClaim、PurchaseRequest、Conversation Memory、LangGraph checkpoint 和 Mock OA approval，并把年假余额恢复为固定基线 `10.0`。执行前会先采集目标 ID，检查身份与关联一致性；任一异常都会 fail-closed，不会部分清理。执行前建议先停止 Java/Python 写入流量。
 
 ```bash
 bash deploy/reset-demo-state.sh --dry-run

@@ -55,8 +55,7 @@ class BusinessActionHandlerMetadataTest {
         assertEquals(TaskExecutionStatus.COMPLETED, purchase.statusAfterConfirmation());
         assertTrue(purchase.deterministicRegistrationRejectionCodes()
                 .contains("PURCHASE_FACTS_MISMATCH"));
-        assertEquals(Set.of("PURCHASE_FACTS_STALE", "PURCHASE_POLICY_STALE",
-                "PURCHASE_BUDGET_STALE"), purchase.staleFailureCodes());
+        assertEquals(Set.of(), purchase.staleFailureCodes());
     }
 
     @Test
@@ -78,6 +77,12 @@ class BusinessActionHandlerMetadataTest {
                 BusinessActionType.EXPENSE_CLAIM, "BUSINESS_RULE_VIOLATION"));
         assertFalse(registry.acceptsStaleFailureCode(
                 BusinessActionType.EXPENSE_CLAIM, "EXPENSE_INVOICE_STALE"));
+        assertFalse(registry.acceptsStaleFailureCode(
+                BusinessActionType.PURCHASE_REQUEST, "PURCHASE_FACTS_STALE"));
+        assertFalse(registry.acceptsStaleFailureCode(
+                BusinessActionType.PURCHASE_REQUEST, "PURCHASE_POLICY_STALE"));
+        assertFalse(registry.acceptsStaleFailureCode(
+                BusinessActionType.PURCHASE_REQUEST, "PURCHASE_BUDGET_STALE"));
         assertFalse(registry.acceptsStaleFailureCode(
                 BusinessActionType.ANNUAL_LEAVE_REQUEST, "ACTION_STALE"));
     }
