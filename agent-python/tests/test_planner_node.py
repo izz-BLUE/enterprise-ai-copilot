@@ -2,7 +2,7 @@
 
 import json
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -14,6 +14,7 @@ from app.agents.planner_node import (
     visible_tools,
 )
 from app.agents.planner_node import planner_node as _planner_node
+from app.agents.tool_executor_node import tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -134,6 +135,71 @@ def test_first_planner_reason_is_frozen_for_current_request():
     assert result['planner_decision']['expense_reason'] == '客户拜访'
 
 
+def test_expense_planner_repairs_premature_finish_to_legal_invoice(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
+    travel_history = [{
+        'tool_name': TRAVEL_RECORD_TOOL_NAME,
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'items': [{
+                'trip_id': 'TRIP-1',
+                'status': 'APPROVED',
+                'expense_documents': [{'invoice_id': 'INV-1'}, {'invoice_id': 'INV-2'}],
+            }],
+        }),
+    }]
+    premature_finish = (
+        '{"action":"finish","answer":"已完成。","reason_code":"task_complete"}'
+    )
+    invoice = (
+        '{"action":"tool","tool_name":"invoice_verify_tool",'
+        '"arguments":{"invoice_id":"INV-1"},"reason_code":"need_invoice_verify",'
+        '"expense_reason":"客户拜访"}'
+    )
+    initial = state(
+        question='报销原因为客户拜访，帮我根据最近一次已批准的出差和对应发票准备差旅报销申请。',
+        allow_business_actions=True,
+        employee_id='E10001',
+        business_date=date(2026, 8, 26),
+        request_expense_reason='客户拜访',
+        step_count=1,
+        tool_call_count=1,
+        tool_history=travel_history,
+    )
+
+    with patch('app.agents.planner_node.call_llm',
+               side_effect=[premature_finish, invoice]) as llm:
+        planner_result = planner_node(initial)
+
+    assert llm.call_count == 2
+    assert planner_result['planner_decision']['action'] == 'tool'
+    assert planner_result['planner_decision']['tool_name'] == 'invoice_verify_tool'
+    assert planner_result['stop_reason'] == 'continue'
+    assert planner_result['step_count'] == 2
+    repair_prompt = llm.call_args_list[1].args[1]
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in repair_prompt
+    assert '当前合法能力清单' in repair_prompt
+    assert 'action="tool"' in repair_prompt
+
+    after_planner = {**initial, **planner_result}
+    invoice_tool = Mock()
+    invoice_tool.invoke.return_value = json.dumps({
+        'success': True, 'invoice_id': 'INV-1', 'valid': True,
+    })
+    with patch('app.agents.tool_executor_node.invoice_verify_tool', invoice_tool):
+        executor_result = tool_executor_node(
+            checkpoint_safe_state(after_planner),
+            runtime_for_state(after_planner),
+        )
+
+    assert executor_result['tool_call_count'] == 2
+    assert [item['tool_name'] for item in executor_result['tool_history']] == [
+        TRAVEL_RECORD_TOOL_NAME, 'invoice_verify_tool',
+    ]
+
+
 def test_null_first_planner_reason_is_frozen_and_cannot_be_replaced():
     raw = (
         '{"action":"tool","tool_name":"expense_proposal_tool",'
@@ -158,6 +224,25 @@ def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
     raw = (
         '{"action":"tool","tool_name":"travel_record_tool",'
         '"arguments":{},"reason_code":"need_travel_history",'
+        '"expense_reason":null}'
+    )
+    with patch('app.agents.planner_node.call_llm', return_value=raw):
+        result = planner_node(state(
+            question='根据最近一次已批准出差和对应发票准备报销。',
+            allow_business_actions=True,
+            employee_id='E10001',
+            business_date=date(2026, 8, 26),
+        ))
+    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
+    assert result['planner_decision']['arguments'] == {}
+    assert result['request_expense_reason'] is None
+
+
+def test_missing_reason_forces_reason_first_before_invoice(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
+    raw = (
+        '{"action":"tool","tool_name":"invoice_verify_tool",'
+        '"arguments":{"invoice_id":"INV-1"},"reason_code":"need_invoice_verify",'
         '"expense_reason":null}'
     )
     with patch('app.agents.planner_node.call_llm', return_value=raw):

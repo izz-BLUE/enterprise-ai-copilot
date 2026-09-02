@@ -11,6 +11,7 @@ trace_id 等系统字段,这些字段统一由 Executor 从当前请求 Runtime 
 
 import json
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from langchain_core.tools import tool
@@ -33,6 +34,8 @@ def _json_default(obj: Any) -> Any:
     """
     if isinstance(obj, date):
         return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return str(obj)
     raise TypeError(f'企业 Tool 输出边界不支持序列化类型: {type(obj).__name__}')
 
 
@@ -385,7 +388,7 @@ def expense_proposal_tool(
     try:
         analysis = expense_input_service.analyze_expense_input(
             question, context=ctx_like)
-    except expense_input_service.ExpenseInputError as exc:
+    except expense_input_service.ExpenseInputError:
         return _payload(False, None, 'CLAIM_INTENT_REQUIRED', '无法识别报销意图。')
 
     if analysis.missing_fields:

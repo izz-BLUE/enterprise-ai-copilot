@@ -2,15 +2,14 @@
 
 from typing import Any
 
-from app.schemas.planner_schema import (
-    EXPENSE_PROPOSAL_TOOL_NAME,
-    LEAVE_PROPOSAL_TOOL_NAME,
-)
+from app.agents.domain_provider_registry import DOMAIN_PROVIDER_REGISTRY
 
-PROPOSAL_TOOL_NAMES = frozenset({
-    LEAVE_PROPOSAL_TOOL_NAME,
-    EXPENSE_PROPOSAL_TOOL_NAME,
-})
+# 只接受显式注册 Provider 声明的 proposal Tool；未注册值 fail-closed。
+PROPOSAL_TOOL_NAMES = frozenset(
+    name
+    for provider in DOMAIN_PROVIDER_REGISTRY.providers
+    for name in provider.proposal_tool_names
+)
 
 
 def is_confirmable_action_proposal(state: dict[str, Any]) -> bool:

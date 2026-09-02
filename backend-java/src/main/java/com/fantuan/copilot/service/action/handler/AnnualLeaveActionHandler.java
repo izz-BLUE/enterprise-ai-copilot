@@ -11,6 +11,8 @@ import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.LeaveAccountRepository;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.AnnualLeaveProposalValidator;
@@ -23,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Set;
 
 /**
  * ANNUAL_LEAVE_REQUEST 业务动作 Handler（V2 §十七 AnnualLeaveActionHandler）。
@@ -54,6 +57,26 @@ public class AnnualLeaveActionHandler implements BusinessActionHandler {
     @Override
     public BusinessActionType supports() {
         return BusinessActionType.ANNUAL_LEAVE_REQUEST;
+    }
+
+    @Override
+    public TaskType taskType() {
+        return TaskType.LEAVE_REQUEST;
+    }
+
+    @Override
+    public TaskExecutionStatus statusAfterConfirmation() {
+        return TaskExecutionStatus.COMPLETED;
+    }
+
+    @Override
+    public Set<String> deterministicRegistrationRejectionCodes() {
+        return Set.of();
+    }
+
+    @Override
+    public Set<String> staleFailureCodes() {
+        return Set.of();
     }
 
     @Override

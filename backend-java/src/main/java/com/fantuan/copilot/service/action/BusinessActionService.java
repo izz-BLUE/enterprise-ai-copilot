@@ -405,11 +405,11 @@ public class BusinessActionService {
                                       VerifiedIdentity identity, String failureCode) {
         requireEnabledAndAdmin(presentedToken, identity);
         requireIdentity(identity);
-        if (!isStaleFailureCode(failureCode)) {
-            throw new IllegalArgumentException("Unsupported stale failure code");
-        }
         PendingAction action = findForUpdate(actionId);
         verifyOwner(action, identity);
+        if (!handlerRegistry.acceptsStaleFailureCode(action.actionType(), failureCode)) {
+            throw new IllegalArgumentException("Unsupported stale failure code");
+        }
         Instant now = clock.instant();
         expireIfNeeded(action, now);
         verifyNonce(action, confirmationNonce);
@@ -500,8 +500,10 @@ public class BusinessActionService {
     }
 
     private TaskExecutionStatus taskStatusAfterConfirmation(PendingAction action) {
-        return action.actionType() == BusinessActionType.EXPENSE_CLAIM
-                ? TaskExecutionStatus.WAITING_EXTERNAL : TaskExecutionStatus.COMPLETED;
+        return handlerRegistry.handlerFor(action.actionType())
+                .map(BusinessActionHandler::statusAfterConfirmation)
+                .orElseThrow(() -> new IllegalStateException(
+                        "No BusinessActionHandler for action type: " + action.actionType()));
     }
 
     private void synchronizeTaskRuntime(PendingAction action, TaskExecutionStatus target) {
@@ -548,13 +550,6 @@ public class BusinessActionService {
     private static boolean isTerminal(ActionStatus status) {
         return status == ActionStatus.SUCCEEDED || status == ActionStatus.CANCELLED
                 || status == ActionStatus.EXPIRED || status == ActionStatus.FAILED;
-    }
-
-    private static boolean isStaleFailureCode(String failureCode) {
-        return switch (failureCode) {
-            case "EXPENSE_TRIP_STALE", "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE" -> true;
-            default -> false;
-        };
     }
 
     private void verifyHitlCorrelation(PendingAction existing,

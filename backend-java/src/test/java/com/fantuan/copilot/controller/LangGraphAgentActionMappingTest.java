@@ -24,6 +24,8 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.service.action.BusinessActionHandler;
+import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.action.TaskRuntimeRegistrationRejectionException;
@@ -472,7 +474,7 @@ class LangGraphAgentActionMappingTest {
 
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
-                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime, handlerRegistry());
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("trace");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
@@ -542,7 +544,7 @@ class LangGraphAgentActionMappingTest {
 
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
-                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime, handlerRegistry());
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("trace");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
@@ -684,6 +686,16 @@ class LangGraphAgentActionMappingTest {
         order.verify(runtime).markTerminal("task-1", TaskExecutionStatus.FAILED);
         order.verify(memoryService).abandon(identity.userId(), "conv-1");
         order.verify(hitl).startNextTaskAfterTerminal(task, identity, "admin", "trace");
+    }
+
+    private static BusinessActionHandlerRegistry handlerRegistry() {
+        BusinessActionHandler leave = mock(BusinessActionHandler.class);
+        when(leave.supports()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        when(leave.taskType()).thenReturn(TaskType.LEAVE_REQUEST);
+        BusinessActionHandler expense = mock(BusinessActionHandler.class);
+        when(expense.supports()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(expense.taskType()).thenReturn(TaskType.EXPENSE_CLAIM);
+        return new BusinessActionHandlerRegistry(List.of(leave, expense));
     }
 
 }

@@ -70,7 +70,7 @@ class AgentResponse(BaseModel):
     sources: list = Field(default_factory=list)
     success: bool
     traceId: str = ""
-    # P2-A: 业务动作 Proposal 多态（V2 §十五）—— AnnualLeave | Expense
+    # 业务动作 Proposal 多态——AnnualLeave | Expense
     action_proposal: AnnualLeaveActionProposal | ExpenseActionProposal | None = None
     missing_fields: list[str] = Field(default_factory=list)
     memory_proposal: AgentMemoryProposal | None = None

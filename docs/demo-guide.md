@@ -1,6 +1,6 @@
 # 本地 Demo 指南
 
-本手册按当前实现准备本地演示。推荐主线是差旅报销外部审批闭环；年假申请作为较短的第二条受控动作。所有演示都应使用本地或专用 Demo 数据，不要把 Demo header、共享 token 或 Mock OA 当作生产认证方案。
+本手册按当前实现准备本地演示。推荐主线是差旅报销外部审批闭环；年假申请和采购申请分别作为较短的第二、第三条受控动作。所有演示都应使用本地或专用 Demo 数据，不要把 Demo header、共享 token 或 Mock OA 当作生产认证方案。
 
 ## 1. Demo 范围
 
@@ -180,8 +180,6 @@ leave_proposal_tool
   → Confirm / Cancel
   → LeaveRequest + balance transaction
 ```
-
-展示重点：Proposal 阶段不扣余额；Confirm 做 owner/nonce/TTL/幂等/业务规则校验；重复 Confirm 重放同一 requestId；Cancel 或过期不会写 LeaveRequest。当前 Demo 不处理法定节假日和调休。
 
 ## 6. Safety 与 RAG fallback
 

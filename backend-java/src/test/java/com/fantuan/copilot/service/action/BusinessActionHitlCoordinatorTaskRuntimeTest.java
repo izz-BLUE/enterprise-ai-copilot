@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -108,6 +109,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry(),
                 taskRuntimeService, null);
 
         ActionExecutionResponse actual = coordinator.confirm(ACTION_ID, "nonce", "idem",
@@ -155,6 +157,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry(),
                 taskRuntimeService, memoryService);
 
         assertNull(coordinator.startNextTaskAfterTerminal(current, identity, "admin", "trace"));
@@ -423,6 +426,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry(),
                 taskRuntimeService, memoryService);
 
         assertEquals(pending, coordinator.startNextTaskAfterTerminal(
@@ -462,6 +466,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry(),
                 taskRuntimeService, memoryService);
 
         assertNull(coordinator.startNextTaskAfterTerminal(current, identity, "admin", "trace"));
@@ -475,7 +480,28 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
         return new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
                 adminAccessService, externalApprovalCoordinator, null,
+                handlerRegistry(),
                 taskRuntimeService, memoryService);
+    }
+
+    private static BusinessActionHandlerRegistry handlerRegistry() {
+        BusinessActionHandler leave = mock(BusinessActionHandler.class,
+                org.mockito.Mockito.withSettings().lenient());
+        when(leave.supports()).thenReturn(BusinessActionType.ANNUAL_LEAVE_REQUEST);
+        when(leave.taskType()).thenReturn(TaskType.LEAVE_REQUEST);
+        when(leave.deterministicRegistrationRejectionCodes()).thenReturn(Set.of());
+        when(leave.staleFailureCodes()).thenReturn(Set.of());
+
+        BusinessActionHandler expense = mock(BusinessActionHandler.class,
+                org.mockito.Mockito.withSettings().lenient());
+        when(expense.supports()).thenReturn(BusinessActionType.EXPENSE_CLAIM);
+        when(expense.taskType()).thenReturn(TaskType.EXPENSE_CLAIM);
+        when(expense.deterministicRegistrationRejectionCodes())
+                .thenReturn(Set.of("EXPENSE_ITEMS_REQUIRED",
+                        "EXPENSE_AMOUNT_INVALID", "EXPENSE_INVOICES_REQUIRED"));
+        when(expense.staleFailureCodes()).thenReturn(Set.of("EXPENSE_TRIP_STALE",
+                "EXPENSE_INVOICE_STALE", "EXPENSE_AMOUNT_STALE"));
+        return new BusinessActionHandlerRegistry(List.of(leave, expense));
     }
 
     private static TaskExecution task(String taskId, int sequenceNo, TaskType taskType,

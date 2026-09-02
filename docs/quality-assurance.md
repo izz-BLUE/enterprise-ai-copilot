@@ -6,8 +6,8 @@
 
 | 范围 | 结果 |
 |---|---:|
-| Java 后端 | 334 通过 |
-| Python 完整套件 | 1402 通过 + 34 个预期跳过 |
+| Java 后端 | 406 通过 |
+| Python 完整套件 | 1512 通过 + 34 个预期跳过 |
 | PostgreSQL checkpoint 集成 | 17 通过 |
 | PostgreSQL crash recovery | 7 通过 |
 | PostgreSQL HITL | 5 通过 |

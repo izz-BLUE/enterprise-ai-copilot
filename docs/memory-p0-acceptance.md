@@ -49,7 +49,7 @@
 
 ## 验证基线
 
-Memory 相关行为包含在当前 Python full suite 与 Java integration baseline 中：Python full suite `1402 passed + 34 expected skips`；PostgreSQL checkpoint/recovery/HITL/external resume 合计 `34 passed, 0 skipped`。这些数字是项目接受基线，不把本页变成一次新的生产容量声明。
+Memory 相关行为包含在当前 Python full suite 与 Java integration baseline 中；PostgreSQL checkpoint/recovery/HITL/external resume 集成测试不进入当前正式业务 Domain 之外的 Proof 生命周期。这些数字是项目接受基线，不把本页变成一次新的生产容量声明。
 
 ## 非目标
 

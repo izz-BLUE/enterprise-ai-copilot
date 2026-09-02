@@ -6,8 +6,8 @@ import json
 from datetime import date
 from unittest.mock import patch
 
+from app.agents.domain_provider_registry import DomainContext, ExpenseProvider
 from app.agents.planner_node import (
-    expense_legal_action_set,
     planner_node,
 )
 from app.schemas.planner_schema import (
@@ -68,12 +68,14 @@ def _travel_history(*invoice_ids: str, include_other_trip: bool = False) -> list
 
 
 def _legal(history=None, *, reason="客户拜访", proposal=None, question=QUESTION):
-    return expense_legal_action_set(
+    return ExpenseProvider().legal_tools(
         TOOLS,
-        question=question,
-        tool_history=history or [],
-        request_expense_reason=reason,
-        action_proposal=proposal,
+        DomainContext(
+            question=question,
+            tool_history=tuple(history or []),
+            request_expense_reason=reason,
+            action_proposal=proposal,
+        ),
     )
 
 

@@ -15,6 +15,7 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.action.TaskRuntimeRegistrationRejectionException;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
@@ -104,6 +105,7 @@ public class LangGraphAgentController {
     private final AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard;
     private final BusinessActionHitlCoordinator hitlCoordinator;
     private final TaskRuntimeService taskRuntimeService;
+    private final BusinessActionHandlerRegistry handlerRegistry;
 
     @Autowired
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
@@ -115,7 +117,8 @@ public class LangGraphAgentController {
                                     AgentRuntimeThreadIdService runtimeThreadIdService,
                                     AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
                                     BusinessActionHitlCoordinator hitlCoordinator,
-                                    TaskRuntimeService taskRuntimeService) {
+                                    TaskRuntimeService taskRuntimeService,
+                                    BusinessActionHandlerRegistry handlerRegistry) {
         this.pythonAgentGateway = pythonAgentGateway;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
@@ -126,6 +129,7 @@ public class LangGraphAgentController {
         this.runtimeThreadExecutionGuard = runtimeThreadExecutionGuard;
         this.hitlCoordinator = hitlCoordinator;
         this.taskRuntimeService = taskRuntimeService;
+        this.handlerRegistry = handlerRegistry;
     }
 
     /**
@@ -169,6 +173,23 @@ public class LangGraphAgentController {
         this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
                 memoryService, adminLogBuffer, runtimeThreadIdService,
                 runtimeThreadExecutionGuard, hitlCoordinator, null);
+    }
+
+    /** 供既有 Task Runtime 聚焦测试使用的构造方法。 */
+    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
+                                    AdminAccessService adminAccessService,
+                                    BusinessActionService businessActionService,
+                                    IdentityContext identityContext,
+                                    AiTaskMemoryService memoryService,
+                                    AdminLogBuffer adminLogBuffer,
+                                    AgentRuntimeThreadIdService runtimeThreadIdService,
+                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
+                                    BusinessActionHitlCoordinator hitlCoordinator,
+                                    TaskRuntimeService taskRuntimeService) {
+        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
+                memoryService, adminLogBuffer, runtimeThreadIdService,
+                runtimeThreadExecutionGuard, hitlCoordinator, taskRuntimeService,
+                new BusinessActionHandlerRegistry(java.util.List.of()));
     }
 
     /**
@@ -507,10 +528,9 @@ public class LangGraphAgentController {
 
     private com.fantuan.copilot.model.task.TaskType taskType(
             com.fantuan.copilot.model.action.BusinessActionType actionType) {
-        return switch (actionType) {
-            case ANNUAL_LEAVE_REQUEST -> com.fantuan.copilot.model.task.TaskType.LEAVE_REQUEST;
-            case EXPENSE_CLAIM -> com.fantuan.copilot.model.task.TaskType.EXPENSE_CLAIM;
-        };
+        return handlerRegistry.taskTypeFor(actionType)
+                .orElseThrow(() -> new TaskRuntimeException(
+                        "Task Runtime Proposal action type 不受支持。"));
     }
 
 }

@@ -103,6 +103,23 @@ class BusinessActionPersistenceIntegrationTest extends PostgresIntegrationTestBa
         // P3-5B3 V11：外部恢复投递标记；Phase 2 V12：Java Task Runtime；
         // Expired HITL continuation delivery V13。
         assertEquals(13, migrations);
+        Integer formalDomainTables = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                        + "WHERE table_schema = 'public' AND table_name IN "
+                        + "('business_action', 'leave_request', 'expense_claim', 'expense_item', 'task_execution')",
+                Integer.class);
+        assertEquals(5, formalDomainTables);
+        Integer purchaseTables = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                        + "WHERE table_schema = 'public' AND table_name = 'purchase_request'",
+                Integer.class);
+        assertEquals(0, purchaseTables);
+        Integer v13Columns = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = 'public' AND table_name = 'business_action' "
+                        + "AND column_name = 'hitl_reconciliation_status'",
+                Integer.class);
+        assertEquals(1, v13Columns);
         PendingActionView pending = service.createPending(proposal(nextWeekday(2)), "origin", null);
         assertEquals(ActionStatus.PENDING_CONFIRMATION,
                 actions.find(pending.actionId()).orElseThrow().status());

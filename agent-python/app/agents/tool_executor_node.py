@@ -21,6 +21,13 @@ from typing import Any, Callable
 from langgraph.runtime import Runtime
 from pydantic import ValidationError
 
+from app.agents.domain_provider_registry import (
+    DOMAIN_PROVIDER_REGISTRY,
+    DomainContext,
+    DomainProviderAmbiguityError,
+    DomainToolCallRejected,
+    build_expense_proposal_context,
+)
 from app.agents.runtime_context import AgentRuntimeContext
 from app.core.config import logger
 from app.schemas.planner_schema import (
@@ -36,7 +43,6 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
-from app.services import expense_input_service
 from app.tools.enterprise_tools import (
     expense_proposal_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
     expense_status_tool,  # noqa: F401 - registry 通过 globals() 解析工具。
@@ -231,91 +237,8 @@ _EXPENSE_CTCX_SYSTEM_ARG_KEYS = frozenset({
 })
 
 
-def _success_observations(tool_history: list[dict], tool_name: str) -> list[dict]:
-    """从 tool_history 抽取指定 Tool 的 success observation（JSON dict）。"""
-    result = []
-    for item in tool_history:
-        if item.get('tool_name') != tool_name or item.get('status') != 'success':
-            continue
-        observation = item.get('observation')
-        try:
-            payload = json.loads(observation)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(payload, dict) and payload.get('success', False):
-            result.append(payload)
-    return result
-
-
-def _build_expense_proposal_context(tool_history: list[dict]) -> dict:
-    """程序层确定性构造 ExpenseProposalContext。
-
-    只允许从当前请求成功 tool_history 中抽取已成功的结构化 facts；
-    travel_record / invoices / policy_context 都是程序层筛选结果。
-    """
-    travel_payloads = _success_observations(
-        tool_history, TRAVEL_RECORD_TOOL_NAME)
-    invoice_payloads = _success_observations(
-        tool_history, INVOICE_VERIFY_TOOL_NAME)
-    rag_payloads = _success_observations(
-        tool_history, RAG_TOOL_NAME)
-
-    travel_items = []
-    for payload in travel_payloads:
-        items = payload.get('items', [])
-        if isinstance(items, list):
-            travel_items.extend(items)
-
-    invoice_items = []
-    for payload in invoice_payloads:
-        if payload.get('success') is True and 'invoice_id' in payload:
-            invoice_items.append(payload)
-        elif payload.get('success') is True and 'items' in payload:
-            invoice_items.extend(payload.get('items', []))
-
-    policy_context = ''
-    for payload in rag_payloads:
-        answer = payload.get('answer')
-        if isinstance(answer, str) and answer:
-            policy_context = answer
-            break
-
-    return {
-        'travel_record': travel_items,
-        'invoices': invoice_items,
-        'policy_context': policy_context,
-    }
-
-
-def _invoice_scope_allowed(question: str, tool_history: list[dict], invoice_id: str) -> bool:
-    """只允许当前成功 travel facts 中 selected trip 的 invoice。"""
-    context = expense_input_service.ExpenseProposalContextLike(_build_expense_proposal_context(tool_history))
-    try:
-        selected_trip_id = expense_input_service.analyze_expense_input(question, context=context).trip_id
-    except expense_input_service.ExpenseInputError:
-        return False
-    return any(
-        item.get('trip_id') == selected_trip_id
-        and invoice_id in {
-            doc.get('invoice_id') for doc in (item.get('expense_documents') or [])
-            if isinstance(doc, dict) and doc.get('invoice_id')
-        }
-        for item in expense_input_service.find_trip_records(context)
-    )
-
-
-def _is_completed_success(item: dict) -> bool:
-    """只把真正完成的 Proposal 计入相同调用去重。"""
-    if item.get('status') != 'success':
-        return False
-    if item.get('tool_name') != EXPENSE_PROPOSAL_TOOL_NAME:
-        return True
-    try:
-        payload = json.loads(item.get('observation'))
-    except (json.JSONDecodeError, TypeError):
-        return False
-    return isinstance(payload, dict) and payload.get('action_proposal') is not None
-
+# ExpenseProposalContext 构造和 invoice scope 判断均由 ExpenseProvider 负责。
+_build_expense_proposal_context = build_expense_proposal_context
 
 def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     """expense_proposal_tool 的 pre-inject 钩子。
@@ -355,6 +278,11 @@ def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
         'action_proposal': parsed.get('action_proposal'),
         'missing_fields': parsed.get('missing_fields', []),
     }
+
+
+def _is_completed_success(item: dict) -> bool:
+    """成功去重的领域完成语义由 Provider Registry 决定。"""
+    return DOMAIN_PROVIDER_REGISTRY.is_completed_success(item)
 
 
 # --- 仅供只读企业 Tool 使用;Planner arguments 不得出现这些 key ---------
@@ -526,8 +454,11 @@ def _blocked(state: dict, runtime: Runtime[AgentRuntimeContext], stop_reason: st
 
 
 def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
-    """成功签名去重：历史中存在相同 tool + 相同 arguments 且 status=success
-    时阻止再次执行；error / timeout / blocked 历史不阻止，允许合理重试。"""
+    """成功签名去重：历史中存在相同 tool + arguments 且业务成功时阻止重试。
+
+    status=success 只表示 Tool 函数正常返回；结构化 payload 的 success=false
+    不阻止合理重试，error / timeout / blocked 历史同样不阻止重试。
+    """
     for item in tool_history:
         if (
             item.get('tool_name') == decision.tool_name
@@ -605,8 +536,8 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
         return _blocked(state, runtime, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
-    # 受控业务动作统一权限（LEAVE_PROPOSAL / EXPENSE_PROPOSAL，V2 §十二 HITL）
-    if decision.tool_name in (LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME):
+    # 受控业务动作统一权限（Provider capability tools，V2 §十二 HITL）
+    if decision.tool_name in DOMAIN_PROVIDER_REGISTRY.business_action_tools:
         if not runtime.context['allow_business_actions']:
             logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
                            trace_id, decision.tool_name)
@@ -621,21 +552,29 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
 
-    invoice_id = (decision.arguments or {}).get('invoice_id')
-    if (
-        decision.tool_name == INVOICE_VERIFY_TOOL_NAME
-        and not _invoice_scope_allowed(
-            state.get('continuation_original_request') or state.get('question', ''),
-            state.get('tool_history', []),
-            invoice_id,
+    # 领域 second gate：Provider 只能拒绝非法动作，不能扩大上游 capability gate。
+    try:
+        DOMAIN_PROVIDER_REGISTRY.validate_tool_call(
+            decision.tool_name,
+            decision.arguments or {},
+            DomainContext.from_state(state),
         )
-    ):
+    except DomainToolCallRejected as exc:
         return _blocked(
             state,
             runtime,
-            'invalid_selected_trip_invoice_scope',
-            f'invoice_id={invoice_id} 不属于当前 selected trip 的 expense_documents，'
-            '或 selected trip 无法确定，已拒绝验真。',
+            exc.reason_code,
+            str(exc),
+            tool_name=decision.tool_name,
+            arguments=decision.arguments,
+        )
+    except DomainProviderAmbiguityError as exc:
+        logger.warning('[%s] executor domain provider ambiguity: %s', trace_id, exc)
+        return _blocked(
+            state,
+            runtime,
+            'invalid_decision',
+            '当前 Tool 同时属于多个业务领域，已拒绝执行。',
             tool_name=decision.tool_name,
             arguments=decision.arguments,
         )

@@ -91,7 +91,7 @@ flowchart LR
 7. Mock OA 被 approve/reject 后发送不含 status 的签名通知；Java 通过 webhook 或 reconciliation 调用 Mock OA GET，唯一以该状态更新本地 claim。
 8. Java 本地 ExpenseClaim 终态提交后，才调用 Python external resume。Python 严格校验 wait/execution/action/request correlation，用 `Command(resume)` 进入 Graph END。
 
-## 5. 确认时重新校验
+## 6. 确认时重新校验
 
 这是一个 Java → Python 的窄内部适配器，payload 来自持久化 Action，不来自浏览器或 Memory。它重新取得当前 OA facts，检查：
 
@@ -109,7 +109,7 @@ flowchart LR
 
 远程读取完成到本地事务提交之间仍有小型 TOCTOU 窗口，这是当前小规格方案明确接受的限制。Local Transactional Outbox 不能消除该窗口；若未来需要关闭它，必须由 provider 提供 version token/ETag、CAS、lease、execute-if-version 或 transactional API。Transactional Outbox 只在本地事务提交后需要可靠异步发布 command/event 时评估。
 
-## 6. WAITING_USER 不等于 WAITING_EXTERNAL
+## 7. WAITING_USER 不等于 WAITING_EXTERNAL
 
 | 维度 | `WAITING_USER` | `WAITING_EXTERNAL` |
 |---|---|---|
@@ -124,7 +124,7 @@ flowchart LR
 
 普通 Chat 开始前，Java 先检查同一 owner/conversation 的 `PENDING_CONFIRMATION` TTL。过期的 `WAITING_USER` 在 Java 短事务内变为 `EXPIRED`，对应 Memory 变为 `ABANDONED` 并写审计；有完整 HITL correlation 的新过期 action 同时进入独立的 `PENDING_RECONCILIATION` 投递状态。事务提交后才通过原有 HITL resume endpoint 发送确定性的 `EXPIRED` decision；成功后将投递状态持久化为 `RECONCILED`，后续 Chat 不再重复选择该 action。未过期 wait 仍阻断新 Chat；临时 resume 失败时当前 Chat 不启动，状态保持待投递并允许后续安全重试；`hitl_marker_invalid` 等不安全 409 不直接视为成功。
 
-## 7. Mock OA、webhook 与 reconciliation
+## 8. Mock OA、webhook 与 reconciliation
 
 Mock OA 独立运行在 `:8010`，使用 SQLite 保存 idempotency key、payload hash、request ID 和 status：
 
@@ -148,7 +148,7 @@ Java webhook 的唯一路径是 `POST /api/webhooks/mock-oa/expense-approval`。
 
 Reconciliation worker 始终按默认 60 秒、批量 20（代码限制 1–100）低频运行。候选只包含 `WAITING_APPROVAL + MOCK_OA + external_request_id`，先对 `external_last_checked_at` 做 due CAS 并提交，再在事务外 GET；provider 关闭或查询失败时 fail-closed，Webhook 与 reconciliation 共用同一 status-sync service。Submission retry 与 external-resume retry 也始终运行并独立限批。
 
-## 8. External resume 失败语义
+## 9. External resume 失败语义
 
 Java 只有在 ExpenseClaim 的 `APPROVED/REJECTED` 终态事务提交后才构建 external resume payload。payload 从持久化 correlation 重建 owner/conversation/employee/execution/wait/request，能力固定为 false，避免恢复路径重新进入 Planner 或业务 Tool。
 
@@ -160,7 +160,7 @@ Python 可能处于三种安全状态：
 
 Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只负责投递和重试记录。Python 不可用、响应丢失或 finalizer crash 都不能回滚 Java 终态。
 
-## 9. 配置
+## 10. 配置
 
 | 配置 | 默认值 |
 |---|---|
@@ -173,7 +173,7 @@ Java 的 `external_resume_last_attempt_at` / `external_resume_completed_at` 只�
 | `MOCK_OA_ENABLED` | `false` |
 | reconciliation / external resume retry | 始终低频调度；provider 由 `MOCK_OA_ENABLED` 控制 |
 
-## 10. 已接受的边界
+## 11. 已接受的边界
 
 - 当前仅用于小规格单机和短时受控演示，不承诺生产 SLA；
 - Java/Python runtime guard 仅 process-local，多实例需要分布式 lease/lock；

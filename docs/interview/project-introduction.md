@@ -10,13 +10,13 @@
 
 > 这个项目不是简单的“问答 API”。稳定链路是 Java → Python → hybrid retrieval → DeepSeek；Agent 链路默认使用 Planner-first LangGraph，Planner 只负责有限规划，Tool Executor 负责 capability、身份、预算和去重，Java 是最终业务 authority。
 >
-> 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。项目有 1402 个 Python 通过、34 个预期 skip，PostgreSQL durable flows 34/0，Java 334、MCP 24、Mock OA 17、前端 44 的接受基线。
+> 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。完整验证结果以质量保证文档中的当前回归记录为准。
 
 ## 3 分钟
 
 ### 背景
 
-企业员工需要查询 HR、银行和 IT 制度，也会提出请假、差旅报销等需要确认的业务请求。单纯把自然语言直接交给 LLM 会产生两个问题：知识答案缺少可追溯性，业务写操作缺少权限和幂等边界。
+企业员工需要查询 HR、银行和 IT 制度，也会提出请假、差旅报销和采购申请等需要确认的业务请求。单纯把自然语言直接交给 LLM 会产生两个问题：知识答案缺少可追溯性，业务写操作缺少权限和幂等边界。
 
 ### 架构
 

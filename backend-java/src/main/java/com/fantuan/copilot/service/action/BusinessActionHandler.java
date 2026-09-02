@@ -4,11 +4,14 @@ import com.fantuan.copilot.dto.action.BusinessActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.identity.VerifiedIdentity;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Set;
 
 /**
  * 业务动作 Handler（V2 §十七）。
@@ -26,6 +29,18 @@ public interface BusinessActionHandler {
 
     /** 该 Handler 支持的 BusinessActionType（与 registry 键一致）。 */
     BusinessActionType supports();
+
+    /** Task Runtime 对该业务动作使用的任务类型。 */
+    TaskType taskType();
+
+    /** Java 确认成功后对应的 Task Runtime 状态。 */
+    TaskExecutionStatus statusAfterConfirmation();
+
+    /** 注册 Proposal 时可确定关闭 HITL wait 的业务错误码。 */
+    Set<String> deterministicRegistrationRejectionCodes();
+
+    /** 确认前权威复检失败时允许写入的领域 stale 错误码。 */
+    Set<String> staleFailureCodes();
 
     /**
      * createPending 阶段的业务校验（V2 §十七 validate）。
