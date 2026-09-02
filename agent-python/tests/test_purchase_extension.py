@@ -9,7 +9,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.agents.domain_provider_registry import (
+    DOMAIN_PROVIDER_REGISTRY,
     DomainContext,
+    DomainProviderAmbiguityError,
     DomainToolCallRejected,
     PurchaseProvider,
 )
@@ -30,6 +32,35 @@ from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 PURCHASE_QUESTION = '请帮我申请购买一台 MacBook Pro，预算 6800 元，用于开发工作。'
 
+PURCHASE_QUERY_CASES = [
+    '公司的采购政策是什么？',
+    '采购电脑有什么规定？',
+    '申请采购需要什么流程？',
+    '如何申请采购？',
+    '我想申请采购，需要什么流程？',
+    '我要申请采购，需要什么材料？',
+    '采购申请需要哪些材料？',
+    '采购怎么申请？',
+]
+
+PURCHASE_WRITE_CASES = [
+    '帮我申请购买一台 MacBook',
+    '帮我采购一台开发电脑',
+    '我要购买一台 MacBook',
+    '我想采购一台开发电脑',
+    '请提交采购申请',
+    '发起采购申请',
+    '按照公司的采购政策，帮我申请购买一台 MacBook，预算15000，原因是移动端开发',
+    '根据采购规定，帮我申请采购一台开发电脑，预算10000，原因是开发测试',
+]
+
+PURCHASE_CROSS_CLAUSE_CASES = [
+    '我想申请年假，顺便问下采购政策',
+    '帮我申请年假，另外采购政策是什么？',
+    '我要申请年假，同时想了解采购流程',
+    '帮我请明天年假，再告诉我采购电脑有什么规定',
+]
+
 
 @pytest.mark.parametrize('question', [
     '公司的采购政策是什么？',
@@ -47,6 +78,99 @@ def test_purchase_policy_and_process_questions_are_not_write_intent(question):
 ])
 def test_explicit_purchase_write_wins_over_policy_or_process_words(question):
     assert PurchaseProvider.is_purchase_request_intent(question) is True
+
+
+@pytest.mark.parametrize('question', PURCHASE_QUERY_CASES)
+def test_purchase_query_matrix_never_matches_write_intent(question):
+    provider = PurchaseProvider()
+
+    assert provider.matches(DomainContext(question=question)) is False
+    assert DOMAIN_PROVIDER_REGISTRY.capability_tools_for_question(question) == []
+
+
+@pytest.mark.parametrize('question', PURCHASE_WRITE_CASES)
+def test_purchase_write_matrix_matches_purchase_provider(question):
+    assert PurchaseProvider().matches(DomainContext(question=question)) is True
+
+
+@pytest.mark.parametrize('question', PURCHASE_CROSS_CLAUSE_CASES)
+def test_purchase_query_in_another_domain_clause_never_matches_purchase(question):
+    provider = PurchaseProvider()
+
+    assert provider.matches(DomainContext(question=question)) is False
+    assert DOMAIN_PROVIDER_REGISTRY.capability_tools_for_question(question) == []
+
+
+def test_purchase_query_plus_leave_write_does_not_expose_purchase_capability():
+    question = '我想申请年假，顺便问下采购预算'
+
+    visible = visible_tools(
+        employee_id='E10001',
+        allow_eval=False,
+        allow_business_actions=True,
+        java_base_url='',
+        java_internal_token='',
+        question=question,
+    )
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is False
+    assert DOMAIN_PROVIDER_REGISTRY.resolve(
+        DomainContext(question=question)
+    ).domain_key == 'leave'
+    assert all(name not in visible for name in (
+        PURCHASE_BUDGET_TOOL_NAME,
+        PURCHASE_POLICY_TOOL_NAME,
+        PURCHASE_PROPOSAL_TOOL_NAME,
+    ))
+
+
+def test_purchase_write_plus_leave_query_keeps_purchase_match():
+    question = '帮我采购一台开发电脑，另外想了解年假政策'
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is True
+    assert DOMAIN_PROVIDER_REGISTRY.resolve(
+        DomainContext(question=question)
+    ).domain_key == 'purchase'
+
+
+def test_purchase_write_plus_leave_write_remains_fail_closed_ambiguous():
+    question = '帮我请明天年假，并帮我采购一台开发电脑'
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is True
+    with pytest.raises(DomainProviderAmbiguityError):
+        DOMAIN_PROVIDER_REGISTRY.resolve(DomainContext(question=question))
+
+
+def test_purchase_write_plus_expense_query_keeps_purchase_match():
+    question = '帮我采购一台开发电脑，另外想了解报销流程'
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is True
+    assert DOMAIN_PROVIDER_REGISTRY.resolve(
+        DomainContext(question=question)
+    ).domain_key == 'purchase'
+
+
+def test_purchase_query_plus_expense_write_does_not_match_purchase():
+    question = '帮我报销最近一次出差，另外问下采购预算'
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is False
+    assert DOMAIN_PROVIDER_REGISTRY.resolve(
+        DomainContext(question=question)
+    ).domain_key == 'expense'
+    assert all(name not in DOMAIN_PROVIDER_REGISTRY.capability_tools_for_question(question)
+               for name in (
+                   PURCHASE_BUDGET_TOOL_NAME,
+                   PURCHASE_POLICY_TOOL_NAME,
+                   PURCHASE_PROPOSAL_TOOL_NAME,
+               ))
+
+
+def test_purchase_write_plus_expense_write_remains_fail_closed_ambiguous():
+    question = '帮我采购一台开发电脑，并报销最近一次出差'
+
+    assert PurchaseProvider().matches(DomainContext(question=question)) is True
+    with pytest.raises(DomainProviderAmbiguityError):
+        DOMAIN_PROVIDER_REGISTRY.resolve(DomainContext(question=question))
 
 
 def _decision(tool_name: str, reason_code: str, **semantic) -> str:

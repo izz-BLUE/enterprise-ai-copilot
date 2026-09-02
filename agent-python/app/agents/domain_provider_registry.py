@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, Sequence
@@ -694,42 +695,55 @@ class PurchaseProvider:
         PURCHASE_PROPOSAL_TOOL_NAME,
     })
 
-    @staticmethod
-    def is_purchase_request_intent(question: str) -> bool:
+    _CLAUSE_SPLIT_PATTERN = re.compile(r'[，,。；;！？?!\n]+')
+    _PURCHASE_QUERY_PREFIXES = (
+        '流程', '制度', '规定', '政策', '标准', '怎么', '如何',
+        '是什么', '有什么', '需要什么', '需要哪些', '需要多少',
+        '有哪些', '是否', '能否',
+    )
+    _PURCHASE_WRITE_WITH_OBJECT_MARKERS = (
+        '帮我申请购买', '帮我申请采购',
+        '我想申请购买', '我想申请采购',
+        '我要申请购买', '我要申请采购',
+        '请申请购买', '请申请采购',
+        '帮我购买', '帮我采购', '帮我买',
+        '我想购买', '我想采购', '我想买',
+        '我要购买', '我要采购', '我要买',
+        '申请购买', '申请采购',
+    )
+    _PURCHASE_EXPLICIT_SUBMISSION_MARKERS = (
+        '提交采购申请', '发起采购申请',
+    )
+
+    @classmethod
+    def _has_purchase_write_clause(cls, clause: str) -> bool:
+        if any(marker in clause for marker in cls._PURCHASE_EXPLICIT_SUBMISSION_MARKERS):
+            return True
+
+        for marker in cls._PURCHASE_WRITE_WITH_OBJECT_MARKERS:
+            marker_start = clause.find(marker)
+            if marker_start < 0:
+                continue
+            suffix = clause[marker_start + len(marker):].lstrip(' ：:、')
+            if suffix and not any(
+                suffix.startswith(prefix) for prefix in cls._PURCHASE_QUERY_PREFIXES
+            ):
+                return True
+        return False
+
+    @classmethod
+    def is_purchase_request_intent(cls, question: str) -> bool:
         value = (question or '').strip()
         if not value:
             return False
-        has_purchase_term = any(word in value for word in ('采购', '购买', '买'))
-        if not has_purchase_term:
+        if not any(word in value for word in ('采购', '购买', '买')):
             return False
 
-        # 先识别明确的写操作，再处理政策/流程等知识查询词。这样“按照采购政策，
-        # 帮我申请购买……”不会因为背景词被误判为 RAG；而“申请采购需要什么流程”
-        # 仍会落到知识查询路径。
-        explicit_action_markers = (
-            '帮我申请', '帮我采购', '帮我购买', '帮我买',
-            '我想申请', '我想采购', '我想购买', '我想买',
-            '我要申请', '我要采购', '我要购买', '我要买',
-            '请申请',
-            '提交采购申请', '发起采购申请',
-        )
-        if any(marker in value for marker in explicit_action_markers):
-            return True
-
-        if any(word in value for word in (
-            '流程', '制度', '规定', '政策', '标准', '怎么', '如何',
-            '是什么', '有什么', '需要什么', '有哪些', '是否', '能否',
-        )):
-            return False
-
-        return (
-            '采购申请' in value
-            or '申请采购' in value
-            or '申请购买' in value
-            or ('采购' in value and any(word in value for word in ('申请', '帮我', '我要', '我想')))
-            or ('购买' in value and any(word in value for word in ('申请', '帮我', '我要', '我想')))
-            or ('买' in value and any(word in value for word in ('申请', '帮我', '我要', '我想')))
-        )
+        # Purchase write intent 必须在同一局部子句内同时具备 Purchase-specific
+        # action marker 和明确对象；不能把全文任意位置的“我想申请”与另一子句的
+        # “采购政策”拼成写意图。提交/发起采购申请属于明确执行语义，可不要求对象。
+        clauses = cls._CLAUSE_SPLIT_PATTERN.split(value)
+        return any(cls._has_purchase_write_clause(clause) for clause in clauses)
 
     def matches(self, context: DomainContext) -> bool:
         return self.is_purchase_request_intent(context.question)
