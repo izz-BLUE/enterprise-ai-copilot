@@ -482,6 +482,28 @@ def _planner_validation_metadata(
     )
 
 
+def _is_unregistered_capability_attempt(
+    payload: object,
+    context: DomainContext,
+) -> bool:
+    """仅识别明确的未注册 Tool 尝试，不掩盖一般 Planner contract 错误。"""
+    if not isinstance(payload, dict) or payload.get('action') != 'tool':
+        return False
+    tool_name = payload.get('tool_name')
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        return False
+    try:
+        DOMAIN_PROVIDER_REGISTRY.prompt_spec(tool_name)
+    except KeyError:
+        pass
+    else:
+        return False
+    try:
+        return DOMAIN_PROVIDER_REGISTRY.resolve(context) is None
+    except DomainProviderAmbiguityError:
+        return False
+
+
 def _validate_business_completion(
     decision: PlannerDecision,
     *,
@@ -731,6 +753,14 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             if repair_attempt < MAX_PLANNER_SEMANTIC_REPAIR_ATTEMPTS:
                 _, repair_error_code, repair_feedback = _planner_validation_metadata(exc)
                 continue
+            if _is_unregistered_capability_attempt(payload, domain_context):
+                return _decision_result(
+                    state,
+                    _refuse_decision(
+                        '当前系统没有可用能力执行该请求。', 'cannot_complete'
+                    ),
+                    'refused',
+                )
             return _decision_result(
                 state,
                 _refuse_decision(
