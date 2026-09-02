@@ -473,8 +473,8 @@ def _planner_validation_metadata(
         return (
             'planner_validation',
             'finish_reason_code_mismatch',
-            'finish 的 reason_code 必须是 task_complete；只读查询成功不等于包含业务申请的任务已完成，'
-            '请继续检查尚未完成的用户目标。',
+            'finish 的 reason_code 必须是 task_complete；如果成功 Tool 已完成当前用户目标（例如只读余额查询），'
+            '必须使用 task_complete；只有仍有复合业务目标时才继续检查尚未完成的目标。',
         )
     provider_metadata = DOMAIN_PROVIDER_REGISTRY.validation_metadata(str(exc))
     if provider_metadata is not None:

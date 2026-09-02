@@ -15,13 +15,20 @@ from app.agents.domain_provider_registry import (
     DomainProviderRegistry,
     ExpenseProvider,
     LeaveProvider,
+    PurchaseProvider,
 )
 from app.agents.planner_node import MAX_PLANNER_STEPS, visible_tools
 from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
 from app.schemas.planner_schema import (
     EXPENSE_PROPOSAL_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
+    LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    PURCHASE_BUDGET_TOOL_NAME,
+    PURCHASE_POLICY_TOOL_NAME,
+    PURCHASE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
@@ -295,6 +302,91 @@ def test_clarification_is_not_completion():
             decision, [EXPENSE_PROPOSAL_TOOL_NAME],
             DomainContext(question=QUESTION, tool_history=history),
         )
+
+
+def _completion_item(tool_name: str, payload: dict) -> dict:
+    return {
+        'tool_name': tool_name,
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps(payload, ensure_ascii=False),
+    }
+
+
+@pytest.mark.parametrize('tool_name', [
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+    PURCHASE_BUDGET_TOOL_NAME,
+    PURCHASE_POLICY_TOOL_NAME,
+])
+def test_structured_business_failure_is_not_completed(tool_name):
+    item = _completion_item(tool_name, {
+        'success': False,
+        'error_code': 'FIXTURE_FAILURE',
+    })
+
+    assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(item) is False
+
+
+@pytest.mark.parametrize('tool_name', [
+    LEAVE_BALANCE_TOOL_NAME,
+    LEAVE_REQUEST_TOOL_NAME,
+    TRAVEL_RECORD_TOOL_NAME,
+    INVOICE_VERIFY_TOOL_NAME,
+    EXPENSE_STATUS_TOOL_NAME,
+    PURCHASE_BUDGET_TOOL_NAME,
+    PURCHASE_POLICY_TOOL_NAME,
+])
+def test_structured_business_success_remains_completed(tool_name):
+    item = _completion_item(tool_name, {'success': True})
+
+    assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(item) is True
+
+
+def test_leave_completion_contract_distinguishes_read_and_action_goals():
+    contract = DOMAIN_PROVIDER_REGISTRY.completion_contract([
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+    ])
+
+    assert '当前目标只有查询本人年假余额' in contract
+    assert 'action=finish' in contract
+    assert 'reason_code=task_complete' in contract
+    assert '不得输出 finish/cannot_complete 或 refuse/cannot_complete' in contract
+    assert '只有当用户目标还包含请假申请或准备申请时' in contract
+    assert 'success=false' in contract
+
+
+def test_registry_preserves_proposal_completion_semantics():
+    assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        {'success': True, 'action_proposal': None, 'missing_fields': ['invoice_ids']},
+    )) is False
+    assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        {'success': True, 'action_proposal': {'action_type': 'EXPENSE_CLAIM'}},
+    )) is True
+
+    for kind in ('clarification', 'rejection', 'proposal'):
+        assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
+            PURCHASE_PROPOSAL_TOOL_NAME,
+            {'success': True, 'kind': kind, 'action_proposal': None},
+        )) is True
+
+    assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
+        LEAVE_PROPOSAL_TOOL_NAME,
+        {'success': True, 'kind': 'clarification', 'action_proposal': None},
+    )) is True
+
+
+def test_purchase_provider_still_owns_purchase_completion_semantics():
+    assert PurchaseProvider().is_completed_success(_completion_item(
+        PURCHASE_PROPOSAL_TOOL_NAME,
+        {'success': True, 'kind': 'proposal', 'action_proposal': {}},
+    )) is True
 
 
 def test_leave_provider_is_simple_and_has_no_expense_semantic_slot():

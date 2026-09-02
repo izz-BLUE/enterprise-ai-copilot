@@ -295,6 +295,51 @@ class TestPlannerSemanticRepair:
         assert result['stop_reason'] == 'task_complete'
         assert result['route'] == 'agent'
 
+    def test_read_only_leave_balance_invalid_finish_repairs_to_task_complete(self, caplog):
+        """只读余额的非法 cannot_complete 必须保持严格拒绝并可修复为合法 finish。"""
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前无法完成。',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        responses = iter([
+            _tool('leave_balance_tool', {}, 'need_balance'),
+            invalid_finish,
+            _finish('当前年假余额为 5 天。'),
+        ])
+        calls = []
+        balance_tool = Mock()
+        balance_tool.invoke.return_value = json.dumps({
+            'success': True, 'annual_balance': 5,
+        }, ensure_ascii=False)
+
+        def fake_llm(system_prompt, user_prompt, **_kwargs):
+            calls.append((system_prompt, user_prompt))
+            return next(responses)
+
+        with patch('app.agents.planner_node.call_llm', side_effect=fake_llm) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool):
+            result = run_langgraph_agent(
+                '请查询我的年假余额',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert llm.call_count == 3
+        assert balance_tool.invoke.call_count == 1
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'agent'
+        assert '5 天' in result['answer']
+        assert '当前目标只有查询本人年假余额' in calls[0][0]
+        assert any(
+            'error_code=finish_reason_code_mismatch' in record.message
+            for record in caplog.records
+        )
+
     def test_second_legal_premature_finish_fails_closed_after_one_repair(self):
         """第二次仍为合法格式但未完成 Proposal 的 finish 必须 fail-closed。"""
         premature_finish = _finish('已完成。')

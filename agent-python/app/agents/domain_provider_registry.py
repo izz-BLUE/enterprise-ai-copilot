@@ -136,6 +136,30 @@ def _successful_observations(tool_history: Sequence[dict], tool_name: str) -> li
     return result
 
 
+def _tool_invocation_has_business_success(item: dict) -> bool:
+    """把 Tool invocation success 与结构化业务 success 分开判断。
+
+    Executor 的 status=success 只表示 Tool 函数正常返回；当前结构化 Tool
+    payload 若明确给出 success=false，则本次调用不能作为成功事实参与去重。
+    未声明 success 的历史 payload 保持原有 status-only 兼容语义。
+    """
+    if item.get('status') != 'success':
+        return False
+    observation = item.get('observation')
+    if isinstance(observation, dict):
+        payload = observation
+    elif isinstance(observation, str):
+        try:
+            payload = json.loads(observation)
+        except (json.JSONDecodeError, TypeError):
+            return True
+    else:
+        return True
+    if isinstance(payload, dict) and 'success' in payload:
+        return payload.get('success') is True
+    return True
+
+
 def build_expense_proposal_context(tool_history: Sequence[dict]) -> dict:
     """从当前请求的成功 Tool observation 构造 Expense 受控事实视图。"""
     travel_payloads = _successful_observations(tool_history, TRAVEL_RECORD_TOOL_NAME)
@@ -198,16 +222,25 @@ class LeaveProvider:
     def completion_contract(self, tools: Sequence[str]) -> str:
         lines = ['任务完成判断补充规则：']
         if LEAVE_BALANCE_TOOL_NAME in tools:
+            lines.append(
+                f'- 如果用户当前目标只有查询本人年假余额，{LEAVE_BALANCE_TOOL_NAME} 返回业务 '
+                'success=true 就表示整个用户目标已经完成；下一步必须输出 action=finish、'
+                'reason_code=task_complete。不得输出 finish/cannot_complete 或 refuse/cannot_complete。'
+            )
             if LEAVE_PROPOSAL_TOOL_NAME in tools:
                 lines.append(
-                    f'- {LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；若用户目标还包含请假申请或准备申请，'
+                    f'- 只有当用户目标还包含请假申请或准备申请时，{LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；'
                     f'应继续调用 {LEAVE_PROPOSAL_TOOL_NAME}，不能直接 finish。'
                 )
             else:
                 lines.append(
-                    f'- {LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；若用户目标还包含请假申请或准备申请，'
+                    f'- 只有当用户目标还包含请假申请或准备申请时，{LEAVE_BALANCE_TOOL_NAME} 成功只表示余额已查询；'
                     '当前能力清单没有可用受控 Proposal Tool 时不得伪造 Tool，应 finish 说明无法继续。'
                 )
+            lines.append(
+                f'- 如果 {LEAVE_BALANCE_TOOL_NAME} 返回 success=false，则余额事实未取得；不得把它当作成功完成，'
+                '应根据错误观察决定是否合理重试或拒绝。'
+            )
         for name in (LEAVE_PROPOSAL_TOOL_NAME,) if LEAVE_PROPOSAL_TOOL_NAME in tools else ():
             lines.append(
                 f'- {name} 只生成待确认草稿，不执行业务写操作；成功后应选择 finish，'
@@ -1114,6 +1147,8 @@ class DomainProviderRegistry:
         return self._prompt_specs[tool_name]
 
     def is_completed_success(self, item: dict) -> bool:
+        if not _tool_invocation_has_business_success(item):
+            return False
         provider = self.provider_for_tool(item.get('tool_name'))
         if provider is None:
             return item.get('status') == 'success'

@@ -346,6 +346,24 @@ class TestSuccessDedup:
         assert rag.invoke.call_count == 2
         assert second['tool_history'][1]['status'] == 'success'
 
+    def test_structured_business_failure_allows_same_signature_retry(self):
+        """Tool 正常返回但业务 success=false 时，不得进入成功去重。"""
+        with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.side_effect = [
+                '{"success":false,"error_code":"RAG_FIXTURE_FAILURE"}',
+                RAG_RESULT,
+            ]
+            first = tool_executor_node(state())
+            second = tool_executor_node(state(
+                tool_call_count=first['tool_call_count'],
+                tool_history=first['tool_history'],
+            ))
+
+        assert first['tool_history'][0]['status'] == 'success'
+        assert second['stop_reason'] == 'tool_executed'
+        assert second['tool_call_count'] == 2
+        assert rag.invoke.call_count == 2
+
     def test_expense_clarification_is_not_marked_completed(self):
         clarification = json.dumps({
             'success': True,

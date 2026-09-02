@@ -557,8 +557,11 @@ def _blocked(state: dict, runtime: Runtime[AgentRuntimeContext], stop_reason: st
 
 
 def _already_completed(decision: PlannerDecision, tool_history: list) -> bool:
-    """成功签名去重：历史中存在相同 tool + 相同 arguments 且 status=success
-    时阻止再次执行；error / timeout / blocked 历史不阻止，允许合理重试。"""
+    """成功签名去重：历史中存在相同 tool + arguments 且业务成功时阻止重试。
+
+    status=success 只表示 Tool 函数正常返回；结构化 payload 的 success=false
+    不阻止合理重试，error / timeout / blocked 历史同样不阻止重试。
+    """
     for item in tool_history:
         if (
             item.get('tool_name') == decision.tool_name
