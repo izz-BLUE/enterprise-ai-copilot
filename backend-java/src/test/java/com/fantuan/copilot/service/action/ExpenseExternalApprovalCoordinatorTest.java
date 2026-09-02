@@ -43,12 +43,14 @@ class ExpenseExternalApprovalCoordinatorTest {
     @Mock ExpenseApprovalGateway gateway;
     @Mock PendingAction action;
     @Mock ExpenseExternalResumeCoordinator resumeCoordinator;
+    @Mock com.fantuan.copilot.service.task.TaskRuntimeService taskRuntimeService;
     private ExpenseExternalApprovalCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         coordinator = new ExpenseExternalApprovalCoordinator(claims, gateway,
-                new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator);
+                new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator,
+                taskRuntimeService);
     }
 
     @Test

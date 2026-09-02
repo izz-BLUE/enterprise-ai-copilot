@@ -15,7 +15,6 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
-import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
 import com.fantuan.copilot.service.action.TaskRuntimeRegistrationRejectionException;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import com.fantuan.copilot.service.agent.AgentEventRecorder;
@@ -105,7 +104,6 @@ public class LangGraphAgentController {
     private final AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard;
     private final BusinessActionHitlCoordinator hitlCoordinator;
     private final TaskRuntimeService taskRuntimeService;
-    private final BusinessActionHandlerRegistry handlerRegistry;
 
     @Autowired
     public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
@@ -117,8 +115,7 @@ public class LangGraphAgentController {
                                     AgentRuntimeThreadIdService runtimeThreadIdService,
                                     AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
                                     BusinessActionHitlCoordinator hitlCoordinator,
-                                    TaskRuntimeService taskRuntimeService,
-                                    BusinessActionHandlerRegistry handlerRegistry) {
+                                    TaskRuntimeService taskRuntimeService) {
         this.pythonAgentGateway = pythonAgentGateway;
         this.adminAccessService = adminAccessService;
         this.businessActionService = businessActionService;
@@ -129,67 +126,6 @@ public class LangGraphAgentController {
         this.runtimeThreadExecutionGuard = runtimeThreadExecutionGuard;
         this.hitlCoordinator = hitlCoordinator;
         this.taskRuntimeService = taskRuntimeService;
-        this.handlerRegistry = handlerRegistry;
-    }
-
-    /**
-     * 供既有无 Spring 上下文的 Controller 单元测试使用；生产路径一律走注入构造器。
-     */
-    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    IdentityContext identityContext,
-                                    AiTaskMemoryService memoryService,
-                                    AdminLogBuffer adminLogBuffer) {
-        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
-                memoryService, adminLogBuffer, new AgentRuntimeThreadIdService(),
-                new AgentRuntimeThreadExecutionGuard(), null, null);
-    }
-
-    /** 供只提供 guard、但不提供 HITL 的测试使用的生产形态构造方法。 */
-    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    IdentityContext identityContext,
-                                    AiTaskMemoryService memoryService,
-                                    AdminLogBuffer adminLogBuffer,
-                                    AgentRuntimeThreadIdService runtimeThreadIdService,
-                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard) {
-        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
-                memoryService, adminLogBuffer, runtimeThreadIdService,
-                runtimeThreadExecutionGuard, null, null);
-    }
-
-    /** 兼容提供现有 HITL coordinator 的测试的构造方法。 */
-    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    IdentityContext identityContext,
-                                    AiTaskMemoryService memoryService,
-                                    AdminLogBuffer adminLogBuffer,
-                                    AgentRuntimeThreadIdService runtimeThreadIdService,
-                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
-                                    BusinessActionHitlCoordinator hitlCoordinator) {
-        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
-                memoryService, adminLogBuffer, runtimeThreadIdService,
-                runtimeThreadExecutionGuard, hitlCoordinator, null);
-    }
-
-    /** 供既有 Task Runtime 聚焦测试使用的构造方法。 */
-    public LangGraphAgentController(PythonAgentGateway pythonAgentGateway,
-                                    AdminAccessService adminAccessService,
-                                    BusinessActionService businessActionService,
-                                    IdentityContext identityContext,
-                                    AiTaskMemoryService memoryService,
-                                    AdminLogBuffer adminLogBuffer,
-                                    AgentRuntimeThreadIdService runtimeThreadIdService,
-                                    AgentRuntimeThreadExecutionGuard runtimeThreadExecutionGuard,
-                                    BusinessActionHitlCoordinator hitlCoordinator,
-                                    TaskRuntimeService taskRuntimeService) {
-        this(pythonAgentGateway, adminAccessService, businessActionService, identityContext,
-                memoryService, adminLogBuffer, runtimeThreadIdService,
-                runtimeThreadExecutionGuard, hitlCoordinator, taskRuntimeService,
-                new BusinessActionHandlerRegistry(java.util.List.of()));
     }
 
     /**
@@ -210,8 +146,7 @@ public class LangGraphAgentController {
         }
         eventRecorder.record(traceId, "AGENT_REQUEST_RECEIVED", null, started);
         boolean allowEval = adminAccessService.isAdminIdentity(identity);
-        boolean allowBusinessActions = businessActionService != null
-                && identity != null
+        boolean allowBusinessActions = identity != null
                 && identity.employeeId() != null
                 && businessActionService.isAllowed(presentedToken, identity);
 
@@ -243,28 +178,25 @@ public class LangGraphAgentController {
         // PendingAction TTL 由 Java 负责。在当前请求仍持有覆盖后续普通 Chat 调用的
         // 同一 runtime-thread guard 时，收口已过期的审批；coordinator 仅在 Java
         // 事务提交后执行 Python resume。
-        if (hitlCoordinator != null) {
-            try {
-                if (!hitlCoordinator.reconcileExpiredBeforeChat(
-                        traceId, presentedToken, identity, conversationId)) {
-                    eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
-                            AdminLogEvent.LEVEL_WARN, started);
-                    return AgentResponseFactory.recoveryConflict(traceId);
-                }
-            } catch (RuntimeException exception) {
-                log.error("[{}] 过期 HITL 收口失败", traceId, exception);
+        try {
+            if (!hitlCoordinator.reconcileExpiredBeforeChat(
+                    traceId, presentedToken, identity, conversationId)) {
                 eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
-                        AdminLogEvent.LEVEL_ERROR, started);
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                        .body(AgentResponseFactory.fallback(traceId));
+                        AdminLogEvent.LEVEL_WARN, started);
+                return AgentResponseFactory.recoveryConflict(traceId);
             }
+        } catch (RuntimeException exception) {
+            log.error("[{}] 过期 HITL 收口失败", traceId, exception);
+            eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                    AdminLogEvent.LEVEL_ERROR, started);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(AgentResponseFactory.fallback(traceId));
         }
 
         // PendingAction 是 legacy single action 和 Task Runtime 共用的
         // WAITING_USER 权威边界。在 TTL reconciliation 之后、任何任务恢复或
         // 分解之前检查它。
-        if (businessActionService != null && businessActionService.hasBlockingAction(
-                identity.userId(), conversationId)) {
+        if (businessActionService.hasBlockingAction(identity.userId(), conversationId)) {
             eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
                     AdminLogEvent.LEVEL_WARN, started);
             return AgentResponseFactory.actionFailure(traceId,
@@ -272,32 +204,29 @@ public class LangGraphAgentController {
         }
 
         // Task Runtime 的准入顺序由 Java 负责：活跃的用户等待或 clarification
-        // 必须先绑定到对应任务，新消息才能进入分解。未构造 runtime service 的
-        // legacy controller 保留原有单任务路径。
+        // 必须先绑定到对应任务，新消息才能进入分解。
         TaskExecution taskExecution = null;
-        if (taskRuntimeService != null) {
-            try {
-                // 该 Java 负责的 reconciliation 同时覆盖：上一次 Python 调用丢失的
-                // RUNNING 任务，以及未阻断的 PENDING successor。它也保持准入顺序：
-                // WAITING_USER -> WAITING_CLARIFICATION -> RUNNING 恢复
-                // -> 确定性下一任务 -> 新的分解。
-                taskExecution = taskRuntimeService.reconcile(
-                        identity.userId(), conversationId).orElse(null);
-                if (taskExecution != null
-                        && taskExecution.status() == TaskExecutionStatus.WAITING_CLARIFICATION) {
-                    taskExecution = taskRuntimeService.acceptClarification(
-                            taskExecution, request.message()).orElse(taskExecution);
-                } else if (taskExecution == null
-                        && allowBusinessActions
-                        && taskRuntimeService.isCompositeWriteCandidate(request.message())) {
-                    taskExecution = taskRuntimeService.decomposeAndStart(
-                            request.message(), identity.userId(), conversationId,
-                            new HttpHeaders(), traceId);
-                }
-            } catch (TaskRuntimeException exception) {
-                log.warn("[{}] Task Runtime admission rejected: {}", traceId, exception.getMessage());
-                return AgentResponseFactory.actionFailure(traceId, exception.getMessage());
+        try {
+            // 该 Java 负责的 reconciliation 同时覆盖：上一次 Python 调用丢失的
+            // RUNNING 任务，以及未阻断的 PENDING successor。它也保持准入顺序：
+            // WAITING_USER -> WAITING_CLARIFICATION -> RUNNING 恢复
+            // -> 确定性下一任务 -> 新的分解。
+            taskExecution = taskRuntimeService.reconcile(
+                    identity.userId(), conversationId).orElse(null);
+            if (taskExecution != null
+                    && taskExecution.status() == TaskExecutionStatus.WAITING_CLARIFICATION) {
+                taskExecution = taskRuntimeService.acceptClarification(
+                        taskExecution, request.message()).orElse(taskExecution);
+            } else if (taskExecution == null
+                    && allowBusinessActions
+                    && taskRuntimeService.isCompositeWriteCandidate(request.message())) {
+                taskExecution = taskRuntimeService.decomposeAndStart(
+                        request.message(), identity.userId(), conversationId,
+                        new HttpHeaders(), traceId);
             }
+        } catch (TaskRuntimeException exception) {
+            log.warn("[{}] Task Runtime admission rejected: {}", traceId, exception.getMessage());
+            return AgentResponseFactory.actionFailure(traceId, exception.getMessage());
         }
 
         String pythonThreadId = taskExecution == null
@@ -330,9 +259,7 @@ public class LangGraphAgentController {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Allow-Eval", String.valueOf(allowEval));
             headers.set("X-Allow-Business-Actions", String.valueOf(allowBusinessActions));
-            if (businessActionService != null) {
-                headers.set("X-Business-Date", businessActionService.businessDate().toString());
-            }
+            headers.set("X-Business-Date", businessActionService.businessDate().toString());
             // 企业 Tool P0：把已通过身份校验的 employeeId 透传给 Python，供只读 Tool 使用。
             // 永远从服务端解析后的 identity 注入，不接受请求头直传，防止前端伪造身份。
             if (identity.employeeId() != null) {
@@ -390,7 +317,51 @@ public class LangGraphAgentController {
         }
         boolean expenseReasonClarification = isExpenseReasonClarification(
                 pythonResponse, request.message());
-        if (pythonResponse.actionProposal() != null) {
+        if (taskExecution != null) {
+            if (pythonResponse.actionProposal() != null && !allowBusinessActions
+                    && pythonResponse.hitlWait() == null) {
+                eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                        AdminLogEvent.LEVEL_WARN, started);
+                return AgentResponseFactory.actionFailure(traceId, "业务动作功能未启用或当前请求无权限。");
+            }
+            try {
+                pendingAction = hitlCoordinator.handleTaskRuntimeResponse(
+                        taskExecution, pythonResponse, identity, presentedToken, traceId,
+                        !expenseReasonClarification);
+            } catch (TaskRuntimeRegistrationRejectionException exception) {
+                log.warn("[{}] Task Runtime task rejected; successor pending action={}",
+                        traceId, exception.successorPendingAction() == null
+                                ? "none" : "present");
+                eventRecorder.record(traceId, "AGENT_REQUEST_CONTINUED_AFTER_REJECTION",
+                        AdminLogEvent.LEVEL_WARN, started);
+                if (exception.successorPendingAction() == null) {
+                    return AgentResponseFactory.actionFailure(traceId,
+                            "暂时无法生成申请草稿，请检查信息后重试。");
+                }
+                return AgentResponseFactory.actionRejectedWithContinuation(
+                        traceId,
+                        "上一项申请因业务规则未能生成，已继续处理下一项任务，请确认。",
+                        exception.successorPendingAction(), conversationId);
+            } catch (ActionException exception) {
+                log.warn("[{}] Python Proposal未创建 PendingAction: code={}",
+                        traceId, exception.errorCode());
+                if ("ACTION_CONVERSATION_IN_PROGRESS".equals(exception.errorCode())) {
+                    eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                            AdminLogEvent.LEVEL_WARN, started);
+                    return AgentResponseFactory.actionFailure(traceId,
+                            "当前会话已有待确认的申请，请先确认或取消后再发起新申请。");
+                }
+                eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                        AdminLogEvent.LEVEL_WARN, started);
+                return AgentResponseFactory.actionFailure(traceId, "暂时无法生成申请草稿，请检查信息后重试。");
+            } catch (RuntimeException exception) {
+                log.error("[{}] PendingAction持久化失败", traceId);
+                eventRecorder.record(traceId, "AGENT_REQUEST_FAILED",
+                        AdminLogEvent.LEVEL_ERROR, started);
+                return AgentResponseFactory.actionFailure(traceId, "业务动作处理失败，请稍后重试。");
+            }
+            persistResponseMemory = false;
+        } else if (pythonResponse.actionProposal() != null) {
             // 持久化 HITL wait 可能属于已经终态化的 Java action，而其 checkpoint
             // 仍需要 reconciliation。即使 capability 已撤销，也让 coordinator
             // 检查该 correlation；非 HITL Proposal 继续使用原有 gate。
@@ -401,33 +372,14 @@ public class LangGraphAgentController {
             }
             try {
                 HitlWaitMarker wait = pythonResponse.hitlWait();
-                if (taskExecution != null && !taskRuntimeService.matchesTaskType(
-                        taskExecution, taskType(pythonResponse.actionProposal().actionType()))) {
-                    throw new TaskRuntimeException("Task Runtime Proposal 与任务类型不匹配。");
-                }
-                if (wait != null && hitlCoordinator != null) {
+                if (wait != null) {
                     pendingAction = hitlCoordinator.registerWait(
                             pythonResponse.actionProposal(), wait, traceId, presentedToken,
-                            identity, conversationId,
-                            taskExecution == null ? null : taskExecution.taskId());
-                } else if (wait != null) {
-                    pendingAction = businessActionService.createHitlPending(
-                            pythonResponse.actionProposal(), traceId, presentedToken,
-                            identity, conversationId,
-                            wait.executionId(), wait.waitId());
+                            identity, conversationId);
                 } else {
-                        pendingAction = businessActionService.createPending(
+                    pendingAction = businessActionService.createPending(
                             pythonResponse.actionProposal(), traceId, presentedToken,
                         identity, conversationId);
-                }
-                if (taskExecution != null) {
-                    if (pendingAction == null || !taskRuntimeService.markWaitingUser(
-                            taskExecution.taskId(), pendingAction.actionId())) {
-                        throw new TaskRuntimeException("Task Runtime PendingAction 关联失败。");
-                    }
-                    memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
-                            conversationId, traceId);
-                    persistResponseMemory = false;
                 }
             } catch (TaskRuntimeRegistrationRejectionException exception) {
                 log.warn("[{}] Task Runtime task rejected; successor pending action={}",
@@ -462,36 +414,6 @@ public class LangGraphAgentController {
                 return AgentResponseFactory.actionFailure(traceId, "业务动作处理失败，请稍后重试。");
             }
         }
-        if (taskExecution != null && pendingAction == null
-                && pythonResponse.missingFields() != null
-                && !pythonResponse.missingFields().isEmpty()
-                && !taskRuntimeService.markWaitingClarification(taskExecution.taskId())) {
-            return AgentResponseFactory.actionFailure(traceId, "Task Runtime clarification 状态冲突。");
-        }
-        if (taskExecution != null && pendingAction == null
-                && pythonResponse.missingFields() != null
-                && !pythonResponse.missingFields().isEmpty()) {
-            if (!expenseReasonClarification) {
-                memoryCoordinator.persist(pythonResponse.memoryProposal(), identity.userId(),
-                        conversationId, traceId);
-            }
-            persistResponseMemory = false;
-        }
-        if (taskExecution != null && pendingAction == null
-                && (pythonResponse.missingFields() == null
-                || pythonResponse.missingFields().isEmpty())) {
-            if (!taskRuntimeService.markTerminal(taskExecution.taskId(),
-                    TaskExecutionStatus.FAILED)) {
-                return AgentResponseFactory.actionFailure(traceId,
-                        "Task Runtime 未产生可执行的业务动作。");
-            }
-            memoryCoordinator.abandon(identity.userId(), conversationId, traceId);
-            if (hitlCoordinator != null) {
-                pendingAction = hitlCoordinator.startNextTaskAfterTerminal(taskExecution,
-                        identity, presentedToken, traceId);
-            }
-            persistResponseMemory = false;
-        }
         if (expenseReasonClarification) {
             memoryCoordinator.persistExpenseReasonContinuation(request.message(),
                     identity.userId(), conversationId, traceId);
@@ -524,13 +446,6 @@ public class LangGraphAgentController {
 
     private boolean isExpenseRequest(String message) {
         return message != null && (message.contains("报销") || message.contains("报账"));
-    }
-
-    private com.fantuan.copilot.model.task.TaskType taskType(
-            com.fantuan.copilot.model.action.BusinessActionType actionType) {
-        return handlerRegistry.taskTypeFor(actionType)
-                .orElseThrow(() -> new TaskRuntimeException(
-                        "Task Runtime Proposal action type 不受支持。"));
     }
 
 }

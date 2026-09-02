@@ -65,6 +65,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
     @Mock AgentRuntimeThreadExecutionGuard threadGuard;
     @Mock AdminAccessService adminAccessService;
     @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
+    @Mock ExpenseConfirmRevalidationService expenseRevalidation;
     @Mock TaskRuntimeService taskRuntimeService;
     @Mock AiTaskMemoryService memoryService;
 
@@ -108,9 +109,9 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
 
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
                 handlerRegistry(),
-                taskRuntimeService, null);
+                taskRuntimeService, memoryService);
 
         ActionExecutionResponse actual = coordinator.confirm(ACTION_ID, "nonce", "idem",
                 "admin", "trace", identity);
@@ -156,7 +157,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
 
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
                 handlerRegistry(),
                 taskRuntimeService, memoryService);
 
@@ -425,7 +426,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
 
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
                 handlerRegistry(),
                 taskRuntimeService, memoryService);
 
@@ -465,7 +466,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
 
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
                 handlerRegistry(),
                 taskRuntimeService, memoryService);
 
@@ -479,7 +480,7 @@ class BusinessActionHitlCoordinatorTaskRuntimeTest {
     private BusinessActionHitlCoordinator coordinator(AiTaskMemoryService memoryService) {
         return new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
+                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
                 handlerRegistry(),
                 taskRuntimeService, memoryService);
     }

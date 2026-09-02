@@ -75,6 +75,9 @@ class BusinessActionHitlCoordinatorTest {
     @Mock AgentRuntimeThreadExecutionGuard threadGuard;
     @Mock AdminAccessService adminAccessService;
     @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
+    @Mock ExpenseConfirmRevalidationService expenseRevalidation;
+    @Mock com.fantuan.copilot.service.task.TaskRuntimeService taskRuntimeService;
+    @Mock com.fantuan.copilot.service.memory.AiTaskMemoryService memoryService;
 
     private BusinessActionHitlCoordinator coordinator;
     private BusinessActionHandlerRegistry handlerRegistry;
@@ -99,8 +102,8 @@ class BusinessActionHitlCoordinatorTest {
         handlerRegistry = new BusinessActionHandlerRegistry(List.of(leave, expense));
         coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService,
-                threadGuard, adminAccessService, externalApprovalCoordinator, null,
-                handlerRegistry, null, null);
+                threadGuard, adminAccessService, externalApprovalCoordinator, expenseRevalidation,
+                handlerRegistry, taskRuntimeService, memoryService);
     }
 
     private void stubResumeDependencies() {
@@ -338,7 +341,8 @@ class BusinessActionHitlCoordinatorTest {
         AgentRuntimeThreadExecutionGuard realGuard = new AgentRuntimeThreadExecutionGuard();
         coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService,
-                realGuard, adminAccessService, externalApprovalCoordinator);
+                realGuard, adminAccessService, externalApprovalCoordinator, expenseRevalidation,
+                handlerRegistry, taskRuntimeService, memoryService);
         when(threadIdService.generate(IDENTITY.userId(), CONVERSATION_ID))
                 .thenReturn(RUNTIME_THREAD_ID);
         when(adminAccessService.isAdminIdentity(IDENTITY)).thenReturn(true);
