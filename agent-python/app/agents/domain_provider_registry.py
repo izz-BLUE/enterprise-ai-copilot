@@ -701,6 +701,12 @@ class PurchaseProvider:
         '是什么', '有什么', '需要什么', '需要哪些', '需要多少',
         '有哪些', '是否', '能否',
     )
+    _PURCHASE_QUERY_CLAUSE_MARKERS = (
+        '如何', '怎么', '是什么', '有什么', '需要什么', '需要哪些',
+        '需要多少', '需要走什么', '是否', '能否', '哪些', '什么流程',
+        '什么材料', '什么规定', '什么政策', '什么标准', '有什么限制',
+        '有哪些要求', '请问', '想了解', '问下', '吗',
+    )
     _PURCHASE_WRITE_WITH_OBJECT_MARKERS = (
         '帮我申请购买', '帮我申请采购',
         '我想申请购买', '我想申请采购',
@@ -716,7 +722,13 @@ class PurchaseProvider:
     )
 
     @classmethod
+    def _is_purchase_query_clause(cls, clause: str) -> bool:
+        return any(marker in clause for marker in cls._PURCHASE_QUERY_CLAUSE_MARKERS)
+
+    @classmethod
     def _has_purchase_write_clause(cls, clause: str) -> bool:
+        if cls._is_purchase_query_clause(clause):
+            return False
         if any(marker in clause for marker in cls._PURCHASE_EXPLICIT_SUBMISSION_MARKERS):
             return True
 
