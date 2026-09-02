@@ -26,9 +26,7 @@ import com.fantuan.copilot.model.action.BusinessActionType;
         @JsonSubTypes.Type(value = AnnualLeaveActionProposal.class,
                 name = "ANNUAL_LEAVE_REQUEST"),
         @JsonSubTypes.Type(value = ExpenseActionProposal.class,
-                name = "EXPENSE_CLAIM"),
-        @JsonSubTypes.Type(value = PurchaseActionProposal.class,
-                name = "PURCHASE_REQUEST")
+                name = "EXPENSE_CLAIM")
 })
 public interface BusinessActionProposal {
     BusinessActionType actionType();

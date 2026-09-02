@@ -135,8 +135,6 @@ PLANNER_SYSTEM_PROMPT = (
     '- reason_code: 必填。Tool 对应值、finish/refuse 合法值和示例见下方动态能力清单。\n'
     '- expense_reason: 当前兼容的领域 semantic slot，取值为字符串或 null；不得放入 arguments。\n'
     '- 当前领域 contract 声明的 semantic slot（如有）只能是字符串或 null，且不得放入 arguments。\n'
-    '- Purchase 语义字段 purchase_item / purchase_budget / purchase_justification 只表达用户输入；'
-    '它们不是 trusted facts，且不得放入 arguments。缺失时输出 null。\n'
     'finish 的 reason_code 必须是 "task_complete"; refuse 的 reason_code 必须是'
     '"not_allowed" 或 "cannot_complete"。\n'
     '\n'
@@ -387,10 +385,7 @@ def _decision_result(state: dict, decision: dict, stop_reason: str, category: st
         'stop_reason': stop_reason,
         'step_count': state.get('step_count', 0) + 1,
     }
-    for key in (
-        'request_expense_reason', 'purchase_item', 'purchase_budget',
-        'purchase_justification',
-    ):
+    for key in ('request_expense_reason',):
         if key in state:
             result[key] = state.get(key)
     if decision.get('action') in ('finish', 'refuse'):
@@ -610,18 +605,11 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             category='business_action',
         )
 
-    prior_decision = state.get('planner_decision')
-    prior_decision = prior_decision if isinstance(prior_decision, dict) else {}
     domain_context = DomainContext(
         question=question,
         tool_history=tuple(state.get('tool_history', [])),
         request_expense_reason=state.get('request_expense_reason'),
         action_proposal=state.get('action_proposal'),
-        purchase_item=state.get('purchase_item', prior_decision.get('purchase_item')),
-        purchase_budget=state.get('purchase_budget', prior_decision.get('purchase_budget')),
-        purchase_justification=state.get(
-            'purchase_justification', prior_decision.get('purchase_justification')
-        ),
         continuation_original_request=continuation_original_request,
         memory_context=state.get('memory_context'),
         step_count=step_count,

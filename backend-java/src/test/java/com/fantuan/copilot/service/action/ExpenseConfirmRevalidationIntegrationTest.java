@@ -76,7 +76,6 @@ class ExpenseConfirmRevalidationIntegrationTest extends PostgresIntegrationTestB
         jdbc.execute("DELETE FROM expense_claim");
         jdbc.execute("DELETE FROM ai_task_memory");
         jdbc.execute("DELETE FROM leave_request");
-        jdbc.execute("DELETE FROM purchase_request");
         jdbc.execute("DELETE FROM business_action");
         jdbc.execute("ALTER SEQUENCE expense_claim_number_seq RESTART WITH 1");
     }

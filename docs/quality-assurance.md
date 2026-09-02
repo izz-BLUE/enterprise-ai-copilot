@@ -13,7 +13,6 @@
 | PostgreSQL HITL | 5 通过 |
 | PostgreSQL external resume | 5 通过 |
 | PostgreSQL 持久化 runtime 合计 | 34 通过，0 跳过 |
-| PurchaseRequest PostgreSQL persistence proof | 4 通过 |
 | Enterprise OA MCP | 24 通过 |
 | Mock OA | 17 通过 |
 | 前端 | 44 通过 |

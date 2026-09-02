@@ -7,7 +7,6 @@ Planner 只拥有"规划权":模型输出严格结构化的"下一步决策",
 不属于模型可控范围,由程序层在 Tool 执行时注入。
 """
 
-from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -24,9 +23,6 @@ ToolName = Literal[
     'invoice_verify_tool',
     'expense_proposal_tool',
     'expense_status_tool',
-    'purchase_budget_tool',
-    'purchase_policy_tool',
-    'purchase_proposal_tool',
 ]
 ReasonCode = Literal[
     'need_knowledge',
@@ -38,9 +34,6 @@ ReasonCode = Literal[
     'need_invoice_verify',
     'need_expense_proposal',
     'need_expense_status',
-    'need_purchase_budget',
-    'need_purchase_policy',
-    'need_purchase_proposal',
     'task_complete',
     'not_allowed',
     'cannot_complete',
@@ -56,9 +49,6 @@ TRAVEL_RECORD_TOOL_NAME = 'travel_record_tool'
 INVOICE_VERIFY_TOOL_NAME = 'invoice_verify_tool'
 EXPENSE_PROPOSAL_TOOL_NAME = 'expense_proposal_tool'
 EXPENSE_STATUS_TOOL_NAME = 'expense_status_tool'
-PURCHASE_BUDGET_TOOL_NAME = 'purchase_budget_tool'
-PURCHASE_POLICY_TOOL_NAME = 'purchase_policy_tool'
-PURCHASE_PROPOSAL_TOOL_NAME = 'purchase_proposal_tool'
 VALID_REPORT_TYPES = ('retrieval', 'generation', 'all')
 LEAVE_REQUEST_MIN_LIMIT = 1
 LEAVE_REQUEST_MAX_LIMIT = 50
@@ -77,9 +67,6 @@ _TRAVEL_RECORD_ARG_KEYS = frozenset()
 _INVOICE_VERIFY_ARG_KEYS = frozenset({'invoice_id'})
 _EXPENSE_PROPOSAL_ARG_KEYS = frozenset()  # Phase 7: 不接受 LLM 入参
 _EXPENSE_STATUS_ARG_KEYS = frozenset({'expense_id'})  # 可选 LLM 入参（按 expense_id 查询）
-_PURCHASE_BUDGET_ARG_KEYS = frozenset()
-_PURCHASE_POLICY_ARG_KEYS = frozenset()
-_PURCHASE_PROPOSAL_ARG_KEYS = frozenset()
 
 
 class PlannerDecisionError(ValueError):
@@ -105,10 +92,6 @@ class PlannerDecision(BaseModel):
     # 仅由 Planner 从用户当前语义中抽取；不是 Tool arguments，也不是 trusted
     # system field。expense_proposal_tool 执行时由 Executor 单独注入。
     expense_reason: str | None = None
-    # Purchase 领域语义字段；它们不是 trusted facts，也不进入 Tool arguments。
-    purchase_item: str | None = None
-    purchase_budget: Decimal | None = None
-    purchase_justification: str | None = None
 
     def validate_decision(self) -> 'PlannerDecision':
         """确定性字段一致性校验;非法结构抛 PlannerDecisionError,不静默修复。"""
@@ -133,12 +116,6 @@ class PlannerDecision(BaseModel):
                 self._validate_expense_proposal()
             elif self.tool_name == EXPENSE_STATUS_TOOL_NAME:
                 self._validate_expense_status()
-            elif self.tool_name == PURCHASE_BUDGET_TOOL_NAME:
-                self._validate_purchase_budget()
-            elif self.tool_name == PURCHASE_POLICY_TOOL_NAME:
-                self._validate_purchase_policy()
-            elif self.tool_name == PURCHASE_PROPOSAL_TOOL_NAME:
-                self._validate_purchase_proposal()
             else:
                 raise PlannerDecisionError(f'未知 tool_name: {self.tool_name}')
         else:
@@ -318,40 +295,4 @@ class PlannerDecision(BaseModel):
         if self.reason_code != 'need_expense_status':
             raise PlannerDecisionError(
                 'expense_status_tool 的 reason_code 必须是 need_expense_status'
-            )
-
-    def _validate_purchase_budget(self) -> None:
-        if not isinstance(self.arguments, dict):
-            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
-        if self.answer is not None:
-            raise PlannerDecisionError('action=tool 不得携带 answer')
-        if set(self.arguments) != _PURCHASE_BUDGET_ARG_KEYS:
-            raise PlannerDecisionError('purchase_budget_tool 不接受任何 LLM 参数')
-        if self.reason_code != 'need_purchase_budget':
-            raise PlannerDecisionError(
-                'purchase_budget_tool 的 reason_code 必须是 need_purchase_budget'
-            )
-
-    def _validate_purchase_policy(self) -> None:
-        if not isinstance(self.arguments, dict):
-            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
-        if self.answer is not None:
-            raise PlannerDecisionError('action=tool 不得携带 answer')
-        if set(self.arguments) != _PURCHASE_POLICY_ARG_KEYS:
-            raise PlannerDecisionError('purchase_policy_tool 不接受任何 LLM 参数')
-        if self.reason_code != 'need_purchase_policy':
-            raise PlannerDecisionError(
-                'purchase_policy_tool 的 reason_code 必须是 need_purchase_policy'
-            )
-
-    def _validate_purchase_proposal(self) -> None:
-        if not isinstance(self.arguments, dict):
-            raise PlannerDecisionError('action=tool 必须提供 arguments(可为空 dict)')
-        if self.answer is not None:
-            raise PlannerDecisionError('action=tool 不得携带 answer')
-        if set(self.arguments) != _PURCHASE_PROPOSAL_ARG_KEYS:
-            raise PlannerDecisionError('purchase_proposal_tool 不接受任何 LLM 参数')
-        if self.reason_code != 'need_purchase_proposal':
-            raise PlannerDecisionError(
-                'purchase_proposal_tool 的 reason_code 必须是 need_purchase_proposal'
             )

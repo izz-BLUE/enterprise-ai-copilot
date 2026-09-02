@@ -107,9 +107,7 @@ Confirm 响应：
 }
 ```
 
-`type` 当前为 `ANNUAL_LEAVE_REQUEST`、`EXPENSE_CLAIM` 或 `PURCHASE_REQUEST`；Action status 为 `PENDING_CONFIRMATION`、`PROCESSING`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`EXPIRED`。Confirm 的重复 UUID key 重放原结果；Action 不存在或 owner 不匹配统一收敛为安全的 not-found 语义。常见业务冲突为 409，revalidation 不可用为 503，系统错误为 5xx；响应不暴露 nonce digest、token 或内部异常。
-
-`PURCHASE_REQUEST` 的内部 Proposal 业务字段为 `item_name`、`requested_budget`、`justification`、`available_budget` 和 `policy_result`。它只在 Java 创建 PendingAction 时重新校验；确认成功写入 `purchase_request`，初始状态为 `SUBMITTED`，不会进入 Mock OA 外部审批。
+`type` 当前为 `ANNUAL_LEAVE_REQUEST` 或 `EXPENSE_CLAIM`；Action status 为 `PENDING_CONFIRMATION`、`PROCESSING`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`EXPIRED`。Confirm 的重复 UUID key 重放原结果；Action 不存在或 owner 不匹配统一收敛为安全的 not-found 语义。常见业务冲突为 409，revalidation 不可用为 503，系统错误为 5xx；响应不暴露 nonce digest、token 或内部异常。
 
 Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附带下一任务的 `nextPendingAction`。该字段仍是 Java PendingAction 视图；不存在时为 `null`。Task Runtime 的 Expense 确认会先让当前 Python task graph `END`，再由 Java 绑定 ExpenseClaim 的外部关联并提交 OA，不进入 Python `/agent/langgraph/external/resume`。
 
@@ -134,7 +132,6 @@ Multi Task Runtime 的确认响应在 Java 已提交当前动作后，可能附�
 
 跨员工查询按 not-found 处理；token 缺失或 employee header 缺失不会获得业务数据。
 
-Purchase Extension Proof 的预算与政策事实是 Python 内部的本地确定性 fixture，不新增浏览器或 Java read API；Java confirm-time 会独立复核同一事实。
 
 ## 4. Java Mock OA webhook
 

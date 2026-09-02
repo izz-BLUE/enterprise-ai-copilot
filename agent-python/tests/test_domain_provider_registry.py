@@ -15,7 +15,6 @@ from app.agents.domain_provider_registry import (
     DomainProviderRegistry,
     ExpenseProvider,
     LeaveProvider,
-    PurchaseProvider,
 )
 from app.agents.planner_node import (
     MAX_PLANNER_STEPS,
@@ -30,9 +29,6 @@ from app.schemas.planner_schema import (
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
-    PURCHASE_BUDGET_TOOL_NAME,
-    PURCHASE_POLICY_TOOL_NAME,
-    PURCHASE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
@@ -462,8 +458,6 @@ def _completion_item(tool_name: str, payload: dict) -> dict:
     TRAVEL_RECORD_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
     EXPENSE_STATUS_TOOL_NAME,
-    PURCHASE_BUDGET_TOOL_NAME,
-    PURCHASE_POLICY_TOOL_NAME,
 ])
 def test_structured_business_failure_is_not_completed(tool_name):
     item = _completion_item(tool_name, {
@@ -480,8 +474,6 @@ def test_structured_business_failure_is_not_completed(tool_name):
     TRAVEL_RECORD_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
     EXPENSE_STATUS_TOOL_NAME,
-    PURCHASE_BUDGET_TOOL_NAME,
-    PURCHASE_POLICY_TOOL_NAME,
 ])
 def test_structured_business_success_remains_completed(tool_name):
     item = _completion_item(tool_name, {'success': True})
@@ -512,12 +504,6 @@ def test_registry_preserves_proposal_completion_semantics():
         EXPENSE_PROPOSAL_TOOL_NAME,
         {'success': True, 'action_proposal': {'action_type': 'EXPENSE_CLAIM'}},
     )) is True
-
-    for kind in ('clarification', 'rejection', 'proposal'):
-        assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
-            PURCHASE_PROPOSAL_TOOL_NAME,
-            {'success': True, 'kind': kind, 'action_proposal': None},
-        )) is True
 
     assert DOMAIN_PROVIDER_REGISTRY.is_completed_success(_completion_item(
         LEAVE_PROPOSAL_TOOL_NAME,
@@ -580,16 +566,6 @@ def test_platform_completion_guard_allows_business_negative_facts():
             }),),
         ),
     )
-    DOMAIN_PROVIDER_REGISTRY.validate_completion(
-        _finish_decision(), [PURCHASE_POLICY_TOOL_NAME],
-        DomainContext(
-            question='请查询采购政策',
-            tool_history=(_completion_item(PURCHASE_POLICY_TOOL_NAME, {
-                'success': True, 'policy_result': 'FAIL',
-            }),),
-        ),
-    )
-
 
 def test_platform_completion_guard_allows_rag_success():
     DOMAIN_PROVIDER_REGISTRY.validate_completion(
@@ -601,13 +577,6 @@ def test_platform_completion_guard_allows_rag_success():
             }),),
         ),
     )
-
-
-def test_purchase_provider_still_owns_purchase_completion_semantics():
-    assert PurchaseProvider().is_completed_success(_completion_item(
-        PURCHASE_PROPOSAL_TOOL_NAME,
-        {'success': True, 'kind': 'proposal', 'action_proposal': {}},
-    )) is True
 
 
 def test_leave_provider_is_simple_and_has_no_expense_semantic_slot():

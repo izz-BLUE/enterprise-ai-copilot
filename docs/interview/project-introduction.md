@@ -10,7 +10,7 @@
 
 > 这个项目不是简单的“问答 API”。稳定链路是 Java → Python → hybrid retrieval → DeepSeek；Agent 链路默认使用 Planner-first LangGraph，Planner 只负责有限规划，Tool Executor 负责 capability、身份、预算和去重，Java 是最终业务 authority。
 >
-> 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。第三领域采购 Proof 则复用同一 PendingAction/confirm 机制，将确定性预算和政策事实写入 PurchaseRequest，但不接外部采购系统。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。当前验证为 Python 1512 个通过、34 个预期 skip，Java 406 个通过，Purchase persistence proof 4 个通过。
+> 我用差旅报销作为主要场景：Agent 通过 Enterprise OA MCP 读取当前 trip/invoice，程序代码确定性计算金额并生成 Proposal；用户确认后，Java 在本地事务中写 ExpenseClaim/ExpenseItem，再进入独立的 WAITING_EXTERNAL，Mock OA 通过 authoritative GET 决定批准或拒绝，Java 最后恢复 Python Graph 到 END。Memory 只保存同一 user/conversation 的 ACTIVE 任务连续性，不能替代权限、当前业务事实或 Checkpoint。完整验证结果以质量保证文档中的当前回归记录为准。
 
 ## 3 分钟
 

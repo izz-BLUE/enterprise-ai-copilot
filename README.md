@@ -82,7 +82,6 @@ Planner 只有规划权，没有业务执行授权。当前程序限制为最多
 | `travel_record_tool` / `invoice_verify_tool` | 通过 Enterprise OA MCP 读取当前差旅、发票事实 | 员工身份和 MCP 地址可用 |
 | `eval_report_tool` | 读取评估报告 | `allow_eval=true` |
 | `leave_proposal_tool` / `expense_proposal_tool` | 生成受控 Proposal，不执行写操作 | `allow_business_actions=true` 且有员工身份；公开 `demo` 身份固定只读 |
-| `purchase_budget_tool` / `purchase_policy_tool` / `purchase_proposal_tool` | 查询采购 fixture 并生成 Purchase Proposal，不执行写操作 | 采购申请意图、`allow_business_actions=true` 且有员工身份；公开 `demo` 身份固定只读 |
 
 Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变量只属于 Python → Java 的只读业务 Tool 链路。
 
@@ -90,7 +89,7 @@ Proposal Tools 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个变�
 
 ### 受控业务动作与 Java authority
 
-年假、报销和采购共用 `BusinessActionService` 生命周期：
+年假和报销共用 `BusinessActionService` 生命周期：
 
 ```text
 Proposal
@@ -103,19 +102,6 @@ TTL     → EXPIRED
 ```
 
 Proposal 阶段没有副作用。Java 创建 PendingAction 时重新校验 action type、字段、业务日期、权限、容量和业务规则，生成一次性 `confirmationNonce`（数据库只存摘要），并返回脱敏确认视图。Confirm 必须通过 owner、nonce、TTL、当前状态和 UUID `Idempotency-Key` 校验；重复确认重放原结果，不重复写业务表。Cancel/expire/失败也由 Java 结束对应 Memory 生命周期。
-
-### 采购申请 Proof
-
-```text
-用户申请购买开发设备
-  → Planner → purchase_budget_tool → purchase_policy_tool
-  → purchase_proposal_tool（只读事实 + Proposal，不写库）
-  → WAITING_USER / Java PendingAction → 用户 Confirm
-  → Java 重验预算/政策 → PurchaseRequest 持久化
-  → BusinessAction=SUCCEEDED / TaskExecution=COMPLETED
-```
-
-当前采购事实是本地 fixture：`E10001` 的可用预算为 `20000.00`，确认后写入 `purchase_request`，不进入 Mock OA 外部审批。
 
 ### 报销主流程
 
@@ -239,7 +225,6 @@ docker compose -f deploy/docker-compose.local.yml up -d postgres mock-oa
 | Java 后端 | 406 通过 |
 | Python 完整套件 | 1512 通过 + 34 个预期跳过 |
 | PostgreSQL checkpoint / crash resume / HITL / external resume | 34 通过，0 跳过（17 + 7 + 5 + 5） |
-| PurchaseRequest PostgreSQL persistence proof | 4 通过 |
 | Enterprise OA MCP | 24 通过 |
 | Mock OA | 17 通过 |
 | 前端 | 44 通过 |

@@ -7,9 +7,7 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, Sequence
 
 from app.schemas.planner_schema import (
@@ -22,9 +20,6 @@ from app.schemas.planner_schema import (
     LEAVE_REQUEST_MAX_LIMIT,
     LEAVE_REQUEST_MIN_LIMIT,
     LEAVE_REQUEST_TOOL_NAME,
-    PURCHASE_BUDGET_TOOL_NAME,
-    PURCHASE_POLICY_TOOL_NAME,
-    PURCHASE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
     PlannerDecision,
@@ -45,15 +40,10 @@ class DomainContext:
     continuation_original_request: str | None = None
     memory_context: object = None
     step_count: int = 0
-    purchase_item: str | None = None
-    purchase_budget: Decimal | None = None
-    purchase_justification: str | None = None
 
     @classmethod
     def from_state(cls, state: dict) -> "DomainContext":
         history = state.get('tool_history', [])
-        planner_decision = state.get('planner_decision')
-        planner_decision = planner_decision if isinstance(planner_decision, dict) else {}
         return cls(
             question=state.get('question', ''),
             tool_history=tuple(history) if isinstance(history, list) else tuple(),
@@ -62,11 +52,6 @@ class DomainContext:
             continuation_original_request=state.get('continuation_original_request'),
             memory_context=state.get('memory_context'),
             step_count=state.get('step_count', 0),
-            purchase_item=state.get('purchase_item', planner_decision.get('purchase_item')),
-            purchase_budget=state.get('purchase_budget', planner_decision.get('purchase_budget')),
-            purchase_justification=state.get(
-                'purchase_justification', planner_decision.get('purchase_justification')
-            ),
         )
 
 
@@ -738,304 +723,6 @@ class ExpenseProvider:
         )
 
 
-class PurchaseProvider:
-    """Purchase 领域的最小 Planner policy。"""
-
-    domain_key = 'purchase'
-    task_type = 'PURCHASE_REQUEST'
-    proposal_tool_names = frozenset({PURCHASE_PROPOSAL_TOOL_NAME})
-    semantic_slots = frozenset({
-        'purchase_item', 'purchase_budget', 'purchase_justification',
-    })
-    capability_tools = frozenset({
-        PURCHASE_BUDGET_TOOL_NAME,
-        PURCHASE_POLICY_TOOL_NAME,
-        PURCHASE_PROPOSAL_TOOL_NAME,
-    })
-
-    _CLAUSE_SPLIT_PATTERN = re.compile(r'[，,。；;！？?!\n]+')
-    _PURCHASE_QUERY_PREFIXES = (
-        '流程', '制度', '规定', '政策', '标准', '怎么', '如何',
-        '是什么', '有什么', '需要什么', '需要哪些', '需要多少',
-        '有哪些', '是否', '能否',
-    )
-    _PURCHASE_QUERY_CLAUSE_MARKERS = (
-        '如何', '怎么', '是什么', '有什么', '需要什么', '需要哪些',
-        '需要多少', '需要走什么', '是否', '能否', '哪些', '什么流程',
-        '什么材料', '什么规定', '什么政策', '什么标准', '有什么限制',
-        '有哪些要求', '请问', '想了解', '问下', '吗',
-    )
-    _PURCHASE_WRITE_WITH_OBJECT_MARKERS = (
-        '帮我申请购买', '帮我申请采购',
-        '我想申请购买', '我想申请采购',
-        '我要申请购买', '我要申请采购',
-        '请申请购买', '请申请采购',
-        '帮我购买', '帮我采购', '帮我买',
-        '我想购买', '我想采购', '我想买',
-        '我要购买', '我要采购', '我要买',
-        '申请购买', '申请采购',
-    )
-    _PURCHASE_EXPLICIT_SUBMISSION_MARKERS = (
-        '提交采购申请', '发起采购申请',
-    )
-
-    @classmethod
-    def _is_purchase_query_clause(cls, clause: str) -> bool:
-        return any(marker in clause for marker in cls._PURCHASE_QUERY_CLAUSE_MARKERS)
-
-    @classmethod
-    def _has_purchase_write_clause(cls, clause: str) -> bool:
-        if cls._is_purchase_query_clause(clause):
-            return False
-        if any(marker in clause for marker in cls._PURCHASE_EXPLICIT_SUBMISSION_MARKERS):
-            return True
-
-        for marker in cls._PURCHASE_WRITE_WITH_OBJECT_MARKERS:
-            marker_start = clause.find(marker)
-            if marker_start < 0:
-                continue
-            suffix = clause[marker_start + len(marker):].lstrip(' ：:、')
-            if suffix and not any(
-                suffix.startswith(prefix) for prefix in cls._PURCHASE_QUERY_PREFIXES
-            ):
-                return True
-        return False
-
-    @classmethod
-    def is_purchase_request_intent(cls, question: str) -> bool:
-        value = (question or '').strip()
-        if not value:
-            return False
-        if not any(word in value for word in ('采购', '购买', '买')):
-            return False
-
-        # Purchase write intent 必须在同一局部子句内同时具备 Purchase-specific
-        # action marker 和明确对象；不能把全文任意位置的“我想申请”与另一子句的
-        # “采购政策”拼成写意图。提交/发起采购申请属于明确执行语义，可不要求对象。
-        clauses = cls._CLAUSE_SPLIT_PATTERN.split(value)
-        return any(cls._has_purchase_write_clause(clause) for clause in clauses)
-
-    def matches(self, context: DomainContext) -> bool:
-        return self.is_purchase_request_intent(context.question)
-
-    def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
-        candidates = [name for name in tools if name in self.capability_tools]
-        if context.action_proposal is not None:
-            return []
-        # 初次 Planner 决策还没有机会提交语义字段；保留预算查询和 Proposal，
-        # 让完整请求先取得 budget fact，缺字段请求则直接得到 clarification。
-        if context.step_count == 0 and not any((
-            context.purchase_item, context.purchase_budget,
-            context.purchase_justification,
-        )):
-            return [name for name in candidates if name in {
-                PURCHASE_BUDGET_TOOL_NAME, PURCHASE_PROPOSAL_TOOL_NAME,
-            }]
-        if not self._semantics_complete(context):
-            return [name for name in candidates if name == PURCHASE_PROPOSAL_TOOL_NAME]
-        facts = self._fact_context(context)
-        if PURCHASE_BUDGET_TOOL_NAME.removesuffix('_tool') not in facts:
-            return [name for name in candidates if name == PURCHASE_BUDGET_TOOL_NAME]
-        if PURCHASE_POLICY_TOOL_NAME.removesuffix('_tool') not in facts:
-            return [name for name in candidates if name == PURCHASE_POLICY_TOOL_NAME]
-        return [name for name in candidates if name == PURCHASE_PROPOSAL_TOOL_NAME]
-
-    def validate_tool_call(
-        self, tool_name: str, arguments: dict[str, Any], context: DomainContext
-    ) -> None:
-        if tool_name not in self.capability_tools:
-            return None
-        if not self.matches(context):
-            raise DomainToolCallRejected(
-                'purchase_intent_required', '当前请求不是可识别的采购申请。'
-            )
-        if tool_name == PURCHASE_BUDGET_TOOL_NAME:
-            return None
-        if tool_name == PURCHASE_POLICY_TOOL_NAME and not self._semantics_complete(context):
-            raise DomainToolCallRejected(
-                'purchase_semantic_fields_missing',
-                '采购政策查询需要 item、requested budget 和 justification。',
-            )
-        if tool_name == PURCHASE_PROPOSAL_TOOL_NAME:
-            if not self._semantics_complete(context):
-                return None
-            if not self._all_facts_present(context):
-                raise DomainToolCallRejected(
-                    'purchase_prerequisite_missing',
-                    '采购 Proposal 的预算和政策事实尚未完成查询。',
-                )
-
-    def validate_completion(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> None:
-        if decision.action != 'finish':
-            return None
-        latest = next(
-            (
-                item for item in reversed(context.tool_history)
-                if item.get('tool_name') == PURCHASE_PROPOSAL_TOOL_NAME
-                and _tool_invocation_has_business_success(item)
-            ),
-            None,
-        )
-        if latest is None:
-            raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
-        payload = _structured_observation_payload(latest)
-        if not isinstance(payload, dict) or payload.get('success') is not True:
-            raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
-        if payload.get('kind') not in {'proposal', 'clarification', 'rejection'}:
-            raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
-
-    def completion_contract(self, tools: Sequence[str]) -> str:
-        if PURCHASE_PROPOSAL_TOOL_NAME in tools:
-            return (
-                '采购任务完成判断补充规则：\n'
-                f'- {PURCHASE_PROPOSAL_TOOL_NAME} 只生成待确认草稿或确定性澄清/拒绝结果，'
-                '不执行业务写操作；成功后应选择 finish，让程序进入用户确认链路。'
-            )
-        prerequisite_tools = [
-            name for name in (PURCHASE_BUDGET_TOOL_NAME, PURCHASE_POLICY_TOOL_NAME)
-            if name in tools
-        ]
-        if not prerequisite_tools:
-            return ''
-        return (
-            '采购任务完成判断补充规则：\n'
-            f'- {"、".join(prerequisite_tools)} 当前仍处于采购申请前置事实阶段；当前可见前置 Tool '
-            '成功不代表采购申请已完成，不得直接 finish，应继续从当前合法能力清单完成剩余步骤。'
-        )
-
-    def postprocess_decision(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> tuple[PlannerDecision, dict[str, object]]:
-        if context.step_count == 0:
-            item = self._normalize_text(decision.purchase_item)
-            budget = self._normalize_budget(decision.purchase_budget)
-            justification = self._normalize_text(decision.purchase_justification)
-        else:
-            item = context.purchase_item
-            budget = context.purchase_budget
-            justification = context.purchase_justification
-        payload = decision.model_dump()
-        payload.update({
-            'purchase_item': item,
-            'purchase_budget': budget,
-            'purchase_justification': justification,
-        })
-        return PlannerDecision.model_validate(payload).validate_decision(), {
-            'purchase_item': item,
-            'purchase_budget': budget,
-            'purchase_justification': justification,
-        }
-
-    def prompt_specs(self) -> dict[str, ToolPromptSpec]:
-        return {
-            PURCHASE_BUDGET_TOOL_NAME: ToolPromptSpec(
-                description='查询当前登录员工的确定性可用采购预算；无参数，身份由程序层注入。',
-                argument_contract='必须为空对象 {}；employee_id 由程序层注入。',
-                reason_code='need_purchase_budget',
-                example={
-                    'action': 'tool', 'tool_name': PURCHASE_BUDGET_TOOL_NAME,
-                    'arguments': {}, 'reason_code': 'need_purchase_budget',
-                    'purchase_item': '开发用 MacBook', 'purchase_budget': 15000,
-                    'purchase_justification': '移动端开发',
-                },
-                freshness_rule='当前可用采购预算必须通过本次 purchase_budget_tool 查询。',
-            ),
-            PURCHASE_POLICY_TOOL_NAME: ToolPromptSpec(
-                description='根据程序注入的 item、预算和 justification 查询确定性采购政策；无 LLM 参数。',
-                argument_contract='必须为空对象 {}；Purchase 语义字段由程序层注入。',
-                reason_code='need_purchase_policy',
-                example={
-                    'action': 'tool', 'tool_name': PURCHASE_POLICY_TOOL_NAME,
-                    'arguments': {}, 'reason_code': 'need_purchase_policy',
-                    'purchase_item': '开发用 MacBook', 'purchase_budget': 15000,
-                    'purchase_justification': '移动端开发',
-                },
-                freshness_rule='当前采购政策必须通过本次 purchase_policy_tool 查询。',
-            ),
-            PURCHASE_PROPOSAL_TOOL_NAME: ToolPromptSpec(
-                description='只根据用户语义字段和已查询的确定性预算/政策事实生成待确认 Purchase Proposal；不写库。',
-                argument_contract='必须为空对象 {}；item、预算和 justification 是独立语义字段，不得放入 arguments。',
-                reason_code='need_purchase_proposal',
-                example={
-                    'action': 'tool', 'tool_name': PURCHASE_PROPOSAL_TOOL_NAME,
-                    'arguments': {}, 'reason_code': 'need_purchase_proposal',
-                    'purchase_item': '开发用 MacBook', 'purchase_budget': 15000,
-                    'purchase_justification': '移动端开发',
-                },
-                usage_rule=(
-                    f'{PURCHASE_PROPOSAL_TOOL_NAME} 使用规则:\n'
-                    '- 每次 Purchase Tool 决策都必须在 JSON 顶层输出 purchase_item、purchase_budget、'
-                    'purchase_justification；它们只从当前用户任务抽取，不得放入 arguments。已提供的值不能省略，'
-                    '缺失的槽才输出 null。\n'
-                    '- 例如“帮我申请购买一台开发用 MacBook，预算15000，原因是移动端开发”应输出：'
-                    'purchase_item="开发用 MacBook"、purchase_budget=15000、'
-                    'purchase_justification="移动端开发"。\n'
-                    '- 用户明确要求申请购买时使用；只生成待确认草稿，不写 purchase_request。\n'
-                    '- item、requested budget、justification 任一缺失时直接调用该 Tool 产生 clarification，'
-                    '不要伪造缺失字段。\n'
-                    '- 语义字段完整时，必须先取得 purchase_budget_tool 和 purchase_policy_tool 的成功事实，'
-                    '不得相信 LLM 自报 available_budget 或 policy_result。'
-                ),
-            ),
-        }
-
-    def is_completed_success(self, item: dict) -> bool:
-        if item.get('status') != 'success':
-            return False
-        if item.get('tool_name') != PURCHASE_PROPOSAL_TOOL_NAME:
-            return True
-        try:
-            payload = json.loads(item.get('observation'))
-        except (json.JSONDecodeError, TypeError):
-            return False
-        return (
-            isinstance(payload, dict)
-            and payload.get('success') is True
-            and payload.get('kind') in {'proposal', 'clarification', 'rejection'}
-        )
-
-    @staticmethod
-    def _normalize_text(value: object) -> str | None:
-        if not isinstance(value, str):
-            return None
-        value = value.strip()
-        return value or None
-
-    @staticmethod
-    def _normalize_budget(value: object) -> Decimal | None:
-        if value is None or isinstance(value, bool):
-            return None
-        try:
-            budget = value if isinstance(value, Decimal) else Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            return None
-        if not budget.is_finite() or budget <= 0:
-            return None
-        return budget
-
-    def _semantics_complete(self, context: DomainContext) -> bool:
-        return bool(
-            context.purchase_item
-            and context.purchase_budget is not None
-            and context.purchase_justification
-        )
-
-    @staticmethod
-    def _fact_context(context: DomainContext) -> dict[str, dict[str, Any]]:
-        from app.services.purchase_facts_service import purchase_fact_context
-
-        return purchase_fact_context(context.tool_history)
-
-    def _all_facts_present(self, context: DomainContext) -> bool:
-        facts = self._fact_context(context)
-        return (
-            PURCHASE_BUDGET_TOOL_NAME.removesuffix('_tool') in facts
-            and PURCHASE_POLICY_TOOL_NAME.removesuffix('_tool') in facts
-        )
-
-
 _PLATFORM_PROMPT_SPECS = {
     RAG_TOOL_NAME: ToolPromptSpec(
         description='回答企业制度、流程、IT/HR 文档等知识库问题。参数: question(用户问题)。',
@@ -1203,11 +890,6 @@ class DomainProviderRegistry:
                 '当前报销申请尚未达到合法完成状态；不得 finish；下一步必须输出 '
                 'action="tool"，并从当前合法能力清单选择尚未成功的 prerequisite Tool。',
             ),
-            'finish 前未完成 purchase_proposal_tool Proposal 阶段': (
-                'planner_completion_validation', 'purchase_proposal_missing',
-                '当前采购申请尚未达到合法完成状态；不得 finish；下一步必须输出 '
-                'action="tool"，并从当前合法能力清单选择尚未成功的 prerequisite Tool。',
-            ),
             _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE: (
                 'planner_completion_validation', 'structured_tool_business_failure',
                 _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE,
@@ -1240,5 +922,5 @@ class DomainProviderRegistry:
 # P4-1 intentionally uses a small, explicit static registry. Adding a future
 # domain requires a deliberate registration and schema/tool review.
 DOMAIN_PROVIDER_REGISTRY = DomainProviderRegistry(
-    (ExpenseProvider(), LeaveProvider(), PurchaseProvider())
+    (ExpenseProvider(), LeaveProvider())
 )

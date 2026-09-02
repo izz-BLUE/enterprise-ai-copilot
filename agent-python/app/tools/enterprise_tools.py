@@ -11,7 +11,7 @@ trace_id 等系统字段,这些字段统一由 Executor 从当前请求 Runtime 
 
 import json
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from langchain_core.tools import tool
@@ -20,10 +20,6 @@ from app.clients.java_client import JavaClientError, get_java_client
 from app.integrations.mcp.enterprise_oa_client import (
     OaMcpClientError,
     get_enterprise_oa_client,
-)
-from app.services.purchase_facts_service import (
-    available_budget_for,
-    evaluate_policy,
 )
 
 
@@ -544,174 +540,4 @@ def expense_status_tool(
         },
         None,
         None,
-    )
-
-
-# ──────────────────────────────────────────────────────────────────────
-# P4-3 Purchase Extension Proof：本地确定性事实与 Proposal Tool
-# ──────────────────────────────────────────────────────────────────────
-
-
-@tool
-def purchase_budget_tool(
-    employee_id: str = '',
-    trace_id: str = '',
-) -> str:
-    """查询当前登录员工的可用采购预算；不接受任何 LLM 参数。"""
-    eid = _require_identity(employee_id)
-    if eid is None:
-        return _identity_error()
-    budget = available_budget_for(eid)
-    if budget is None:
-        return _payload(
-            False, None, 'PURCHASE_BUDGET_NOT_FOUND',
-            '当前员工没有可用的采购预算 fixture。',
-        )
-    return _payload(
-        True,
-        {
-            'available_budget': budget,
-            'source': 'fixture:purchase_budget',
-        },
-        None,
-        None,
-    )
-
-
-@tool
-def purchase_policy_tool(
-    item_name: str = '',
-    requested_budget: str = '',
-    justification: str = '',
-) -> str:
-    """根据程序注入的语义字段评估本地采购政策；不接受 LLM arguments。"""
-    if not item_name.strip() or not justification.strip():
-        return _payload(
-            False, None, 'PURCHASE_FIELDS_REQUIRED',
-            '采购政策评估需要 item_name 和 justification。',
-        )
-    try:
-        budget = Decimal(str(requested_budget))
-    except (InvalidOperation, ValueError):
-        return _payload(
-            False, None, 'PURCHASE_BUDGET_INVALID',
-            'requested_budget 不是有效金额。',
-        )
-    result, reason = evaluate_policy(item_name, budget, justification)
-    return _payload(
-        True,
-        {
-            'item_name': item_name,
-            'requested_budget': budget,
-            'policy_result': result,
-            'policy_reason': reason,
-            'source': 'fixture:purchase_policy',
-        },
-        None,
-        None,
-    )
-
-
-@tool
-def purchase_proposal_tool(
-    item_name: str = '',
-    requested_budget: str = '',
-    justification: str = '',
-    context: dict | None = None,
-) -> str:
-    """只根据当前语义和已成功事实生成 Purchase 待确认草稿。"""
-    if not item_name.strip():
-        return _payload(
-            True, {
-                'kind': 'clarification',
-                'action_proposal': None,
-                'missing_fields': ['item_name'],
-                'message': '请提供要采购的物品名称。',
-            }, None, None,
-        )
-    if not justification.strip():
-        return _payload(
-            True, {
-                'kind': 'clarification',
-                'action_proposal': None,
-                'missing_fields': ['justification'],
-                'message': '请提供本次采购的用途或申请理由。',
-            }, None, None,
-        )
-    try:
-        budget = Decimal(str(requested_budget))
-    except (InvalidOperation, ValueError):
-        return _payload(False, None, 'PURCHASE_BUDGET_INVALID', '预算金额无效。')
-    if not budget.is_finite() or budget <= 0:
-        return _payload(False, None, 'PURCHASE_BUDGET_INVALID', '预算金额必须大于 0。')
-
-    facts = context or {}
-    budget_fact = facts.get('purchase_budget')
-    policy_fact = facts.get('purchase_policy')
-    if not isinstance(budget_fact, dict) or not isinstance(policy_fact, dict):
-        return _payload(
-            False, None, 'PURCHASE_FACTS_REQUIRED',
-            '预算和采购政策事实尚未完成查询。',
-        )
-    try:
-        available = Decimal(str(budget_fact['available_budget']))
-    except (KeyError, InvalidOperation, ValueError):
-        return _payload(False, None, 'PURCHASE_FACTS_INVALID', '采购预算事实无效。')
-    if not available.is_finite():
-        return _payload(False, None, 'PURCHASE_FACTS_INVALID', '采购预算事实无效。')
-    if budget > available:
-        return _payload(
-            True,
-            {
-                'kind': 'rejection',
-                'action_proposal': None,
-                'missing_fields': [],
-                'message': f'采购预算不足：申请 {budget}，可用预算 {available}。',
-            }, None, None,
-        )
-
-    policy_item = policy_fact.get('item_name')
-    if not isinstance(policy_item, str) or policy_item.strip() != item_name.strip():
-        return _payload(
-            False, None, 'PURCHASE_FACTS_MISMATCH',
-            '采购政策事实与当前物品不一致。',
-        )
-    try:
-        policy_budget = Decimal(str(policy_fact['requested_budget']))
-    except (KeyError, InvalidOperation, ValueError):
-        return _payload(
-            False, None, 'PURCHASE_FACTS_MISMATCH',
-            '采购政策事实与当前预算不一致。',
-        )
-    if not policy_budget.is_finite() or policy_budget != budget:
-        return _payload(
-            False, None, 'PURCHASE_FACTS_MISMATCH',
-            '采购政策事实与当前预算不一致。',
-        )
-    policy_result = policy_fact.get('policy_result')
-    if policy_result != 'PASS':
-        return _payload(
-            True,
-            {
-                'kind': 'rejection',
-                'action_proposal': None,
-                'missing_fields': [],
-                'message': str(policy_fact.get('policy_reason') or '当前采购政策不允许该申请。'),
-            }, None, None,
-        )
-    return _payload(
-        True,
-        {
-            'kind': 'proposal',
-            'action_proposal': {
-                'action_type': 'PURCHASE_REQUEST',
-                'item_name': item_name.strip(),
-                'requested_budget': budget,
-                'justification': justification.strip(),
-                'available_budget': available,
-                'policy_result': 'PASS',
-            },
-            'missing_fields': [],
-            'message': '已生成采购申请草稿，请确认后提交。',
-        }, None, None,
     )

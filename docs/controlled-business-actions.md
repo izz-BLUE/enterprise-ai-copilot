@@ -1,6 +1,6 @@
 # 受控业务动作
 
-本文说明当前三个受控动作：`ANNUAL_LEAVE_REQUEST`、`EXPENSE_CLAIM` 和 `PURCHASE_REQUEST`。它们共享 Java authority，但业务事实不同。Python/LLM 只能提出 Proposal；任何写操作都必须经过 Java 的 PendingAction、nonce、权限、幂等和数据库事务。
+本文说明当前两个受控动作：`ANNUAL_LEAVE_REQUEST` 和 `EXPENSE_CLAIM`。它们共享 Java authority，但业务事实不同。Python/LLM 只能提出 Proposal；任何写操作都必须经过 Java 的 PendingAction、nonce、权限、幂等和数据库事务。
 
 ## 1. 通用契约
 
@@ -27,7 +27,7 @@ Java 负责：
 - 业务数据库事务和最终结果；
 - Confirm/cancel/expire/失败后的 Java Memory lifecycle transition。
 
-Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创建 LeaveRequest、ExpenseClaim 或 PurchaseRequest。Confirm body 只允许 `confirmationNonce`，不接受浏览器传入的 employee、金额、权限或业务事实。
+Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创建 LeaveRequest 或 ExpenseClaim。Confirm body 只允许 `confirmationNonce`，不接受浏览器传入的 employee、金额、权限或业务事实。
 
 ## 2. Planner 与 Router 路径
 
@@ -41,7 +41,7 @@ Confirm 成功的重复请求重放原 `requestId`，不会重复扣余额、创
 
 Planner-first 是生产唯一入口；Router-first 仅供直接测试/离线对照。两者最终都调用同一 Java control plane。
 
-Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool`、`purchase_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。公开 `demo` 身份即使全局业务动作开关开启，也固定为只读，不获得 Proposal Tool。
+Planner 受最多 6 次 decision、最多 5 次实际 Tool execution 的独立预算约束。可见 Tool 由程序按 Runtime Context 收缩，模型不能扩大权限。`leave_proposal_tool`、`expense_proposal_tool` 只生成 Proposal，不调用 Java 写接口；可信员工身份、日期和 trace 由程序注入。公开 `demo` 身份即使全局业务动作开关开启，也固定为只读，不获得 Proposal Tool。
 
 Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个配置只属于 Python → Java 的只读业务 Tool 链路。
 
@@ -56,25 +56,7 @@ Proposal Tool 不依赖 `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN`；这两个配�
 
 Confirm 在一个 PostgreSQL 事务内锁定账户和 Action，写入 LeaveRequest、扣减余额并保存成功结果；任何数据库异常整体回滚。当前 Demo 不处理法定节假日和调休，Manager 也没有审批或查看他人申请的权限。
 
-## 4. 采购申请
-
-Purchase Extension Proof 是最小的第三业务域，不建设完整采购系统。当前 fixture 只为 `E10001` 提供 `20000.00` 可用预算，并允许带 justification 的开发设备申请。
-
-```text
-用户申请购买开发设备
-  → Planner 抽取 item / requested budget / justification
-  → purchase_budget_tool（当前员工预算事实）
-  → purchase_policy_tool（当前采购政策事实）
-  → purchase_proposal_tool（只生成 Proposal，不写库）
-  → WAITING_USER / Java PendingAction
-  → 用户 Confirm
-  → Java 重新读取预算并重新评估政策
-  → purchase_request 持久化，BusinessAction=SUCCEEDED
-```
-
-预算与政策 Tool 都是只读、确定性的本地 fixture；它们的结果只用于构造 Proposal，不能替代 Java confirm-time authority。Java 会重新校验 item、金额、justification、可用预算和政策结果。Purchase 不进入 `WAITING_EXTERNAL`，确认成功后直接为 `COMPLETED`；`purchase_request.source_action_id` 的唯一约束保证同一确认动作不会重复写入。
-
-## 5. 报销主流程
+## 4. 报销主流程
 
 ```mermaid
 flowchart LR

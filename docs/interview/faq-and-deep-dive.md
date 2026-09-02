@@ -104,7 +104,7 @@ Checkpoint 是 runtime execution scene，用于 crash/HITL/external resume；Mem
 
 ## Q26：怎么证明项目质量？
 
-接受基线为 Java 406、Python 1512 + 34 expected skips、Purchase persistence proof 4 passed、PostgreSQL durable flows 34 passed/0 skipped、Enterprise OA MCP 24、Mock OA 17、Frontend 44，另有 lint/build pass；CI 分别覆盖 backend、Mock OA、Python eval、frontend、browser、Gitleaks、CodeQL。
+接受基线为 Java/Python/Frontend 完整回归、PostgreSQL durable flows、Enterprise OA MCP 和 Mock OA 测试均通过，另有 lint/build pass；CI 分别覆盖 backend、Mock OA、Python eval、frontend、browser、Gitleaks、CodeQL。
 
 ## Q27：Safety Guard 能解决 Prompt Injection 吗？
 

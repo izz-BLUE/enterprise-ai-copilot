@@ -181,28 +181,6 @@ leave_proposal_tool
   → LeaveRequest + balance transaction
 ```
 
-## 6. 第三领域 Proof：采购申请
-
-输入包含物品、预算和理由的请求，例如：
-
-```text
-帮我申请购买一台开发用 MacBook，预算15000，原因是移动端开发。
-```
-
-预期流程：
-
-```text
-purchase_budget_tool → purchase_policy_tool
-  → purchase_proposal_tool
-  → Java PendingAction PENDING_CONFIRMATION
-  → Confirm
-  → PurchaseRequest SUBMITTED + BusinessAction SUCCEEDED
-```
-
-采购 Proof 使用本地确定性预算/政策 fixture，不进入 Mock OA 外部审批；确认前的缺字段、超预算、政策拒绝和错误用户确认都应 fail-closed。
-
-展示重点：Proposal 阶段不扣余额；Confirm 做 owner/nonce/TTL/幂等/业务规则校验；重复 Confirm 重放同一 requestId；Cancel 或过期不会写 LeaveRequest。当前 Demo 不处理法定节假日和调休。
-
 ## 6. Safety 与 RAG fallback
 
 ### 普通 RAG
