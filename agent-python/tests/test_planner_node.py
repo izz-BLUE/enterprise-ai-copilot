@@ -2,7 +2,7 @@
 
 import json
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -14,6 +14,7 @@ from app.agents.planner_node import (
     visible_tools,
 )
 from app.agents.planner_node import planner_node as _planner_node
+from app.agents.tool_executor_node import tool_executor_node
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
@@ -22,6 +23,9 @@ from app.schemas.planner_schema import (
     LEAVE_BALANCE_TOOL_NAME,
     LEAVE_PROPOSAL_TOOL_NAME,
     LEAVE_REQUEST_TOOL_NAME,
+    PURCHASE_BUDGET_TOOL_NAME,
+    PURCHASE_POLICY_TOOL_NAME,
+    PURCHASE_PROPOSAL_TOOL_NAME,
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
 )
@@ -132,6 +136,137 @@ def test_first_planner_reason_is_frozen_for_current_request():
         ))
     assert result['request_expense_reason'] == '客户拜访'
     assert result['planner_decision']['expense_reason'] == '客户拜访'
+
+
+def test_expense_planner_repairs_premature_finish_to_legal_invoice(monkeypatch):
+    monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
+    travel_history = [{
+        'tool_name': TRAVEL_RECORD_TOOL_NAME,
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'items': [{
+                'trip_id': 'TRIP-1',
+                'status': 'APPROVED',
+                'expense_documents': [{'invoice_id': 'INV-1'}, {'invoice_id': 'INV-2'}],
+            }],
+        }),
+    }]
+    premature_finish = (
+        '{"action":"finish","answer":"已完成。","reason_code":"task_complete"}'
+    )
+    invoice = (
+        '{"action":"tool","tool_name":"invoice_verify_tool",'
+        '"arguments":{"invoice_id":"INV-1"},"reason_code":"need_invoice_verify",'
+        '"expense_reason":"客户拜访"}'
+    )
+    initial = state(
+        question='报销原因为客户拜访，帮我根据最近一次已批准的出差和对应发票准备差旅报销申请。',
+        allow_business_actions=True,
+        employee_id='E10001',
+        business_date=date(2026, 8, 26),
+        request_expense_reason='客户拜访',
+        step_count=1,
+        tool_call_count=1,
+        tool_history=travel_history,
+    )
+
+    with patch('app.agents.planner_node.call_llm',
+               side_effect=[premature_finish, invoice]) as llm:
+        planner_result = planner_node(initial)
+
+    assert llm.call_count == 2
+    assert planner_result['planner_decision']['action'] == 'tool'
+    assert planner_result['planner_decision']['tool_name'] == 'invoice_verify_tool'
+    assert planner_result['stop_reason'] == 'continue'
+    assert planner_result['step_count'] == 2
+    repair_prompt = llm.call_args_list[1].args[1]
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in repair_prompt
+    assert '当前合法能力清单' in repair_prompt
+    assert 'action="tool"' in repair_prompt
+
+    after_planner = {**initial, **planner_result}
+    invoice_tool = Mock()
+    invoice_tool.invoke.return_value = json.dumps({
+        'success': True, 'invoice_id': 'INV-1', 'valid': True,
+    })
+    with patch('app.agents.tool_executor_node.invoice_verify_tool', invoice_tool):
+        executor_result = tool_executor_node(
+            checkpoint_safe_state(after_planner),
+            runtime_for_state(after_planner),
+        )
+
+    assert executor_result['tool_call_count'] == 2
+    assert [item['tool_name'] for item in executor_result['tool_history']] == [
+        TRAVEL_RECORD_TOOL_NAME, 'invoice_verify_tool',
+    ]
+
+
+def test_purchase_planner_repairs_premature_finish_to_legal_policy():
+    question = '帮我申请购买一台开发用 MacBook，预算15000，原因是移动端开发。'
+    budget_history = [{
+        'tool_name': PURCHASE_BUDGET_TOOL_NAME,
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True, 'available_budget': '20000.00',
+        }),
+    }]
+    premature_finish = (
+        '{"action":"finish","answer":"已完成。","reason_code":"task_complete"}'
+    )
+    policy = (
+        '{"action":"tool","tool_name":"purchase_policy_tool",'
+        '"arguments":{},"reason_code":"need_purchase_policy",'
+        '"purchase_item":"开发用 MacBook","purchase_budget":15000,'
+        '"purchase_justification":"移动端开发"}'
+    )
+    initial = state(
+        question=question,
+        allow_business_actions=True,
+        employee_id='E10001',
+        business_date=date(2026, 8, 26),
+        step_count=1,
+        tool_call_count=1,
+        tool_history=budget_history,
+        purchase_item='开发用 MacBook',
+        purchase_budget=15000,
+        purchase_justification='移动端开发',
+    )
+
+    with patch('app.agents.planner_node.call_llm',
+               side_effect=[premature_finish, policy]) as llm:
+        planner_result = planner_node(initial)
+
+    assert llm.call_count == 2
+    assert planner_result['planner_decision']['action'] == 'tool'
+    assert planner_result['planner_decision']['tool_name'] == PURCHASE_POLICY_TOOL_NAME
+    assert planner_result['stop_reason'] == 'continue'
+    assert planner_result['step_count'] == 2
+    repair_prompt = llm.call_args_list[1].args[1]
+    assert PURCHASE_PROPOSAL_TOOL_NAME not in repair_prompt
+    assert '当前合法能力清单' in repair_prompt
+    assert 'action="tool"' in repair_prompt
+
+    after_planner = {**initial, **planner_result}
+    policy_tool = Mock()
+    policy_tool.invoke.return_value = json.dumps({
+        'success': True,
+        'item_name': '开发用 MacBook',
+        'requested_budget': '15000',
+        'policy_result': 'PASS',
+    })
+    with patch('app.agents.tool_executor_node.purchase_policy_tool', policy_tool):
+        executor_result = tool_executor_node(
+            checkpoint_safe_state(after_planner),
+            runtime_for_state(after_planner),
+        )
+
+    assert executor_result['tool_call_count'] == 2
+    assert [item['tool_name'] for item in executor_result['tool_history']] == [
+        PURCHASE_BUDGET_TOOL_NAME, PURCHASE_POLICY_TOOL_NAME,
+    ]
 
 
 def test_null_first_planner_reason_is_frozen_and_cannot_be_replaced():

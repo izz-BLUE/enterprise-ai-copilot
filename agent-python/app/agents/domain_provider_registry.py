@@ -486,11 +486,17 @@ class ExpenseProvider:
                 RAG_TOOL_NAME, TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME,
             ) if name in tools
         ]
-        if read_tools and EXPENSE_PROPOSAL_TOOL_NAME in tools:
-            lines.append(
-                f'- {"、".join(read_tools)} 成功只提供报销所需事实；若用户目标还包含报销申请或准备报销，'
-                f'应继续调用 {EXPENSE_PROPOSAL_TOOL_NAME}，不能直接 finish。'
-            )
+        if read_tools:
+            if EXPENSE_PROPOSAL_TOOL_NAME in tools:
+                lines.append(
+                    f'- {"、".join(read_tools)} 成功只提供报销所需事实；若用户目标还包含报销申请或准备报销，'
+                    f'应继续调用 {EXPENSE_PROPOSAL_TOOL_NAME}，不能直接 finish。'
+                )
+            elif any(name in tools for name in (TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME)):
+                lines.append(
+                    f'- {"、".join(read_tools)} 当前仍处于报销申请 prerequisite 阶段；当前可见依赖 Tool '
+                    '成功不代表整个报销申请已完成，不得直接 finish，应继续从当前合法能力清单完成剩余步骤。'
+                )
         if EXPENSE_PROPOSAL_TOOL_NAME in tools:
             lines.append(
                 f'- {EXPENSE_PROPOSAL_TOOL_NAME} 只生成待确认草稿，不执行业务写操作；成功后应选择 finish，'
@@ -515,12 +521,8 @@ class ExpenseProvider:
     def validate_completion(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> None:
-        if decision.action != 'finish' or EXPENSE_PROPOSAL_TOOL_NAME not in tools:
+        if decision.action != 'finish':
             return None
-        successful_tools = {
-            item.get('tool_name') for item in context.tool_history
-            if _tool_invocation_has_business_success(item)
-        }
         latest_proposal = next(
             (
                 item for item in reversed(context.tool_history)
@@ -529,18 +531,17 @@ class ExpenseProvider:
             ),
             None,
         )
-        if latest_proposal is not None:
-            try:
-                payload = json.loads(latest_proposal.get('observation'))
-            except (json.JSONDecodeError, TypeError):
-                payload = None
-            if (
-                isinstance(payload, dict)
-                and payload.get('action_proposal') is None
-                and payload.get('missing_fields', []) == ['invoice_ids']
-            ):
-                raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
-        if EXPENSE_PROPOSAL_TOOL_NAME not in successful_tools:
+        if latest_proposal is None:
+            raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
+        payload = _structured_observation_payload(latest_proposal)
+        if not isinstance(payload, dict):
+            raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
+        if payload.get('action_proposal') is not None:
+            return None
+        missing_fields = payload.get('missing_fields', [])
+        if not isinstance(missing_fields, list) or not missing_fields:
+            raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
+        if 'invoice_ids' in missing_fields or payload.get('kind') not in (None, 'clarification'):
             raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
 
     def postprocess_decision(
@@ -867,34 +868,41 @@ class PurchaseProvider:
     def validate_completion(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> None:
-        if decision.action != 'finish' or PURCHASE_PROPOSAL_TOOL_NAME not in tools:
+        if decision.action != 'finish':
             return None
         latest = next(
             (
                 item for item in reversed(context.tool_history)
                 if item.get('tool_name') == PURCHASE_PROPOSAL_TOOL_NAME
-                and item.get('status') == 'success'
+                and _tool_invocation_has_business_success(item)
             ),
             None,
         )
         if latest is None:
             raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
-        try:
-            payload = json.loads(latest.get('observation'))
-        except (json.JSONDecodeError, TypeError):
-            payload = None
+        payload = _structured_observation_payload(latest)
         if not isinstance(payload, dict) or payload.get('success') is not True:
             raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
         if payload.get('kind') not in {'proposal', 'clarification', 'rejection'}:
             raise PlannerDecisionError('finish 前未完成 purchase_proposal_tool Proposal 阶段')
 
     def completion_contract(self, tools: Sequence[str]) -> str:
-        if PURCHASE_PROPOSAL_TOOL_NAME not in tools:
+        if PURCHASE_PROPOSAL_TOOL_NAME in tools:
+            return (
+                '采购任务完成判断补充规则：\n'
+                f'- {PURCHASE_PROPOSAL_TOOL_NAME} 只生成待确认草稿或确定性澄清/拒绝结果，'
+                '不执行业务写操作；成功后应选择 finish，让程序进入用户确认链路。'
+            )
+        prerequisite_tools = [
+            name for name in (PURCHASE_BUDGET_TOOL_NAME, PURCHASE_POLICY_TOOL_NAME)
+            if name in tools
+        ]
+        if not prerequisite_tools:
             return ''
         return (
             '采购任务完成判断补充规则：\n'
-            f'- {PURCHASE_PROPOSAL_TOOL_NAME} 只生成待确认草稿或确定性澄清/拒绝结果，'
-            '不执行业务写操作；成功后应选择 finish，让程序进入用户确认链路。'
+            f'- {"、".join(prerequisite_tools)} 当前仍处于采购申请前置事实阶段；当前可见前置 Tool '
+            '成功不代表采购申请已完成，不得直接 finish，应继续从当前合法能力清单完成剩余步骤。'
         )
 
     def postprocess_decision(
@@ -1192,11 +1200,13 @@ class DomainProviderRegistry:
             ),
             'finish 前未完成 expense_proposal_tool Proposal 阶段': (
                 'planner_completion_validation', 'expense_proposal_missing',
-                '当前用户目标包含报销申请，但尚未完成 expense_proposal_tool；请继续规划剩余目标。',
+                '当前报销申请尚未达到合法完成状态；不得 finish；下一步必须输出 '
+                'action="tool"，并从当前合法能力清单选择尚未成功的 prerequisite Tool。',
             ),
             'finish 前未完成 purchase_proposal_tool Proposal 阶段': (
                 'planner_completion_validation', 'purchase_proposal_missing',
-                '当前用户目标包含采购申请，但尚未完成 purchase_proposal_tool；请继续规划剩余目标。',
+                '当前采购申请尚未达到合法完成状态；不得 finish；下一步必须输出 '
+                'action="tool"，并从当前合法能力清单选择尚未成功的 prerequisite Tool。',
             ),
             _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE: (
                 'planner_completion_validation', 'structured_tool_business_failure',

@@ -22,6 +22,7 @@ from app.schemas.planner_schema import (
     PURCHASE_BUDGET_TOOL_NAME,
     PURCHASE_POLICY_TOOL_NAME,
     PURCHASE_PROPOSAL_TOOL_NAME,
+    PlannerDecision,
 )
 from app.tools.enterprise_tools import (
     purchase_budget_tool,
@@ -203,6 +204,10 @@ def _finish(answer: str) -> str:
     return json.dumps({
         'action': 'finish', 'answer': answer, 'reason_code': 'task_complete',
     }, ensure_ascii=False)
+
+
+def _finish_decision(answer: str = '已完成。') -> PlannerDecision:
+    return PlannerDecision.model_validate(json.loads(_finish(answer)))
 
 
 def _purchase_state(**changes) -> dict:
@@ -408,6 +413,96 @@ def test_executor_second_gate_rejects_purchase_proposal_without_fresh_facts():
     result = tool_executor_node(checkpoint_safe_state(state), runtime_for_state(state))
     assert result['stop_reason'] == 'purchase_prerequisite_missing'
     assert result['tool_call_count'] == 0
+
+
+def _purchase_completion_item(payload: dict) -> dict:
+    return {
+        'tool_name': PURCHASE_PROPOSAL_TOOL_NAME,
+        'arguments': {},
+        'status': 'success',
+        'observation': json.dumps(payload, ensure_ascii=False),
+    }
+
+
+def _purchase_completion_context(history: tuple[dict, ...]) -> DomainContext:
+    return DomainContext(
+        question=PURCHASE_QUESTION,
+        tool_history=history,
+        purchase_item='MacBook Pro',
+        purchase_budget='6800',
+        purchase_justification='开发工作',
+        step_count=1,
+    )
+
+
+@pytest.mark.parametrize(
+    ('tools', 'history'),
+    [
+        ([PURCHASE_BUDGET_TOOL_NAME], ()),
+        (
+            [PURCHASE_POLICY_TOOL_NAME],
+            ({
+                'tool_name': PURCHASE_BUDGET_TOOL_NAME,
+                'status': 'success',
+                'observation': json.dumps({
+                    'success': True, 'available_budget': '20000.00',
+                }),
+            },),
+        ),
+        (
+            [PURCHASE_PROPOSAL_TOOL_NAME],
+            (
+                {
+                    'tool_name': PURCHASE_BUDGET_TOOL_NAME,
+                    'status': 'success',
+                    'observation': json.dumps({
+                        'success': True, 'available_budget': '20000.00',
+                    }),
+                },
+                {
+                    'tool_name': PURCHASE_POLICY_TOOL_NAME,
+                    'status': 'success',
+                    'observation': json.dumps({
+                        'success': True, 'policy_result': 'PASS',
+                    }),
+                },
+            ),
+        ),
+    ],
+)
+def test_purchase_finish_is_rejected_before_successful_proposal(tools, history):
+    with pytest.raises(ValueError, match='purchase_proposal_tool'):
+        PurchaseProvider().validate_completion(
+            _finish_decision(),
+            tools,
+            _purchase_completion_context(history),
+        )
+
+
+def test_purchase_completion_contract_warns_when_proposal_is_hidden():
+    contract = PurchaseProvider().completion_contract([
+        PURCHASE_BUDGET_TOOL_NAME, PURCHASE_POLICY_TOOL_NAME,
+    ])
+
+    assert '采购申请前置事实阶段' in contract
+    assert '不得直接 finish' in contract
+    assert PURCHASE_PROPOSAL_TOOL_NAME not in contract
+
+
+@pytest.mark.parametrize('kind', ['proposal', 'clarification', 'rejection'])
+def test_purchase_successful_proposal_kinds_still_allow_finish(kind):
+    PurchaseProvider().validate_completion(
+        _finish_decision('已处理。'),
+        [PURCHASE_PROPOSAL_TOOL_NAME],
+        _purchase_completion_context((
+            _purchase_completion_item({
+                'success': True,
+                'kind': kind,
+                'action_proposal': {'action_type': 'PURCHASE_REQUEST'}
+                if kind == 'proposal' else None,
+            }),
+        )),
+    )
 
 
 def test_purchase_planner_executor_proposal_loop_reaches_confirmable_result():

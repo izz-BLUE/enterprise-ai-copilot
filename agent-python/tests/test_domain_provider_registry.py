@@ -411,6 +411,42 @@ def test_expense_proposal_still_allows_finish():
     )
 
 
+@pytest.mark.parametrize(
+    ('tools', 'history'),
+    [
+        ([TRAVEL_RECORD_TOOL_NAME], tuple(_history())),
+        ([TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME], tuple(_history())),
+        ([TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME], tuple(_history('INV-1'))),
+        (
+            [TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+            tuple(_history('INV-1', 'INV-2')),
+        ),
+    ],
+)
+def test_expense_finish_is_rejected_without_business_successful_proposal(tools, history):
+    with pytest.raises(ValueError, match='expense_proposal_tool'):
+        ExpenseProvider().validate_completion(
+            _finish_decision(),
+            tools,
+            DomainContext(
+                question=QUESTION,
+                request_expense_reason='客户拜访',
+                tool_history=history,
+            ),
+        )
+
+
+def test_expense_completion_contract_warns_when_prerequisite_tools_are_visible():
+    contract = ExpenseProvider().completion_contract([
+        RAG_TOOL_NAME, TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME,
+    ])
+
+    assert '报销申请 prerequisite 阶段' in contract
+    assert '当前可见依赖 Tool 成功不代表整个报销申请已完成' in contract
+    assert '不得直接 finish' in contract
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in contract
+
+
 def _completion_item(tool_name: str, payload: dict) -> dict:
     return {
         'tool_name': tool_name,
