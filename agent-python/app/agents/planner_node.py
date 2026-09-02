@@ -659,6 +659,23 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         step_count=step_count,
     )
     try:
+        resolved_provider = DOMAIN_PROVIDER_REGISTRY.resolve(domain_context)
+        if (
+            not allow_business_actions
+            and resolved_provider is not None
+            and resolved_provider.capability_tools
+        ):
+            # 业务 intent 与 capability 都由程序层确定；未授权时无需让
+            # Planner 猜测一个当前不可见的 Proposal Tool。
+            return _decision_result(
+                state,
+                _refuse_decision(
+                    '业务动作功能未启用，或当前请求无执行权限。',
+                    'not_allowed',
+                ),
+                'not_allowed',
+                category='business_action',
+            )
         current_visible_tools = DOMAIN_PROVIDER_REGISTRY.legal_tools(
             current_visible_tools, domain_context
         )

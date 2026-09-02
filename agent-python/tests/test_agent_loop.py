@@ -69,6 +69,81 @@ class TestAcceptanceScenario:
         assert 'final_pass_rate' in result['observation']
         assert [e['status'] for e in result['tool_history']] == ['success', 'success']
 
+
+class TestUnauthorizedBusinessIntentPreflight:
+    @staticmethod
+    def _assert_refused_without_planner(result, llm):
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['route'] == 'refuse'
+        assert result['category'] == 'business_action'
+        assert result['tool_call_count'] == 0
+        assert result['action_proposal'] is None
+        llm.assert_not_called()
+
+    def test_leave_action_is_refused_before_planner_without_permission(self):
+        with patch('app.agents.planner_node.call_llm') as llm:
+            result = run_langgraph_agent(
+                '我想请明天一天年假，原因是个人安排。',
+                allow_business_actions=False,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        self._assert_refused_without_planner(result, llm)
+
+    def test_expense_action_is_refused_before_planner_without_permission(self):
+        with patch('app.agents.planner_node.call_llm') as llm:
+            result = run_langgraph_agent(
+                '帮我根据最近一次出差准备报销。',
+                allow_business_actions=False,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        self._assert_refused_without_planner(result, llm)
+
+    def test_knowledge_questions_are_not_rejected_by_business_preflight(self):
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                _tool('rag_answer_tool', {'question': '年假能请几天？'}, 'need_knowledge'),
+                _finish('年假制度：入职满1年5天。'),
+        ]) as llm, \
+             patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
+            result = run_langgraph_agent(
+                '年假能请几天？',
+                allow_business_actions=False,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'rag'
+        assert llm.call_count == 2
+        assert rag.invoke.call_count == 1
+
+    def test_expense_knowledge_question_is_not_rejected_by_business_preflight(self):
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                _tool('rag_answer_tool', {'question': '报销流程是什么？'}, 'need_knowledge'),
+                _finish('报销流程：提交申请后由负责人审批。'),
+        ]) as llm, \
+             patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
+            result = run_langgraph_agent(
+                '公司的报销流程是什么？',
+                allow_business_actions=False,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'rag'
+        assert llm.call_count == 2
+        assert rag.invoke.call_count == 1
+
     def test_eval_denied_in_loop(self):
         """allow_eval=False 时即使 Planner 硬输出 eval 决策也被拒绝并终止。"""
         decisions = [

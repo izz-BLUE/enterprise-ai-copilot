@@ -345,12 +345,14 @@ class TestProposalToolPath:
     def test_proposal_tool_denied_without_business_permission(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:
             result = planner_node(state(allow_business_actions=False,
+                                        question='申请2026-09-01一天年假，原因为私事',
                                         employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
-        llm.assert_called_once()
+        llm.assert_not_called()
         assert result['planner_decision']['action'] == 'refuse'
-        assert result['planner_decision']['reason_code'] == 'cannot_complete'
-        assert result['stop_reason'] == 'invalid_decision'
+        assert result['planner_decision']['reason_code'] == 'not_allowed'
+        assert result['stop_reason'] == 'not_allowed'
+        assert result['category'] == 'business_action'
 
     def test_proposal_tool_denied_without_business_date(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:

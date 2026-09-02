@@ -17,7 +17,6 @@ Proposal 业务字段。
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, Literal
 
@@ -26,6 +25,9 @@ from pydantic import BaseModel, ConfigDict
 # 报销意图动作词（"报销""报账""报销一下"）。咨询句（"报销流程是什么"）由
 # Planner 路由到 rag_answer_tool，不会进入 proposal 链路。
 _CLAIM_PATTERN = re.compile(r"(?:报销|报账|报一下|帮我报|帮我把[^，。！？\n]*报)")
+# 已有 Expense 状态 Tool 以 EXP-* 报销单号查询；这类已存在单据引用不是
+# 新建报销申请 intent，避免被业务 Proposal capability preflight 拦截。
+_EXPENSE_ID_PATTERN = re.compile(r"EXP-[0-9A-Za-z-]+")
 
 _QUERY_NOISE_EXPRESSIONS = (
     "流程", "制度", "规定", "政策", "标准", "多少", "怎么", "如何",
@@ -61,6 +63,8 @@ class ExpenseInputAnalysis(BaseModel):
 
 def is_expense_claim_intent(question: str) -> bool:
     normalized = question.strip()
+    if _EXPENSE_ID_PATTERN.search(normalized) is not None:
+        return False
     if _CLAIM_PATTERN.search(normalized) is None:
         return False
     if any(expression in normalized for expression in _QUERY_NOISE_EXPRESSIONS):
