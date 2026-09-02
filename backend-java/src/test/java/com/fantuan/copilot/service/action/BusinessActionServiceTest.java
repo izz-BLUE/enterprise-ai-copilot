@@ -202,7 +202,8 @@ class BusinessActionServiceTest {
         BusinessActionService service = new BusinessActionService(properties,
                 new AdminAccessService(ADMIN), actions, registry,
                 new ActionNonceService(), mock(AiTaskMemoryService.class),
-                new com.fantuan.copilot.adminlog.AdminLogBuffer(), clock);
+                new com.fantuan.copilot.adminlog.AdminLogBuffer(), clock,
+                mock(com.fantuan.copilot.service.task.TaskRuntimeService.class));
         return new Fixture(properties, actions, accounts, gateway, service);
     }
 

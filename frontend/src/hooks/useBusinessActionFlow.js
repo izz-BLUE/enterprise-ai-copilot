@@ -11,6 +11,7 @@ import {
   phaseForTerminalStatus,
 } from '../domain/actionState'
 import { MAX_MESSAGES } from '../services/chatHistoryStorage'
+import { isRetryableServerError } from '../services/httpErrorPolicy'
 
 export function isSupportedPendingAction(action) {
   // V2 §二十五：受控业务动作白名单（年假 + 报销）
@@ -228,8 +229,7 @@ export default function useBusinessActionFlow({
         ? requestError
         : new BusinessActionApiError({ message: '业务操作未完成，请稍后重试。' })
       const retryable = RETRYABLE_ACTION_ERRORS.has(safeError.errorCode)
-        || safeError.httpStatus === 502
-        || safeError.httpStatus === 503
+        || isRetryableServerError(safeError.httpStatus)
       const errorCodeStatus = safeError.errorCode === 'ACTION_EXPIRED' ? 'EXPIRED' : null
       const responseStatus = typeof safeError.status === 'string'
         && AUTHORITATIVE_TERMINAL_STATUSES.has(safeError.status)

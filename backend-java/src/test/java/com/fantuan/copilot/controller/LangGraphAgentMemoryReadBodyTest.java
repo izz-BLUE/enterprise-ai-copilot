@@ -78,7 +78,7 @@ class LangGraphAgentMemoryReadBodyTest {
         admin = mock(AdminAccessService.class);
         actionService = mock(BusinessActionService.class);
         memoryService = mock(AiTaskMemoryService.class);
-        controller = new LangGraphAgentController(
+        controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService,
                 new IdentityContext(), memoryService,

@@ -79,51 +79,7 @@ public class BusinessActionHitlCoordinator {
         this.expenseRevalidation = expenseRevalidation;
         this.handlerRegistry = handlerRegistry;
         this.taskRuntimeService = taskRuntimeService;
-        this.memoryCoordinator = memoryService == null ? null : new AgentMemoryCoordinator(memoryService);
-    }
-
-    /** 兼容不执行报销重新校验的聚焦测试的构造方法。 */
-    public BusinessActionHitlCoordinator(BusinessActionService actionService,
-                                         PendingActionRepository actions,
-                                         PythonAgentGateway pythonAgentGateway,
-                                         AgentRuntimeThreadIdService threadIdService,
-                                         AgentRuntimeThreadExecutionGuard threadGuard,
-                                         AdminAccessService adminAccessService,
-                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator) {
-        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, null,
-                new BusinessActionHandlerRegistry(java.util.List.of()), null, null);
-    }
-
-    /** 兼容执行报销重新校验的测试的构造方法。 */
-    public BusinessActionHitlCoordinator(BusinessActionService actionService,
-                                         PendingActionRepository actions,
-                                         PythonAgentGateway pythonAgentGateway,
-                                         AgentRuntimeThreadIdService threadIdService,
-                                         AgentRuntimeThreadExecutionGuard threadGuard,
-                                         AdminAccessService adminAccessService,
-                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
-                                         ExpenseConfirmRevalidationService expenseRevalidation) {
-        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
-                new BusinessActionHandlerRegistry(java.util.List.of()), null, null);
-    }
-
-    /** 兼容既有 Task Runtime 聚焦测试的构造方法。 */
-    public BusinessActionHitlCoordinator(BusinessActionService actionService,
-                                         PendingActionRepository actions,
-                                         PythonAgentGateway pythonAgentGateway,
-                                         AgentRuntimeThreadIdService threadIdService,
-                                         AgentRuntimeThreadExecutionGuard threadGuard,
-                                         AdminAccessService adminAccessService,
-                                         ExpenseExternalApprovalCoordinator externalApprovalCoordinator,
-                                         ExpenseConfirmRevalidationService expenseRevalidation,
-                                         TaskRuntimeService taskRuntimeService,
-                                         AiTaskMemoryService memoryService) {
-        this(actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, expenseRevalidation,
-                new BusinessActionHandlerRegistry(java.util.List.of()), taskRuntimeService,
-                memoryService);
+        this.memoryCoordinator = new AgentMemoryCoordinator(memoryService);
     }
 
     /**
@@ -148,8 +104,7 @@ public class BusinessActionHitlCoordinator {
                 || action.ownerUserId() == null || action.conversationId() == null) {
             return true;
         }
-        TaskExecution task = taskRuntimeService == null ? null
-                : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
+        TaskExecution task = taskRuntimeService.findByActionId(action.actionId()).orElse(null);
         if (task != null) {
             // 过期处理和 TaskExecution 终态化由 BusinessActionService 一起提交。
             // Python 只负责尽力而为的 checkpoint 清理，不能阻断下一任务。
@@ -200,7 +155,7 @@ public class BusinessActionHitlCoordinator {
                 actionService.abandonMemoryAfterHitlRejection(
                         identity, conversationId);
                 PendingActionView successorPendingAction = null;
-                if (taskId != null && taskRuntimeService != null) {
+                if (taskId != null) {
                     taskRuntimeService.markTerminal(taskId, TaskExecutionStatus.FAILED);
                     tryResumeRejected(wait, identity, conversationId,
                             presentedToken, originTraceId, taskId);
@@ -216,6 +171,95 @@ public class BusinessActionHitlCoordinator {
                         exception, successorPendingAction);
             }
             throw exception;
+        }
+    }
+
+    /**
+     * 处理一个已经由 Java 准入并启动的 Task Runtime 的 Python 结果。
+     * Controller 和 successor continuation 共用这一条状态迁移路径；终态任务的
+     * successor 也由本 coordinator 继续启动。
+     */
+    public PendingActionView handleTaskRuntimeResponse(TaskExecution task,
+                                                       PythonAgentResponse response,
+                                                       VerifiedIdentity identity,
+                                                       String presentedToken,
+                                                       String traceId,
+                                                       boolean persistMemory) {
+        return applyTaskRuntimeResponse(task, response, identity, presentedToken,
+                traceId, false, persistMemory);
+    }
+
+    private PendingActionView applyTaskRuntimeResponse(TaskExecution task,
+                                                       PythonAgentResponse response,
+                                                       VerifiedIdentity identity,
+                                                       String presentedToken,
+                                                       String traceId,
+                                                       boolean successor,
+                                                       boolean persistMemory) {
+        if (task == null) {
+            throw new TaskRuntimeException("Task Runtime 任务为空。 ");
+        }
+        if (response == null) {
+            throw new TaskRuntimeException("Task Runtime Agent 响应为空。 ");
+        }
+        if (successor && response.externalWait() != null) {
+            throw new TaskRuntimeException("Task Runtime 新任务返回了不允许的 external wait。 ");
+        }
+        if (response.hitlWait() != null && response.actionProposal() == null) {
+            throw new TaskRuntimeException("Task Runtime HITL wait 缺少业务 Proposal。 ");
+        }
+        if (response.hitlWait() != null && !response.hitlWait().structurallyValid()) {
+            throw new TaskRuntimeException("Task Runtime HITL wait 上下文无效。 ");
+        }
+
+        if (response.actionProposal() != null) {
+            if (!taskRuntimeService.matchesTaskType(task,
+                    handlerRegistry.taskTypeFor(response.actionProposal().actionType())
+                            .orElseThrow(() -> new TaskRuntimeException(
+                                    "Task Runtime Proposal action type 不受支持。")))
+                    || (successor && response.hitlWait() == null)) {
+                throw new TaskRuntimeException("Task Runtime Proposal 与任务关联不匹配。 ");
+            }
+            PendingActionView pending = response.hitlWait() == null
+                    ? actionService.createPending(response.actionProposal(), traceId, presentedToken,
+                    identity, task.conversationId())
+                    : registerWait(response.actionProposal(), response.hitlWait(), traceId,
+                    presentedToken, identity, task.conversationId(), task.taskId());
+            if (pending == null || !taskRuntimeService.markWaitingUser(
+                    task.taskId(), pending.actionId())) {
+                throw new TaskRuntimeException("Task Runtime PendingAction 关联失败。 ");
+            }
+            if (persistMemory) {
+                persistTaskMemory(response, identity, task.conversationId(), traceId, successor);
+            }
+            return pending;
+        }
+
+        if (response.missingFields() != null && !response.missingFields().isEmpty()) {
+            if (!taskRuntimeService.markWaitingClarification(task.taskId())) {
+                throw new TaskRuntimeException("Task Runtime clarification 状态冲突。 ");
+            }
+            if (persistMemory) {
+                persistTaskMemory(response, identity, task.conversationId(), traceId, successor);
+            }
+            return null;
+        }
+
+        if (!taskRuntimeService.markTerminal(task.taskId(), TaskExecutionStatus.FAILED)) {
+            throw new TaskRuntimeException("Task Runtime 任务未产生可执行结果。 ");
+        }
+        memoryCoordinator.abandon(identity.userId(), task.conversationId(), traceId);
+        return successor ? null : startNextTask(task, identity, presentedToken, traceId);
+    }
+
+    private void persistTaskMemory(PythonAgentResponse response, VerifiedIdentity identity,
+                                   String conversationId, String traceId, boolean successor) {
+        if (successor) {
+            memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
+                    conversationId, traceId);
+        } else {
+            memoryCoordinator.persist(response.memoryProposal(), identity.userId(),
+                    conversationId, traceId);
         }
     }
 
@@ -277,8 +321,7 @@ public class BusinessActionHitlCoordinator {
                                                       String confirmationNonce,
                                                       String presentedToken, String traceId,
                                                       VerifiedIdentity identity) {
-        if (expenseRevalidation == null
-                || routing.actionType() != BusinessActionType.EXPENSE_CLAIM
+        if (routing.actionType() != BusinessActionType.EXPENSE_CLAIM
                 || routing.status() != ActionStatus.PENDING_CONFIRMATION) {
             return;
         }
@@ -390,8 +433,7 @@ public class BusinessActionHitlCoordinator {
                                                           String traceId,
                                                           String guardKey) {
         PendingAction action = actions.find(actionId).orElse(routing);
-        TaskExecution task = taskRuntimeService == null ? null
-                : taskRuntimeService.findByActionId(actionId).orElse(null);
+        TaskExecution task = taskRuntimeService.findByActionId(actionId).orElse(null);
         if (task != null) {
             return reconcileTaskRuntimeAction(task, action, response, identity,
                     presentedToken, traceId, guardKey);
@@ -498,7 +540,7 @@ public class BusinessActionHitlCoordinator {
                                              VerifiedIdentity identity,
                                              String presentedToken,
                                              String traceId) {
-        if (current == null || taskRuntimeService == null) {
+        if (current == null) {
             return null;
         }
         Optional<TaskExecution> next = taskRuntimeService.startNextRunnable(current.taskGroupId());
@@ -509,53 +551,8 @@ public class BusinessActionHitlCoordinator {
         try {
             PythonAgentResponse response = postTaskRuntimeChat(task, identity,
                     presentedToken, traceId);
-            if (response == null || response.externalWait() != null) {
-                throw new TaskRuntimeException("Task Runtime 新任务返回了不允许的 external wait。 ");
-            }
-            if (response.hitlWait() != null && response.actionProposal() == null) {
-                throw new TaskRuntimeException("Task Runtime HITL wait 缺少业务 Proposal。 ");
-            }
-            if (response.hitlWait() != null && !response.hitlWait().structurallyValid()) {
-                throw new TaskRuntimeException("Task Runtime HITL wait 上下文无效。 ");
-            }
-            if (response.actionProposal() != null) {
-                if (!taskRuntimeService.matchesTaskType(task,
-                        handlerRegistry.taskTypeFor(response.actionProposal().actionType())
-                                .orElseThrow(() -> new TaskRuntimeException(
-                                        "Task Runtime Proposal action type 不受支持。")))
-                        || response.hitlWait() == null) {
-                    throw new TaskRuntimeException("Task Runtime Proposal 与任务关联不匹配。 ");
-                }
-                PendingActionView pending = registerWait(response.actionProposal(),
-                        response.hitlWait(), traceId, presentedToken, identity,
-                        task.conversationId(), task.taskId());
-                if (pending == null || !taskRuntimeService.markWaitingUser(
-                        task.taskId(), pending.actionId())) {
-                    throw new TaskRuntimeException("Task Runtime 下一任务 PendingAction 关联失败。 ");
-                }
-                if (memoryCoordinator != null) {
-                    memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
-                            task.conversationId(), traceId);
-                }
-                return pending;
-            }
-            if (response.missingFields() != null && !response.missingFields().isEmpty()) {
-                if (!taskRuntimeService.markWaitingClarification(task.taskId())) {
-                    throw new TaskRuntimeException("Task Runtime clarification 状态冲突。 ");
-                }
-                if (memoryCoordinator != null) {
-                    memoryCoordinator.persistForNextTask(response.memoryProposal(), identity.userId(),
-                            task.conversationId(), traceId);
-                }
-                return null;
-            }
-            if (!taskRuntimeService.markTerminal(task.taskId(), TaskExecutionStatus.FAILED)) {
-                throw new TaskRuntimeException("Task Runtime 下一任务未产生可执行结果。 ");
-            }
-            if (memoryCoordinator != null) {
-                memoryCoordinator.abandon(identity.userId(), task.conversationId(), traceId);
-            }
-            return null;
+            return applyTaskRuntimeResponse(task, response, identity, presentedToken,
+                    traceId, true, true);
         } catch (TaskRuntimeRegistrationRejectionException exception) {
             // successor 已经被确定性地置为终态；重新入队会把业务拒绝变成启动
             // 失败，并可能在下一次 Chat 中产生重复 Proposal。
@@ -688,8 +685,7 @@ public class BusinessActionHitlCoordinator {
                 1, action.hitlWaitId(), action.agentExecutionId(), decision,
                 action.actionId(), action.actionType(), status, requestId,
                 canonicalMessage(action, status, message));
-        TaskExecution task = taskRuntimeService == null ? null
-                : taskRuntimeService.findByActionId(action.actionId()).orElse(null);
+        TaskExecution task = taskRuntimeService.findByActionId(action.actionId()).orElse(null);
         if (task != null) {
             tryResume(action, identity, presentedToken, traceId, payload);
             // action service 已在同一事务中提交对应的 TaskExecution 终态。
@@ -791,8 +787,8 @@ public class BusinessActionHitlCoordinator {
                                            String conversationId,
                                            String presentedToken, String traceId,
                                            HitlResumePayload payload) {
-        TaskExecution task = taskRuntimeService == null || payload.actionId() == null ? null
-                : taskRuntimeService.findByActionId(payload.actionId()).orElse(null);
+        TaskExecution task = payload.actionId() == null
+                ? null : taskRuntimeService.findByActionId(payload.actionId()).orElse(null);
         String runtimeThreadId = task == null
                 ? threadIdService.generate(ownerUserId, conversationId)
                 : threadIdService.generate(ownerUserId, conversationId, task.taskId());

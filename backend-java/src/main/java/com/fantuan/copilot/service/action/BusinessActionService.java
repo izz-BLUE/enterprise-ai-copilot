@@ -59,19 +59,6 @@ public class BusinessActionService {
     private final TaskRuntimeService taskRuntimeService;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    /** 兼容不使用 Task Runtime 的聚焦测试的构造方法。 */
-    public BusinessActionService(BusinessActionProperties properties,
-                                 AdminAccessService adminAccessService,
-                                 PendingActionRepository actions,
-                                 BusinessActionHandlerRegistry handlerRegistry,
-                                 ActionNonceService nonceService,
-                                 AiTaskMemoryService memoryService,
-                                 AdminLogBuffer adminLogBuffer,
-                                 Clock clock) {
-        this(properties, adminAccessService, actions, handlerRegistry, nonceService,
-                memoryService, adminLogBuffer, clock, null);
-    }
-
     @Autowired
     public BusinessActionService(BusinessActionProperties properties,
                                  AdminAccessService adminAccessService,
@@ -507,7 +494,7 @@ public class BusinessActionService {
     }
 
     private void synchronizeTaskRuntime(PendingAction action, TaskExecutionStatus target) {
-        if (taskRuntimeService == null || action == null) {
+        if (action == null) {
             return;
         }
         if (!taskRuntimeService.synchronizeBusinessStatus(action.actionId(), target)) {
@@ -516,7 +503,7 @@ public class BusinessActionService {
     }
 
     private boolean isTaskRuntimeAction(PendingAction action) {
-        return taskRuntimeService != null && action != null
+        return action != null
                 && taskRuntimeService.findByActionId(action.actionId()).isPresent();
     }
 

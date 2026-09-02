@@ -75,7 +75,7 @@ class LangGraphAgentActionMappingTest {
         when(restTemplate.postForEntity(anyString(), any(HttpEntity.class), eq(PythonAgentResponse.class)))
                 .thenReturn(ResponseEntity.ok(python));
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService, identityContext, mock(AiTaskMemoryService.class),
                 new AdminLogBuffer());
@@ -119,7 +119,7 @@ class LangGraphAgentActionMappingTest {
                 .when(memoryService).upsertActiveFromAgent(
                         anyString(), anyString(), any(), any(), any());
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 gateway, mock(AdminAccessService.class), actionService, identityContext,
                 memoryService, new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
@@ -154,7 +154,7 @@ class LangGraphAgentActionMappingTest {
         when(gateway.post(anyString(), any(), any(), eq(PythonAgentResponse.class), anyString()))
                 .thenReturn(python);
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 gateway, mock(AdminAccessService.class), actionService, identityContext,
                 memoryService, new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
@@ -186,7 +186,7 @@ class LangGraphAgentActionMappingTest {
                         "请提供请假原因。", "action", true, "business_action", "", List.of(),
                         true, "python-trace", null, List.of("reason"), null));
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 gateway, mock(AdminAccessService.class), actionService, identityContext,
                 memoryService, new AdminLogBuffer());
         HttpServletRequest request = mock(HttpServletRequest.class);
@@ -205,7 +205,7 @@ class LangGraphAgentActionMappingTest {
         IdentityContext identityContext = mock(IdentityContext.class);
         when(identityContext.require(any())).thenThrow(new ActionException(
                 HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED", "请先登录。", null, null));
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 mock(AdminAccessService.class), mock(BusinessActionService.class),
                 identityContext, mock(AiTaskMemoryService.class),
@@ -258,7 +258,7 @@ class LangGraphAgentActionMappingTest {
                 });
 
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService, identityContext,
                 memoryService,
@@ -317,7 +317,7 @@ class LangGraphAgentActionMappingTest {
                 .thenThrow(new ActionException(HttpStatus.CONFLICT,
                         "ACTION_CONVERSATION_IN_PROGRESS", "当前会话已有待确认的申请。", null, null));
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService, identityContext, memoryService,
                 new AdminLogBuffer());
@@ -365,7 +365,7 @@ class LangGraphAgentActionMappingTest {
                 .thenThrow(new ActionException(HttpStatus.UNPROCESSABLE_ENTITY,
                         "BUSINESS_RULE_VIOLATION", "年假申请参数不完整。", null, null));
 
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                 admin, actionService, identityContext, memoryService,
                 new AdminLogBuffer());
@@ -401,7 +401,7 @@ class LangGraphAgentActionMappingTest {
                         zhangsan, null,
                         List.of(new SimpleGrantedAuthority("ROLE_EMPLOYEE"))));
         try {
-            LangGraphAgentController controller = new LangGraphAgentController(
+            LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                     new PythonAgentGateway(restTemplate, bulkhead, "http://python-agent"),
                     mock(AdminAccessService.class), actionService,
                     new IdentityContext(), mock(AiTaskMemoryService.class),
@@ -467,14 +467,12 @@ class LangGraphAgentActionMappingTest {
                 eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
                 new PythonAgentResponse("请确认", "action", true, "business_action", "",
                         List.of(), true, "trace", proposal, List.of(), memory, wait, null));
-        when(runtime.matchesTaskType(task, TaskType.LEAVE_REQUEST)).thenReturn(true);
-        when(hitl.registerWait(eq(proposal), eq(wait), eq("trace"), eq("admin"),
-                eq(identity), eq("conv-1"), eq("task-1"))).thenReturn(pending);
-        when(runtime.markWaitingUser("task-1", "act-1")).thenReturn(true);
+        when(hitl.handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true))).thenReturn(pending);
 
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
-                new AdminLogBuffer(), threadIds, guard, hitl, runtime, handlerRegistry());
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("trace");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
@@ -483,10 +481,8 @@ class LangGraphAgentActionMappingTest {
                 new ChatRequest("request", "conv-1"), request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        var order = inOrder(runtime, memoryService);
-        order.verify(runtime).markWaitingUser("task-1", "act-1");
-        order.verify(memoryService).upsertActiveFromAgent(identity.userId(), "conv-1",
-                "LEAVE_REQUEST", Map.of("waiting_for", "confirmation"), "等待确认");
+        verify(hitl).handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true));
     }
 
     @Test
@@ -537,14 +533,13 @@ class LangGraphAgentActionMappingTest {
                 eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
                 new PythonAgentResponse("已生成请假申请", "action", true, "business_action", "",
                         List.of(), true, "trace", proposal, List.of(), null, wait, null));
-        when(runtime.matchesTaskType(task, TaskType.LEAVE_REQUEST)).thenReturn(true);
-        when(hitl.registerWait(eq(proposal), eq(wait), eq("trace"), eq("admin"),
-                eq(identity), eq("conv-1"), eq("task-1")))
+        when(hitl.handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true)))
                 .thenThrow(new TaskRuntimeRegistrationRejectionException(rejection, successor));
 
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
-                new AdminLogBuffer(), threadIds, guard, hitl, runtime, handlerRegistry());
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("trace");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
@@ -573,8 +568,8 @@ class LangGraphAgentActionMappingTest {
                 duplicate.getBody().answer());
         verify(gateway, times(1)).post(eq("/agent/langgraph/chat"), any(), any(),
                 eq(PythonAgentResponse.class), eq("trace"));
-        verify(hitl, times(1)).registerWait(eq(proposal), eq(wait), eq("trace"),
-                eq("admin"), eq(identity), eq("conv-1"), eq("task-1"));
+        verify(hitl, times(1)).handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true));
     }
 
     @Test
@@ -586,6 +581,7 @@ class LangGraphAgentActionMappingTest {
         AiTaskMemoryService memoryService = mock(AiTaskMemoryService.class);
         AgentRuntimeThreadIdService threadIds = mock(AgentRuntimeThreadIdService.class);
         AgentRuntimeThreadExecutionGuard guard = mock(AgentRuntimeThreadExecutionGuard.class);
+        BusinessActionHitlCoordinator hitl = mock(BusinessActionHitlCoordinator.class);
         TaskRuntimeService runtime = mock(TaskRuntimeService.class);
         VerifiedIdentity identity = new VerifiedIdentity(
                 "U10001", "zhangsan", "E10001", "张三",
@@ -610,11 +606,13 @@ class LangGraphAgentActionMappingTest {
                 eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
                 new PythonAgentResponse("请补充发票", "action", true, "business_action", "",
                         List.of(), true, "trace", null, List.of("invoice"), memory));
-        when(runtime.markWaitingClarification("task-1")).thenReturn(true);
+        when(hitl.handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true))).thenReturn(null);
 
+        when(hitl.reconcileExpiredBeforeChat(any(), any(), any(), any())).thenReturn(true);
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
-                new AdminLogBuffer(), threadIds, guard, null, runtime);
+                new AdminLogBuffer(), threadIds, guard, hitl, runtime);
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute("traceId")).thenReturn("trace");
         when(request.getHeader("X-Admin-Token")).thenReturn("admin");
@@ -623,9 +621,8 @@ class LangGraphAgentActionMappingTest {
                 new ChatRequest("request", "conv-1"), request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        verify(runtime).markWaitingClarification("task-1");
-        verify(memoryService).upsertActiveFromAgent(identity.userId(), "conv-1",
-                "EXPENSE_CLAIM", Map.of("waiting_for", "invoice"), "等待补充发票");
+        verify(hitl).handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true));
     }
 
     @Test
@@ -664,9 +661,8 @@ class LangGraphAgentActionMappingTest {
                 eq(PythonAgentResponse.class), eq("trace"))).thenReturn(
                 new PythonAgentResponse("无法继续", "action", true, "business_action", "",
                         List.of(), true, "trace", null, List.of(), staleMemory));
-        when(runtime.markTerminal("task-1", TaskExecutionStatus.FAILED)).thenReturn(true);
-        when(hitl.startNextTaskAfterTerminal(task, identity, "admin", "trace"))
-                .thenReturn(null);
+        when(hitl.handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true))).thenReturn(null);
 
         LangGraphAgentController controller = new LangGraphAgentController(
                 gateway, admin, actionService, identityContext, memoryService,
@@ -679,13 +675,8 @@ class LangGraphAgentActionMappingTest {
                 new ChatRequest("request", "conv-1"), request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        verify(memoryService).abandon(identity.userId(), "conv-1");
-        verify(memoryService, never()).upsertActiveFromAgent(
-                anyString(), anyString(), any(), any(), anyString());
-        var order = inOrder(runtime, memoryService, hitl);
-        order.verify(runtime).markTerminal("task-1", TaskExecutionStatus.FAILED);
-        order.verify(memoryService).abandon(identity.userId(), "conv-1");
-        order.verify(hitl).startNextTaskAfterTerminal(task, identity, "admin", "trace");
+        verify(hitl).handleTaskRuntimeResponse(eq(task), any(PythonAgentResponse.class),
+                eq(identity), eq("admin"), eq("trace"), eq(true));
     }
 
     private static BusinessActionHandlerRegistry handlerRegistry() {

@@ -52,6 +52,8 @@ class BusinessActionHitlCoordinatorRevalidationTest {
     @Mock AdminAccessService adminAccessService;
     @Mock ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
     @Mock ExpenseConfirmRevalidationService revalidation;
+    @Mock com.fantuan.copilot.service.task.TaskRuntimeService taskRuntimeService;
+    @Mock com.fantuan.copilot.service.memory.AiTaskMemoryService memoryService;
 
     private BusinessActionHitlCoordinator coordinator;
 
@@ -59,7 +61,9 @@ class BusinessActionHitlCoordinatorRevalidationTest {
     void setUp() {
         coordinator = new BusinessActionHitlCoordinator(
                 actionService, actions, pythonAgentGateway, threadIdService, threadGuard,
-                adminAccessService, externalApprovalCoordinator, revalidation);
+                adminAccessService, externalApprovalCoordinator, revalidation,
+                new BusinessActionHandlerRegistry(java.util.List.of()), taskRuntimeService,
+                memoryService);
         when(threadIdService.generate("user-1", "conversation-1")).thenReturn(THREAD_ID);
         when(threadGuard.tryAcquire(THREAD_ID)).thenReturn(true);
     }

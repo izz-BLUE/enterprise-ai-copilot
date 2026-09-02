@@ -20,11 +20,14 @@ import com.fantuan.copilot.service.AdminAccessService;
 import com.fantuan.copilot.service.action.ActionException;
 import com.fantuan.copilot.service.action.BusinessActionService;
 import com.fantuan.copilot.service.action.BusinessActionHitlCoordinator;
+import com.fantuan.copilot.service.action.BusinessActionHandlerRegistry;
+import com.fantuan.copilot.service.action.ExpenseConfirmRevalidationService;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.action.ExpenseExternalApprovalCoordinator;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import com.fantuan.copilot.dto.action.HitlResumePayload;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,6 +69,8 @@ class LangGraphAgentControllerThreadGuardTest {
     private IdentityContext identityContext;
     private AiTaskMemoryService memoryService;
     private AgentRuntimeThreadExecutionGuard guard;
+    private BusinessActionHitlCoordinator hitlCoordinator;
+    private TaskRuntimeService taskRuntimeService;
     private LangGraphAgentController controller;
 
     @BeforeEach
@@ -76,6 +81,8 @@ class LangGraphAgentControllerThreadGuardTest {
         identityContext = mock(IdentityContext.class);
         memoryService = mock(AiTaskMemoryService.class);
         guard = new AgentRuntimeThreadExecutionGuard();
+        hitlCoordinator = mock(BusinessActionHitlCoordinator.class);
+        taskRuntimeService = mock(TaskRuntimeService.class);
 
         when(identityContext.require(any())).thenReturn(new VerifiedIdentity(
                 USER_ID, "user", "E10001", "Test User",
@@ -84,11 +91,13 @@ class LangGraphAgentControllerThreadGuardTest {
         when(adminAccessService.isAdminIdentity(any(VerifiedIdentity.class))).thenReturn(false);
         when(businessActionService.isAllowed(eq(ADMIN_TOKEN), any(VerifiedIdentity.class))).thenReturn(false);
         when(businessActionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 27));
+        when(hitlCoordinator.reconcileExpiredBeforeChat(any(), any(), any(), any())).thenReturn(true);
+        when(taskRuntimeService.reconcile(anyString(), anyString())).thenReturn(Optional.empty());
 
         controller = new LangGraphAgentController(
                 pythonAgentGateway, adminAccessService, businessActionService,
                 identityContext, memoryService, new AdminLogBuffer(),
-                threadIdService, guard);
+                threadIdService, guard, hitlCoordinator, taskRuntimeService);
     }
 
     @Test
@@ -203,11 +212,13 @@ class LangGraphAgentControllerThreadGuardTest {
         PendingActionRepository actions = mock(PendingActionRepository.class);
         BusinessActionHitlCoordinator coordinator = new BusinessActionHitlCoordinator(
                 businessActionService, actions, pythonAgentGateway, threadIdService,
-                guard, adminAccessService, mock(ExpenseExternalApprovalCoordinator.class));
+                guard, adminAccessService, mock(ExpenseExternalApprovalCoordinator.class),
+                mock(ExpenseConfirmRevalidationService.class),
+                new BusinessActionHandlerRegistry(List.of()), taskRuntimeService, memoryService);
         LangGraphAgentController controllerWithHitl = new LangGraphAgentController(
                 pythonAgentGateway, adminAccessService, businessActionService,
                 identityContext, memoryService, new AdminLogBuffer(),
-                threadIdService, guard, coordinator);
+                threadIdService, guard, coordinator, taskRuntimeService);
 
         doAnswer(invocation -> {
             assertFalse(guard.tryAcquire(threadId()));

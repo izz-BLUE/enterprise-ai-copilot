@@ -67,7 +67,7 @@ class ControllerConcurrencyTest {
         HttpServletRequest servletRequest = requestWithTraceId("trace-agent");
         BusinessActionService actionService = mock(BusinessActionService.class);
         when(actionService.businessDate()).thenReturn(java.time.LocalDate.of(2026, 8, 24));
-        LangGraphAgentController controller = new LangGraphAgentController(
+        LangGraphAgentController controller = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(mock(RestTemplate.class), bulkhead, "http://python-agent"),
                 mock(AdminAccessService.class),
                 actionService, new IdentityContext(),

@@ -73,21 +73,6 @@ public class ExpenseExternalResumeCoordinator {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** 兼容聚焦单元测试的构造方法。 */
-    public ExpenseExternalResumeCoordinator(
-            ExpenseClaimRepository claims,
-            PendingActionRepository actions,
-            PythonAgentGateway pythonAgentGateway,
-            BusinessActionService actionService,
-            AgentRuntimeThreadIdService threadIdService,
-            AgentRuntimeThreadExecutionGuard threadGuard,
-            TransactionOperations transactions,
-            long retryIntervalMillis,
-            Clock clock) {
-        this(claims, actions, pythonAgentGateway, actionService, threadIdService,
-                threadGuard, transactions, retryIntervalMillis, clock, null);
-    }
-
     /** 对一个本地 ExpenseClaim 立即投递或执行重试投递。 */
     public void tryResume(String expenseId) {
         if (expenseId == null || expenseId.isBlank()) {
@@ -226,7 +211,7 @@ public class ExpenseExternalResumeCoordinator {
     }
 
     private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
-        return taskRuntimeService != null && claim != null
+        return claim != null
                 && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 

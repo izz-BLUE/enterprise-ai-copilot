@@ -69,3 +69,35 @@ test('403 和 Mock OA 超时返回明确的安全错误', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+test('502、503、504 统一返回暂时不可用，500 保留通用错误', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    for (const status of [502, 503, 504]) {
+      globalThis.fetch = async () => new Response(JSON.stringify({ errorCode: 'UPSTREAM_ERROR' }), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      await assert.rejects(
+        () => listMockOaApprovals({ accessToken: 'jwt-token' }),
+        error => error instanceof MockOaApprovalApiError
+          && error.httpStatus === status
+          && error.message === '模拟 OA 暂时不可用，请稍后重试。',
+      )
+    }
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ errorCode: 'INTERNAL_ERROR' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    await assert.rejects(
+      () => listMockOaApprovals({ accessToken: 'jwt-token' }),
+      error => error instanceof MockOaApprovalApiError
+        && error.httpStatus === 500
+        && error.message === '模拟 OA 请求未完成，请稍后重试。',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

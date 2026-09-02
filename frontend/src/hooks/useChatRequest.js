@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { AuthExpiredError, RequestTimeoutError, authenticatedFetch } from '../services/authApi'
 import { isTerminalActionStatus, MAX_MESSAGES } from '../services/chatHistoryStorage'
+import { isRetryableServerError } from '../services/httpErrorPolicy'
 import { initialActionUi, isSupportedPendingAction } from './useBusinessActionFlow'
 
 const newMessageId = () => crypto.randomUUID()
@@ -108,7 +109,7 @@ export default function useChatRequest({
       } else if (requestError instanceof TypeError) {
         setError('无法连接到 Java 后端，请确认服务已启动。')
       } else if (requestError?.type === 'http_error') {
-        setError(requestError.status === 502 || requestError.status === 504
+        setError(isRetryableServerError(requestError.status)
           ? 'AI 服务暂时不可用，请稍后重试。'
           : `服务返回错误（HTTP ${requestError.status}）`)
       } else if (requestError?.type === 'parse_error') {

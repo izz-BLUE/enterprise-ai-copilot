@@ -12,6 +12,7 @@ import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadExecutionGuard;
 import com.fantuan.copilot.service.agent.AgentRuntimeThreadIdService;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -62,6 +63,7 @@ class ExpenseExternalResumeCoordinatorTest {
     @Mock BusinessActionService actionService;
     @Mock AgentRuntimeThreadIdService threadIdService;
     @Mock AgentRuntimeThreadExecutionGuard threadGuard;
+    @Mock TaskRuntimeService taskRuntimeService;
     private ExpenseExternalResumeCoordinator coordinator;
 
     @BeforeEach
@@ -69,7 +71,7 @@ class ExpenseExternalResumeCoordinatorTest {
         coordinator = new ExpenseExternalResumeCoordinator(
                 claims, actions, pythonAgentGateway, actionService, threadIdService,
                 threadGuard, new TransactionTemplate(new NoopTransactionManager()),
-                60000, Clock.fixed(NOW, ZoneOffset.UTC));
+                60000, Clock.fixed(NOW, ZoneOffset.UTC), taskRuntimeService);
         lenient().when(threadIdService.generate(OWNER_ID, CONVERSATION_ID)).thenReturn(RUNTIME_THREAD_ID);
         lenient().when(threadGuard.tryAcquire(RUNTIME_THREAD_ID)).thenReturn(true);
         lenient().when(actionService.businessDate()).thenReturn(LocalDate.of(2026, 8, 28));

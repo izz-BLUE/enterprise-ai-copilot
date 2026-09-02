@@ -39,21 +39,6 @@ public class ExpenseExternalApprovalStatusSyncService {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** 兼容不包含 B3 wiring 的聚焦 status-sync 单元测试的构造方法。 */
-    public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
-                                                    ExpenseApprovalGateway approvalGateway,
-                                                    TransactionOperations transactions) {
-        this(claims, approvalGateway, transactions, null, null);
-    }
-
-    /** 兼容提供 B3 wiring 的聚焦测试的构造方法。 */
-    public ExpenseExternalApprovalStatusSyncService(ExpenseClaimRepository claims,
-                                                    ExpenseApprovalGateway approvalGateway,
-                                                    TransactionOperations transactions,
-                                                    ExpenseExternalResumeCoordinator resumeCoordinator) {
-        this(claims, approvalGateway, transactions, resumeCoordinator, null);
-    }
-
     public void sync(String externalRequestId) {
         if (externalRequestId == null || externalRequestId.isBlank()) {
             return;
@@ -97,14 +82,12 @@ public class ExpenseExternalApprovalStatusSyncService {
         if (!taskRuntimeClaim) {
             // 上方的 ExpenseClaim 和 TaskExecution 终态更新完成后，才启动 legacy
             // Python continuation（继续执行）。
-            if (resumeCoordinator != null) {
-                resumeCoordinator.tryResume(claim.expenseId());
-            }
+            resumeCoordinator.tryResume(claim.expenseId());
         }
     }
 
     private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
-        return taskRuntimeService != null && claim != null
+        return claim != null
                 && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 }

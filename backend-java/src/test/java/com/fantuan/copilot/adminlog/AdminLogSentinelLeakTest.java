@@ -1,6 +1,7 @@
 package com.fantuan.copilot.adminlog;
 
 import com.fantuan.copilot.controller.LangGraphAgentController;
+import com.fantuan.copilot.controller.LangGraphAgentControllerTestFactory;
 import com.fantuan.copilot.controller.admin.AdminLogController;
 import com.fantuan.copilot.auth.AuthRole;
 import com.fantuan.copilot.auth.AuthenticatedUser;
@@ -138,7 +139,7 @@ class AdminLogSentinelLeakTest {
         when(memoryService.find(anyString(), anyString())).thenReturn(Optional.empty());
 
         // 唯一构造器注入测试的 AdminLogBuffer；生产代码已无自行 new buffer 的兼容路径。
-        LangGraphAgentController agentController = new LangGraphAgentController(
+        LangGraphAgentController agentController = LangGraphAgentControllerTestFactory.create(
                 new PythonAgentGateway(restTemplate,
                         new com.fantuan.copilot.concurrency.PythonAgentBulkhead(3, 500),
                         "http://python-agent"),
@@ -294,6 +295,7 @@ class AdminLogSentinelLeakTest {
                 actions, registry,
                 new ActionNonceService(), memoryService,
                 buffer,
-                FIXED_CLOCK);
+                FIXED_CLOCK,
+                mock(com.fantuan.copilot.service.task.TaskRuntimeService.class));
     }
 }

@@ -5,6 +5,7 @@ import com.fantuan.copilot.gateway.expense.ExternalApprovalSubmissionResult;
 import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
+import com.fantuan.copilot.service.task.TaskRuntimeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,6 +42,7 @@ class ExpenseExternalApprovalReconciliationWorkerTest {
     @Mock ExpenseClaimRepository claims;
     @Mock ExpenseApprovalGateway gateway;
     @Mock ExpenseExternalApprovalStatusSyncService statusSyncService;
+    @Mock TaskRuntimeService taskRuntimeService;
     private ExpenseExternalApprovalReconciliationWorker worker;
 
     @BeforeEach
@@ -147,7 +150,8 @@ class ExpenseExternalApprovalReconciliationWorkerTest {
     private ExpenseExternalApprovalReconciliationWorker workerWithRealStatusSync() {
         TransactionTemplate transactions = new TransactionTemplate(new NoopTransactionManager());
         return new ExpenseExternalApprovalReconciliationWorker(
-                claims, new ExpenseExternalApprovalStatusSyncService(claims, gateway, transactions),
+                claims, new ExpenseExternalApprovalStatusSyncService(claims, gateway, transactions,
+                        mock(ExpenseExternalResumeCoordinator.class), taskRuntimeService),
                 transactions, 60000, 20, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

@@ -36,13 +36,15 @@ class MockOaWebhookProcessingServiceTest {
     @Mock ExpenseClaimRepository claims;
     @Mock ExpenseApprovalGateway gateway;
     @Mock ExpenseExternalResumeCoordinator resumeCoordinator;
+    @Mock com.fantuan.copilot.service.task.TaskRuntimeService taskRuntimeService;
     private MockOaWebhookProcessingService service;
 
     @BeforeEach
     void setUp() {
         ExpenseExternalApprovalStatusSyncService statusSyncService =
                 new ExpenseExternalApprovalStatusSyncService(claims, gateway,
-                        new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator);
+                        new TransactionTemplate(new NoopTransactionManager()), resumeCoordinator,
+                        taskRuntimeService);
         service = new MockOaWebhookProcessingService(statusSyncService);
     }
 

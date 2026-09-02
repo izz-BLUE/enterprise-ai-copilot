@@ -48,21 +48,6 @@ public class ExpenseExternalApprovalCoordinator {
         this.taskRuntimeService = taskRuntimeService;
     }
 
-    /** 兼容不包含 B3 wiring 的聚焦 B2a 单元测试的构造方法。 */
-    public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
-                                              ExpenseApprovalGateway approvalGateway,
-                                              TransactionOperations transactions) {
-        this(claims, approvalGateway, transactions, null, null);
-    }
-
-    /** 兼容提供 legacy resume coordinator 的测试的构造方法。 */
-    public ExpenseExternalApprovalCoordinator(ExpenseClaimRepository claims,
-                                              ExpenseApprovalGateway approvalGateway,
-                                              TransactionOperations transactions,
-                                              ExpenseExternalResumeCoordinator resumeCoordinator) {
-        this(claims, approvalGateway, transactions, resumeCoordinator, null);
-    }
-
     public void registerExternalWaitAndDispatch(PendingAction action,
                                                 ActionExecutionResponse response,
                                                 ExternalWaitMarker marker,
@@ -112,8 +97,7 @@ public class ExpenseExternalApprovalCoordinator {
                     exception.getClass().getSimpleName());
             return false;
         }
-        if (taskRuntimeService == null
-                || !taskRuntimeService.findByActionId(action.actionId()).map(task ->
+        if (!taskRuntimeService.findByActionId(action.actionId()).map(task ->
                 task.status() == com.fantuan.copilot.model.task.TaskExecutionStatus.WAITING_EXTERNAL)
                 .orElse(false)) {
             log.warn("[{}] TASK_RUNTIME_EXTERNAL_STATUS_BINDING_FAILED actionIdPrefix={}", traceId,
@@ -203,7 +187,7 @@ public class ExpenseExternalApprovalCoordinator {
                     }
                 }
             });
-            if (terminal != null && !taskRuntimeClaim && resumeCoordinator != null) {
+            if (terminal != null && !taskRuntimeClaim) {
                 // ExpenseClaim 终态事务已经提交；legacy Python continuation 是独立的
                 // 尽力而为操作。
                 resumeCoordinator.tryResume(claim.expenseId());
@@ -244,7 +228,7 @@ public class ExpenseExternalApprovalCoordinator {
     }
 
     private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
-        return taskRuntimeService != null && claim != null
+        return claim != null
                 && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 

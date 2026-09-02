@@ -1,4 +1,5 @@
 import { authenticatedFetch, AuthExpiredError, RequestTimeoutError } from './authApi.js'
+import { isRetryableServerError } from './httpErrorPolicy.js'
 
 export class MockOaApprovalApiError extends Error {
   constructor({ message, errorCode, httpStatus }) {
@@ -21,7 +22,7 @@ const messageForResponse = (status, data) => {
   if (status === 503) return data?.errorCode === 'MOCK_OA_DISABLED'
     ? '模拟 OA 当前未启用，请联系管理员。'
     : '模拟 OA 暂时不可用，请稍后重试。'
-  if (status >= 500) return '模拟 OA 暂时不可用，请稍后重试。'
+  if (isRetryableServerError(status)) return '模拟 OA 暂时不可用，请稍后重试。'
   return '模拟 OA 请求未完成，请稍后重试。'
 }
 

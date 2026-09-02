@@ -57,7 +57,8 @@ class ActionAuditLoggingTest {
                 new ActionNonceService(),
                 mock(com.fantuan.copilot.service.memory.AiTaskMemoryService.class),
                 new AdminLogBuffer(),
-                java.time.Clock.systemUTC());
+                java.time.Clock.systemUTC(),
+                mock(com.fantuan.copilot.service.task.TaskRuntimeService.class));
 
         Logger logger = (Logger) LoggerFactory.getLogger(BusinessActionService.class);
         Level previousLevel = logger.getLevel();
