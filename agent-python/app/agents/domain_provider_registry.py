@@ -86,6 +86,8 @@ class DomainProvider(Protocol):
 
     def matches(self, context: DomainContext) -> bool: ...
 
+    def is_business_action_intent(self, context: DomainContext) -> bool: ...
+
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]: ...
 
     def validate_tool_call(
@@ -217,6 +219,9 @@ class LeaveProvider:
 
     def matches(self, context: DomainContext) -> bool:
         return is_annual_leave_action_intent(context.question)
+
+    def is_business_action_intent(self, context: DomainContext) -> bool:
+        return self.matches(context)
 
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
         # Leave 当前没有额外的领域依赖顺序；保留 capability gate 原集合。
@@ -350,6 +355,16 @@ class ExpenseProvider:
         return bool(
             expense_input_service.is_expense_claim_intent(context.question)
             or context.continuation_original_request
+        )
+
+    def is_business_action_intent(self, context: DomainContext) -> bool:
+        if not self.matches(context):
+            return False
+        # 显式 trip / invoice 引用仍可用于读取报销事实；只有需要进入
+        # Proposal capability 的直接申请才走未授权业务动作 preflight。
+        return not (
+            expense_input_service.extract_trip_reference(context.question)
+            or expense_input_service.extract_invoice_references(context.question)
         )
 
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:

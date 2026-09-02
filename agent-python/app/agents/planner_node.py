@@ -664,6 +664,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             not allow_business_actions
             and resolved_provider is not None
             and resolved_provider.capability_tools
+            and resolved_provider.is_business_action_intent(domain_context)
         ):
             # 业务 intent 与 capability 都由程序层确定；未授权时无需让
             # Planner 猜测一个当前不可见的 Proposal Tool。
