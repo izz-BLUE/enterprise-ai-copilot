@@ -95,6 +95,14 @@ def _decision(tool_name: str, *, expense_reason: str | None = None) -> PlannerDe
     })
 
 
+def _finish_decision(answer: str = '已完成。') -> PlannerDecision:
+    return PlannerDecision.model_validate({
+        'action': 'finish',
+        'answer': answer,
+        'reason_code': 'task_complete',
+    })
+
+
 @pytest.mark.parametrize('tool_name', [TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
 def test_expense_provider_reason_first_covers_travel_and_invoice(tool_name):
     decision, updates = ExpenseProvider().postprocess_decision(
@@ -302,6 +310,101 @@ def test_clarification_is_not_completion():
             decision, [EXPENSE_PROPOSAL_TOOL_NAME],
             DomainContext(question=QUESTION, tool_history=history),
         )
+
+
+def test_leave_proposal_business_failure_cannot_finish():
+    history = ({
+        'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': False, 'error_code': 'FIXTURE_FAILURE',
+        }),
+    },)
+
+    with pytest.raises(ValueError, match='leave_proposal_tool'):
+        LeaveProvider().validate_completion(
+            _finish_decision(), [LEAVE_PROPOSAL_TOOL_NAME],
+            DomainContext(question='帮我请明天年假', tool_history=history),
+        )
+
+
+def test_leave_proposal_clarification_still_allows_finish():
+    history = ({
+        'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True, 'kind': 'clarification', 'action_proposal': None,
+        }),
+    },)
+
+    LeaveProvider().validate_completion(
+        _finish_decision('请补充请假日期。'), [LEAVE_PROPOSAL_TOOL_NAME],
+        DomainContext(question='帮我请年假', tool_history=history),
+    )
+
+
+def test_expense_proposal_business_failure_cannot_finish():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': False, 'error_code': 'FIXTURE_FAILURE',
+        }),
+    },)
+
+    with pytest.raises(ValueError, match='expense_proposal_tool'):
+        ExpenseProvider().validate_completion(
+            _finish_decision(), [EXPENSE_PROPOSAL_TOOL_NAME],
+            DomainContext(question=QUESTION, tool_history=history),
+        )
+
+
+def test_expense_allowed_clarification_still_allows_finish():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True, 'action_proposal': None, 'missing_fields': ['reason'],
+        }),
+    },)
+
+    ExpenseProvider().validate_completion(
+        _finish_decision('请补充报销原因。'), [EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION, tool_history=history),
+    )
+
+
+def test_expense_invoice_clarification_still_cannot_finish():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True, 'action_proposal': None, 'missing_fields': ['invoice_ids'],
+        }),
+    },)
+
+    with pytest.raises(ValueError, match='expense_proposal_tool'):
+        ExpenseProvider().validate_completion(
+            _finish_decision(), [EXPENSE_PROPOSAL_TOOL_NAME],
+            DomainContext(question=QUESTION, tool_history=history),
+        )
+
+
+def test_expense_proposal_still_allows_finish():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'action_proposal': {'action_type': 'EXPENSE_CLAIM'},
+            'missing_fields': [],
+        }),
+    },)
+
+    ExpenseProvider().validate_completion(
+        _finish_decision('已生成报销草稿。'), [EXPENSE_PROPOSAL_TOOL_NAME],
+        DomainContext(question=QUESTION, tool_history=history),
+    )
 
 
 def _completion_item(tool_name: str, payload: dict) -> dict:

@@ -256,7 +256,7 @@ class LeaveProvider:
             and LEAVE_PROPOSAL_TOOL_NAME in tools
             and LEAVE_PROPOSAL_TOOL_NAME not in {
                 item.get('tool_name') for item in context.tool_history
-                if item.get('status') == 'success'
+                if _tool_invocation_has_business_success(item)
             }
         ):
             raise PlannerDecisionError('finish 前未完成 leave_proposal_tool Proposal 阶段')
@@ -495,13 +495,13 @@ class ExpenseProvider:
             return None
         successful_tools = {
             item.get('tool_name') for item in context.tool_history
-            if item.get('status') == 'success'
+            if _tool_invocation_has_business_success(item)
         }
         latest_proposal = next(
             (
                 item for item in reversed(context.tool_history)
                 if item.get('tool_name') == EXPENSE_PROPOSAL_TOOL_NAME
-                and item.get('status') == 'success'
+                and _tool_invocation_has_business_success(item)
             ),
             None,
         )
