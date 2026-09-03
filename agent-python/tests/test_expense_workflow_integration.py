@@ -395,6 +395,10 @@ class TestExpenseReasonContinuation:
         assert prop.invoke.call_args.args[0]["question"] == original
         assert prop.invoke.call_args.args[0]["expense_reason"] == "客户现场项目验收"
         assert inv.invoke.call_count == 2
+        assert "leave_proposal_tool" not in [
+            item["tool_name"] for item in result["tool_history"]
+        ]
+        assert result["stop_reason"] != "step_budget_exhausted"
 
     def test_continuation_prompt_labels_current_and_original_requests_separately(self):
         prompt = build_planner_prompt(

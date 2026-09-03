@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 
@@ -13,6 +14,7 @@ from app.agents.domain_provider_registry import (
     DomainContext,
     DomainProviderAmbiguityError,
     DomainProviderRegistry,
+    DomainToolCallRejected,
     ExpenseProvider,
     LeaveProvider,
 )
@@ -23,6 +25,7 @@ from app.agents.planner_node import (
 )
 from app.agents.tool_executor_node import MAX_TOOL_CALLS, tool_executor_node
 from app.schemas.planner_schema import (
+    EVAL_TOOL_NAME,
     EXPENSE_PROPOSAL_TOOL_NAME,
     EXPENSE_STATUS_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
@@ -253,6 +256,193 @@ def test_provider_cannot_reexpose_capability_hidden_tool():
     assert DOMAIN_PROVIDER_REGISTRY.legal_tools(visible, _context()) == visible
     assert EXPENSE_PROPOSAL_TOOL_NAME not in DOMAIN_PROVIDER_REGISTRY.legal_tools(visible, _context())
     assert set(hidden) != set(visible)
+
+
+@pytest.mark.parametrize(
+    ('tool_name', 'domain_key'),
+    [
+        (LEAVE_BALANCE_TOOL_NAME, 'leave'),
+        (LEAVE_REQUEST_TOOL_NAME, 'leave'),
+        (LEAVE_PROPOSAL_TOOL_NAME, 'leave'),
+        (TRAVEL_RECORD_TOOL_NAME, 'expense'),
+        (INVOICE_VERIFY_TOOL_NAME, 'expense'),
+        (EXPENSE_PROPOSAL_TOOL_NAME, 'expense'),
+        (EXPENSE_STATUS_TOOL_NAME, 'expense'),
+    ],
+)
+def test_registry_classifies_all_domain_tools_by_owner(tool_name, domain_key):
+    provider = DOMAIN_PROVIDER_REGISTRY.provider_for_tool(tool_name)
+
+    assert provider is not None
+    assert provider.domain_key == domain_key
+
+
+def test_expense_legal_tools_filter_leave_domain_tools_but_keep_platform_tools():
+    tools = [
+        RAG_TOOL_NAME,
+        EVAL_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        EXPENSE_STATUS_TOOL_NAME,
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+    ]
+
+    legal = DOMAIN_PROVIDER_REGISTRY.legal_tools(
+        tools,
+        _context(continuation_original_request=QUESTION),
+    )
+
+    assert RAG_TOOL_NAME in legal
+    assert EVAL_TOOL_NAME in legal
+    assert EXPENSE_STATUS_TOOL_NAME in legal
+    assert not set(legal) & {
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+    }
+
+
+def test_leave_legal_tools_filter_expense_domain_tools_but_keep_platform_tools():
+    tools = [
+        RAG_TOOL_NAME,
+        EVAL_TOOL_NAME,
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        EXPENSE_STATUS_TOOL_NAME,
+    ]
+
+    legal = DOMAIN_PROVIDER_REGISTRY.legal_tools(
+        tools,
+        DomainContext(question='帮我请明天年假'),
+    )
+
+    assert RAG_TOOL_NAME in legal
+    assert EVAL_TOOL_NAME in legal
+    assert set(legal) >= {
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+    }
+    assert not set(legal) & {
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        EXPENSE_STATUS_TOOL_NAME,
+    }
+
+
+@pytest.mark.parametrize(
+    ('question', 'continuation_original_request', 'tool_name'),
+    [
+        ('拜访客户', QUESTION, LEAVE_PROPOSAL_TOOL_NAME),
+        ('帮我请明天年假', None, EXPENSE_PROPOSAL_TOOL_NAME),
+    ],
+)
+def test_registry_rejects_cross_domain_tool_call(question, continuation_original_request, tool_name):
+    with pytest.raises(DomainToolCallRejected) as error:
+        DOMAIN_PROVIDER_REGISTRY.validate_tool_call(
+            tool_name,
+            {},
+            DomainContext(
+                question=question,
+                continuation_original_request=continuation_original_request,
+                request_expense_reason='客户拜访' if continuation_original_request else None,
+            ),
+        )
+
+    assert error.value.reason_code == 'domain_tool_mismatch'
+    assert str(error.value) == '当前请求领域与目标 Tool 所属领域不一致，已拒绝执行。'
+
+
+def test_expense_continuation_blocks_leave_tool_before_invoke():
+    state = {
+        'question': '拜访客户',
+        'employee_id': 'E10001',
+        'allow_business_actions': True,
+        'business_date': date(2026, 8, 26),
+        'request_expense_reason': '拜访客户',
+        'continuation_original_request': QUESTION,
+        'action_proposal': None,
+        'tool_history': _history(),
+        'tool_call_count': 0,
+        'planner_decision': {
+            'action': 'tool',
+            'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
+            'arguments': {},
+            'reason_code': 'need_proposal',
+        },
+    }
+
+    with patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal:
+        result = tool_executor_node(
+            checkpoint_safe_state(state), runtime_for_state(state)
+        )
+
+    proposal.assert_not_called()
+    assert result['stop_reason'] == 'domain_tool_mismatch'
+    assert result['tool_call_count'] == 0
+    assert result['tool_history'][-1]['status'] == 'blocked'
+    assert json.loads(result['tool_history'][-1]['observation'])['reason'] == (
+        'domain_tool_mismatch'
+    )
+
+
+def test_unknown_provider_keeps_current_tool_set():
+    tools = [RAG_TOOL_NAME, LEAVE_PROPOSAL_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME]
+
+    assert DOMAIN_PROVIDER_REGISTRY.legal_tools(
+        tools,
+        DomainContext(question='帮我查询今天的天气'),
+    ) == tools
+
+
+@pytest.mark.parametrize(
+    'context',
+    [
+        _context(continuation_original_request=QUESTION),
+        DomainContext(question='帮我请明天年假'),
+    ],
+)
+def test_platform_tools_remain_legal_for_each_resolved_domain(context):
+    assert DOMAIN_PROVIDER_REGISTRY.legal_tools(
+        [RAG_TOOL_NAME, EVAL_TOOL_NAME], context
+    ) == [RAG_TOOL_NAME, EVAL_TOOL_NAME]
+
+
+def test_planner_visible_tools_are_restricted_to_expense_domain():
+    upstream = visible_tools(
+        employee_id='E10001',
+        allow_eval=True,
+        allow_business_actions=True,
+        java_base_url='http://127.0.0.1:8080',
+        java_internal_token='test-internal-token',
+    )
+
+    legal = DOMAIN_PROVIDER_REGISTRY.legal_tools(
+        upstream,
+        _context(continuation_original_request=QUESTION),
+    )
+
+    assert set(legal) <= {
+        RAG_TOOL_NAME,
+        EVAL_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        EXPENSE_STATUS_TOOL_NAME,
+    }
+    assert not set(legal) & {
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+    }
 
 
 def test_expense_provider_preserves_selected_trip_prerequisite_order():
