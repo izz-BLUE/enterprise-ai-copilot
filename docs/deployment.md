@@ -169,6 +169,7 @@ Frontend 不属于 production Compose 服务；正式产物由本地 Node 20 构
 cd frontend
 npm ci
 npm run build:production
+npm run verify:production-env-boundary
 npm run verify:production-build
 ```
 
@@ -180,7 +181,7 @@ VITE_PUBLIC_DEMO_USERNAME=demo
 VITE_PUBLIC_DEMO_PASSWORD=demo-public-2026
 ```
 
-这些变量是 build-time 配置，不是 Compose 或 Nginx runtime 环境变量。`verify:production-build` 会检查 bundle 中的默认账号、公开 Demo 提示、登录按钮可用性，并拒绝 `zhangsan`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD`、`ADMIN_TOKEN`、JWT、Mock OA 和 Python server-side credential marker。`frontend/.env.example` 仅用于说明 contract，不是生产构建的自动加载来源。
+这些变量是 build-time 配置，不是 Compose 或 Nginx runtime 环境变量。`build:production` 使用 Vite programmatic build 的 `envDir=false`，不从任何 `.env*` 文件加载 `VITE_*`；同时会清除继承的 `VITE_*`，再设置上述三个值。`verify:production-env-boundary` 用外部环境和全部 `.env*` 文件 canary 验证该边界，`verify:production-build` 再检查 bundle 中的默认账号、公开 Demo 提示、登录按钮可用性，并拒绝 `zhangsan`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD`、`ADMIN_TOKEN`、JWT、Mock OA 和 Python server-side credential marker。`frontend/.env.example` 仅用于说明 contract，不是生产构建的自动加载来源。
 
 构建验证通过后，按 release ID 打包 `frontend/dist`，在服务器校验并解压到不可变 `${RELEASE_ID}` 目录，再通过临时软链接原子更新 `current`；最后执行 `nginx -t`，成功后才进行平滑 reload。服务器不执行 Frontend build，也不接收任何 server-side password。
 
