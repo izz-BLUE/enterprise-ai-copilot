@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:production",
+    "build:production": "node scripts/build-production.mjs",
+    "verify:production-build": "node scripts/verify-production-build.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "node --test src/**/*.test.mjs",
