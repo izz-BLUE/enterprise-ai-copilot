@@ -155,11 +155,19 @@ jobs:
 
       - name: Build
         working-directory: frontend
-        run: npm run build
+        run: npm run build:production
+
+      - name: Verify production env boundary
+        working-directory: frontend
+        run: npm run verify:production-env-boundary
 
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
 
   frontend-e2e:
     name: Frontend Browser Tests
@@ -181,6 +189,14 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build:production
+
+      - name: Verify production bundle
+        working-directory: frontend
+        run: npm run verify:production-build
 
       - name: Run browser tests
         working-directory: frontend

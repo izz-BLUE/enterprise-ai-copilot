@@ -161,6 +161,30 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 
 Release ID 格式：`${UTC_TIMESTAMP}-${SHORT_SHA}`
 
+### 前端正式构建 Contract
+
+Frontend 不属于 production Compose 服务；正式产物由本地 Node 20 构建，随后上传到上述 Nginx release 目录并原子切换 `current`。必须使用仓库提供的 production build 入口：
+
+```bash
+cd frontend
+npm ci
+npm run build:production
+npm run verify:production-env-boundary
+npm run verify:production-build
+```
+
+`build:production` 会在 Vite 构建时显式注入且只注入以下刻意公开的浏览器配置：
+
+```text
+VITE_DEMO_AUTH_ENABLED=true
+VITE_PUBLIC_DEMO_USERNAME=demo
+VITE_PUBLIC_DEMO_PASSWORD=demo-public-2026
+```
+
+这些变量是 build-time 配置，不是 Compose 或 Nginx runtime 环境变量。`build:production` 使用 Vite programmatic build 的 `envDir=false`，不从任何 `.env*` 文件加载 `VITE_*`；同时会清除继承的 `VITE_*`，再设置上述三个值。`verify:production-env-boundary` 用外部环境和全部 `.env*` 文件 canary 验证该边界，`verify:production-build` 再检查 bundle 中的默认账号、公开 Demo 提示、登录按钮可用性，并拒绝 `zhangsan`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD`、`ADMIN_TOKEN`、JWT、Mock OA 和 Python server-side credential marker。`frontend/.env.example` 仅用于说明 contract，不是生产构建的自动加载来源。
+
+构建验证通过后，按 release ID 打包 `frontend/dist`，在服务器校验并解压到不可变 `${RELEASE_ID}` 目录，再通过临时软链接原子更新 `current`；最后执行 `nginx -t`，成功后才进行平滑 reload。服务器不执行 Frontend build，也不接收任何 server-side password。
+
 ### Docker 网络
 
 ```mermaid
@@ -318,7 +342,7 @@ graph LR
 
 PostgreSQL 是 Java 受控业务动作与 Python 执行快照的生产强依赖：Java 和 Python 都等待数据库健康后启动。Java 只通过 Flyway 管理业务表；Python Checkpoint Runtime 只调用 LangGraph 官方 `PostgresSaver.setup()` 创建和升级其 checkpoint 表，绝不写 Java Flyway 或自定义 checkpoint SQL。`LANGGRAPH_CHECKPOINT_DSN` 与 `SPRING_DATASOURCE_URL` 独立配置，开发/CI 可以暂用同一数据库，生产可分离数据库与权限。执行快照不是业务查询源；报销、请假、PendingAction 仍只查询 Java 业务系统。LeaveRequest 编号来自 PostgreSQL Sequence，事务回滚可能产生安全的编号间隙。
 
-本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。公网完整 Demo 还必须使用 `BUSINESS_ACTIONS_REQUIRE_ADMIN=false`、`MOCK_OA_ENABLED=true`、`MEMORY_WRITE_MODE=ENABLED`，并将 `ENTERPRISE_OA_MCP_URL` 指向 Python 容器可达的内部或正式外部服务。对当前 Compose，内部值是 `http://enterprise-oa-mcp:8100/mcp`。其中 public password 是刻意公开的体验凭据，其他三个密码只存在服务端配置；Java 服务端按可信身份计算 `allow_business_actions`，`demo` 永远为 `false`，正常员工按既有员工权限允许；`BUSINESS_ACTIONS_REQUIRE_ADMIN` 默认 `false`，只有显式设为 `true` 才额外要求 server-only `ADMIN_TOKEN`，浏览器不发送该 Token。前端只允许通过 `frontend/.env.example` 注入公开 demo 凭据，`VITE_*` 会进入浏览器 bundle。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
+本地或受控登录演示需设置 `DEMO_AUTH_ENABLED=true`、`DEMO_PUBLIC_PASSWORD`、`DEMO_INTERVIEW_PASSWORD`、`DEMO_ADMIN_PASSWORD`、`DEMO_AUTH_DEFAULT_PASSWORD` 与 `BUSINESS_ACTIONS_ENABLED=true`。公网完整 Demo 还必须使用 `BUSINESS_ACTIONS_REQUIRE_ADMIN=false`、`MOCK_OA_ENABLED=true`、`MEMORY_WRITE_MODE=ENABLED`，并将 `ENTERPRISE_OA_MCP_URL` 指向 Python 容器可达的内部或正式外部服务。对当前 Compose，内部值是 `http://enterprise-oa-mcp:8100/mcp`。其中 public password 是刻意公开的体验凭据，其他三个密码只存在服务端配置；Java 服务端按可信身份计算 `allow_business_actions`，`demo` 永远为 `false`，正常员工按既有员工权限允许；`BUSINESS_ACTIONS_REQUIRE_ADMIN` 默认 `false`，只有显式设为 `true` 才额外要求 server-only `ADMIN_TOKEN`，浏览器不发送该 Token。前端生产构建只允许由 `frontend/scripts/build-production.mjs` 注入公开 demo 凭据，`frontend/.env.example` 仅为说明文件；`VITE_*` 会进入浏览器 bundle。Mock OA 使用独立 SQLite：终态先提交再 best-effort 回调 Java，Java 通过 HMAC webhook 接收通知并 GET OA 权威状态；回调失败不回滚 OA。Java 侧的 reconciliation worker 始终低频、限批，先提交 `external_last_checked_at` CAS，再执行 HTTP，不把 HTTP 放进本地事务；provider 关闭或 OA 失败时保持 `WAITING_APPROVAL` 并在窗口后重试。Java ExpenseClaim 终态提交后，以持久化 correlation 重建原 Agent runtime，使用 false capabilities 调用 Python external resume；Java → Python HTTP 不在数据库事务内，失败保留终态并由 worker 重试。当前 thread guard 为单实例进程内实现；event inbox/outbox 和分布式协调不在当前范围。
 
 Planner-first 下，RAG 不依赖 Java read 配置；`leave_proposal_tool` 可见性取决于 `allow_business_actions` 与受信任 `employee_id`，并由 `BUSINESS_ACTIONS_ENABLED=true` 支持 Java 创建 PendingAction。只读企业 Tool 额外需要 `JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` 才会暴露给 Planner；两者缺失时，下游直接调用仍按稳定错误码 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` 拒绝，不会伪造成功。Enterprise OA MCP 的 `travel_record_tool` / `invoice_verify_tool` 由 Compose 内部服务提供，Python 只接受显式、容器可达的 `ENTERPRISE_OA_MCP_URL`。Scoped Conversation Memory 默认 `MEMORY_WRITE_MODE=DISABLED`，不会调用 Extractor；公网完整 Demo 必须设为 `ENABLED`，由 Java 当前认证请求持久化响应内提案。
 
