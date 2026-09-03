@@ -837,7 +837,6 @@ class DomainProviderRegistry:
             or tool_name in provider.capability_tools
             or tool_name in getattr(provider, 'dependency_tools', frozenset())
             or tool_name in provider.prompt_specs()
-            and provider.domain_key != 'leave'
         )
         if len(matches) > 1:
             raise DomainProviderAmbiguityError(
@@ -852,7 +851,14 @@ class DomainProviderRegistry:
         original = list(tools)
         legal = provider.legal_tools(original, context)
         allowed = set(original)
-        return [name for name in legal if name in allowed]
+        return [
+            name for name in legal
+            if name in allowed
+            and (
+                (owner := self.provider_for_tool(name)) is None
+                or owner is provider
+            )
+        ]
 
     def terminal_clarification(self, context: DomainContext) -> str | None:
         provider = self.resolve(context)
@@ -861,9 +867,19 @@ class DomainProviderRegistry:
     def validate_tool_call(
         self, tool_name: str, arguments: dict[str, Any], context: DomainContext
     ) -> None:
-        provider = self.provider_for_tool(tool_name)
-        if provider is not None:
-            provider.validate_tool_call(tool_name, arguments, context)
+        resolved_provider = self.resolve(context)
+        tool_owner = self.provider_for_tool(tool_name)
+        if (
+            resolved_provider is not None
+            and tool_owner is not None
+            and resolved_provider is not tool_owner
+        ):
+            raise DomainToolCallRejected(
+                'domain_tool_mismatch',
+                '当前请求领域与目标 Tool 所属领域不一致，已拒绝执行。',
+            )
+        if tool_owner is not None:
+            tool_owner.validate_tool_call(tool_name, arguments, context)
 
     def validate_completion(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
