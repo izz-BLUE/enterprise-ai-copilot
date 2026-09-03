@@ -506,6 +506,40 @@ def test_expense_provider_completion_recovery_stays_fail_closed_without_selected
     ) is None
 
 
+def test_expense_provider_completion_recovery_handles_single_invoice():
+    provider = ExpenseProvider()
+    history = _history()
+    travel_payload = json.loads(history[0]['observation'])
+    travel_payload['items'][0]['expense_documents'] = [{'invoice_id': 'INV-1'}]
+    history[0]['observation'] = json.dumps(travel_payload)
+    tools = [
+        RAG_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+    ]
+
+    invoice = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(history)),
+        'expense_proposal_missing',
+    )
+    assert invoice is not None
+    assert invoice.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert invoice.arguments == {'invoice_id': 'INV-1'}
+
+    history.extend(_history('INV-1')[1:])
+    proposal = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(history)),
+        'expense_proposal_missing',
+    )
+    assert proposal is not None
+    assert proposal.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+
+
 def test_executor_second_gate_blocks_illegal_expense_proposal():
     state = {
         'question': QUESTION,
