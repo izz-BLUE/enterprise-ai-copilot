@@ -20,6 +20,9 @@ from app.schemas.action_schema import (
 BUSINESS_DATE = date(2026, 7, 16)
 
 RAG_RESULT = '{"answer":"年假制度：入职满1年5天。","success":true,"sources":["hr/annual_leave.md"]}'
+RAG_NO_KNOWLEDGE_RESULT = (
+    '{"answer":"当前知识库暂无相关信息","success":true,"sources":[]}'
+)
 EVAL_RESULT = json.dumps({'retrieval': {'final_pass_rate': 0.8}}, ensure_ascii=False)
 
 
@@ -192,6 +195,133 @@ class TestTermination:
         rag.invoke.assert_not_called()
         assert result['stop_reason'] == 'refused'
         assert result['answer'] == '不允许处理。'
+
+
+class TestUnresolvedTerminalRefusal:
+    def test_finish_cannot_complete_normalizes_before_semantic_repair(self, caplog):
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前无法完成。',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        decisions = [
+            _tool('rag_answer_tool', {'question': '你好'}, 'need_knowledge'),
+            invalid_finish,
+            invalid_finish,
+        ]
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
+            result = run_langgraph_agent('你好', use_planner=True)
+
+        assert result['stop_reason'] == 'refused'
+        assert result['route'] == 'refuse'
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['planner_decision']['reason_code'] == 'cannot_complete'
+        assert llm.call_count == 2
+        assert not any(
+            'planner semantic validation failure' in record.message
+            for record in caplog.records
+        )
+
+    def test_finish_not_allowed_normalizes_before_semantic_repair(self, caplog):
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前不允许完成。',
+            'reason_code': 'not_allowed',
+        }, ensure_ascii=False)
+        decisions = [
+            _tool('rag_answer_tool', {'question': '你好'}, 'need_knowledge'),
+            invalid_finish,
+            invalid_finish,
+        ]
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
+            result = run_langgraph_agent('你好', use_planner=True)
+
+        assert result['stop_reason'] == 'refused'
+        assert result['route'] == 'refuse'
+        assert result['planner_decision']['action'] == 'refuse'
+        assert result['planner_decision']['reason_code'] == 'not_allowed'
+        assert llm.call_count == 2
+        assert not any(
+            'planner semantic validation failure' in record.message
+            for record in caplog.records
+        )
+
+    def test_no_knowledge_rag_result_still_normalizes_unresolved_refusal(self, caplog):
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前无法完成。',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                _tool('rag_answer_tool', {'question': '你好'}, 'need_knowledge'),
+                invalid_finish,
+                invalid_finish,
+        ]) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_NO_KNOWLEDGE_RESULT
+            result = run_langgraph_agent('你好', use_planner=True)
+
+        assert result['stop_reason'] == 'refused'
+        assert result['route'] == 'refuse'
+        assert llm.call_count == 2
+        assert not any(
+            'planner semantic validation failure' in record.message
+            for record in caplog.records
+        )
+
+    def test_resolved_expense_finish_cannot_complete_is_not_normalized(self, caplog):
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前无法完成。',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                invalid_finish, invalid_finish,
+        ]) as llm:
+            result = run_langgraph_agent(
+                '帮我根据最近一次出差准备报销。',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert llm.call_count == 2
+        failures = [record.message for record in caplog.records
+                    if 'planner semantic validation failure' in record.message]
+        assert len(failures) == 2
+        assert all('error_code=expense_proposal_missing' in message for message in failures)
+
+    def test_resolved_leave_finish_cannot_complete_is_not_normalized(self, caplog):
+        invalid_finish = json.dumps({
+            'action': 'finish',
+            'answer': '当前无法完成。',
+            'reason_code': 'cannot_complete',
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                invalid_finish, invalid_finish,
+        ]) as llm:
+            result = run_langgraph_agent(
+                '我想请明天一天年假，原因是个人安排。',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert llm.call_count == 2
+        failures = [record.message for record in caplog.records
+                    if 'planner semantic validation failure' in record.message]
+        assert len(failures) == 2
+        assert all('error_code=leave_proposal_missing' in message for message in failures)
 
 
 class TestFailureRecovery:

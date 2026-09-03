@@ -518,6 +518,18 @@ def _unresolved_terminal_refusal(
             return None
     except DomainProviderAmbiguityError:
         return None
+    # 只读领域 Tool（例如 leave_balance_tool）可能在 request-level
+    # provider 未命中时仍已成功完成；保留该领域自身的 completion/repair
+    # 契约，避免把可完成的只读请求提前拒绝。
+    if any(
+        DOMAIN_PROVIDER_REGISTRY.is_completed_success(item)
+        and any(
+            item.get('tool_name') in provider.prompt_specs()
+            for provider in DOMAIN_PROVIDER_REGISTRY.providers
+        )
+        for item in context.tool_history
+    ):
+        return None
     answer = (
         '当前系统没有可用能力执行该请求。'
         if decision.reason_code == 'cannot_complete'
@@ -800,6 +812,9 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                 tool_history=state.get('tool_history', []),
                 continuation_original_request=continuation_original_request,
             )
+            terminal_refusal = _unresolved_terminal_refusal(decision, domain_context)
+            if terminal_refusal is not None:
+                decision = PlannerDecision.model_validate(terminal_refusal)
             decision.validate_decision()
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
             _log_planner_validation_failure(

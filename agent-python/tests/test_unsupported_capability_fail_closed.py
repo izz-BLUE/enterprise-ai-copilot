@@ -156,7 +156,7 @@ def test_unresolved_finish_not_allowed_gracefully_refuses():
     assert result['planner_decision']['reason_code'] == 'not_allowed'
 
 
-def test_terminal_refusal_repair_result_is_preserved():
+def test_unresolved_finish_cannot_complete_uses_deterministic_refusal():
     result = _run(
         '请帮我发一封邮件给老板。',
         [
@@ -169,7 +169,7 @@ def test_terminal_refusal_repair_result_is_preserved():
 
     assert result['stop_reason'] == 'refused'
     assert result['route'] == 'refuse'
-    assert result['answer'] == '无法处理。'
+    assert result['answer'] == '当前系统没有可用能力执行该请求。'
 
 
 def test_unresolved_finish_task_complete_remains_normal_finish():
