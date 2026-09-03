@@ -102,6 +102,14 @@ class DomainProvider(Protocol):
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> None: ...
 
+    def recover_completion_decision(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None: ...
+
     def postprocess_decision(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> tuple[PlannerDecision, dict[str, object]]: ...
@@ -280,6 +288,15 @@ class LeaveProvider:
         ):
             raise PlannerDecisionError('finish 前未完成 leave_proposal_tool Proposal 阶段')
 
+    def recover_completion_decision(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        return None
+
     def postprocess_decision(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> tuple[PlannerDecision, dict[str, object]]:
@@ -395,21 +412,118 @@ class ExpenseProvider:
                 if name not in {INVOICE_VERIFY_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME}
             ]
 
-        if not expense_input_service.find_trip_records(view) or analysis.trip_id is None:
+        progress = self._selected_invoice_progress(context, analysis=analysis, view=view)
+        if progress is None:
             return [
                 name for name in tools
                 if name not in {INVOICE_VERIFY_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME}
             ]
 
-        target_invoice_ids = set(analysis.invoice_ids)
+        _, _, pending_invoice_ids = progress
+        if pending_invoice_ids:
+            return [name for name in tools if name != EXPENSE_PROPOSAL_TOOL_NAME]
+        return [name for name in tools if name != INVOICE_VERIFY_TOOL_NAME]
+
+    def recover_completion_decision(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        """把已知的过早 finish 确定性收敛到下一个 Expense prerequisite。
+
+        这不是放宽完成校验：原 finish 不会被接受，而是被替换为当前
+        selected trip 的下一步合法 Tool。只有 Provider 已经能从当前事实
+        明确下一步时才恢复；否则仍交回既有 semantic validation/repair。
+        """
+        if error_code != 'expense_proposal_missing' or decision.action != 'finish':
+            return None
+
+        source_question = context.continuation_original_request or context.question
+        view = _context_view(context)
+        try:
+            analysis = expense_input_service.analyze_expense_input(
+                source_question, context=view
+            )
+        except expense_input_service.ExpenseInputError:
+            return None
+        progress = self._selected_invoice_progress(context, analysis=analysis, view=view)
+        if progress is None:
+            return None
+
+        _, _, pending_invoice_ids = progress
+        if pending_invoice_ids and INVOICE_VERIFY_TOOL_NAME in tools:
+            return self._tool_decision(
+                INVOICE_VERIFY_TOOL_NAME,
+                {'invoice_id': pending_invoice_ids[0]},
+                'need_invoice_verify',
+                context.request_expense_reason,
+            )
+        if not pending_invoice_ids and EXPENSE_PROPOSAL_TOOL_NAME in tools:
+            return self._tool_decision(
+                EXPENSE_PROPOSAL_TOOL_NAME,
+                {},
+                'need_expense_proposal',
+                context.request_expense_reason,
+            )
+        return None
+
+    def _selected_invoice_progress(
+        self,
+        context: DomainContext,
+        *,
+        analysis: expense_input_service.ExpenseInputAnalysis,
+        view: expense_input_service.ExpenseProposalContextLike,
+    ) -> tuple[str, set[str], list[str]] | None:
+        """返回 selected trip、已验真集合和按源事实顺序排列的待验真发票。"""
+        if analysis.trip_id is None:
+            return None
+        selected_trip = next(
+            (
+                trip for trip in expense_input_service.find_trip_records(view)
+                if trip.get('trip_id') == analysis.trip_id
+            ),
+            None,
+        )
+        if selected_trip is None:
+            return None
+
+        selected_invoice_ids = [
+            document.get('invoice_id')
+            for document in (selected_trip.get('expense_documents') or [])
+            if isinstance(document, dict) and document.get('invoice_id')
+        ]
+        target_invoice_ids = list(dict.fromkeys(analysis.invoice_ids))
+        if set(target_invoice_ids) - set(selected_invoice_ids):
+            return None
         verified_invoice_ids = {
             invoice.get('invoice_id')
             for invoice in expense_input_service.find_invoice_records(view)
             if invoice.get('invoice_id')
         }
-        if target_invoice_ids - verified_invoice_ids:
-            return [name for name in tools if name != EXPENSE_PROPOSAL_TOOL_NAME]
-        return [name for name in tools if name != INVOICE_VERIFY_TOOL_NAME]
+        pending_invoice_ids = [
+            invoice_id
+            for invoice_id in target_invoice_ids
+            if invoice_id not in verified_invoice_ids
+        ]
+        return analysis.trip_id, verified_invoice_ids, pending_invoice_ids
+
+    @staticmethod
+    def _tool_decision(
+        tool_name: str,
+        arguments: dict[str, Any],
+        reason_code: str,
+        expense_reason: str | None,
+    ) -> PlannerDecision:
+        return PlannerDecision.model_validate({
+            'action': 'tool',
+            'tool_name': tool_name,
+            'arguments': arguments,
+            'answer': None,
+            'reason_code': reason_code,
+            'expense_reason': expense_reason,
+        }).validate_decision()
 
     def terminal_clarification(self, context: DomainContext) -> str | None:
         """原因缺失时返回 Tool 的澄清文案，避免重新规划依赖链。"""
@@ -893,6 +1007,20 @@ class DomainProviderRegistry:
         provider = self.resolve(context)
         if provider is not None:
             provider.validate_completion(decision, tools, context)
+
+    def recover_completion_decision(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        provider = self.resolve(context)
+        if provider is None:
+            return None
+        return provider.recover_completion_decision(
+            decision, tools, context, error_code
+        )
 
     def postprocess_decision(
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext

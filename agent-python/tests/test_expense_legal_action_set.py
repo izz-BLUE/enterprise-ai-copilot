@@ -19,6 +19,7 @@ from app.schemas.planner_schema import (
 from tests.runtime_helpers import checkpoint_safe_state, runtime_for_state
 
 QUESTION = "根据我最近一次已批准的出差和对应发票，帮我准备差旅报销申请。"
+RECENT_TRIP_QUESTION = "帮我报销最近这次出差"
 TOOLS = [
     RAG_TOOL_NAME,
     TRAVEL_RECORD_TOOL_NAME,
@@ -88,6 +89,15 @@ def test_reason_available_without_travel_facts_hides_invoice_and_proposal():
 
 def test_selected_trip_with_pending_invoices_hides_proposal():
     legal = _legal(_travel_history())
+    assert INVOICE_VERIFY_TOOL_NAME in legal
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in legal
+
+
+def test_recent_trip_without_approved_qualifier_keeps_invoice_prerequisite():
+    legal = _legal(
+        _travel_history(include_other_trip=True),
+        question=RECENT_TRIP_QUESTION,
+    )
     assert INVOICE_VERIFY_TOOL_NAME in legal
     assert EXPENSE_PROPOSAL_TOOL_NAME not in legal
 

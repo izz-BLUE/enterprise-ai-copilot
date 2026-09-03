@@ -400,6 +400,113 @@ class TestExpenseReasonContinuation:
         ]
         assert result["stop_reason"] != "step_budget_exhausted"
 
+    def test_q2_continuation_converges_when_planner_repeats_finish_after_travel(
+        self, caplog,
+    ):
+        """Expense continuation must repair an early finish deterministically."""
+        original = "帮我报销最近这次出差"
+        active_memory = {
+            "taskType": "EXPENSE_REQUEST",
+            "status": "ACTIVE",
+            "taskStateJson": json.dumps({
+                "waiting_for": "reason",
+                "original_request": original,
+            }, ensure_ascii=False),
+        }
+        proposal_payload = json.dumps({
+            "success": True,
+            "kind": "proposal",
+            "action_proposal": {
+                "action_type": "EXPENSE_CLAIM",
+                "trip_id": "TRIP-20260818-001",
+                "claimed_amount": "1830.00",
+                "reimbursable_amount": "1730.00",
+                "cost_center": "COST-DEFAULT",
+                "reason": "拜访客户",
+                "invoice_ids": ["INV-001", "INV-002"],
+                "expense_items": [],
+                "stay_nights": 2,
+            },
+            "missing_fields": [],
+        }, ensure_ascii=False)
+        clarification_payload = json.dumps({
+            "success": True,
+            "kind": "clarification",
+            "action_proposal": None,
+            "missing_fields": ["reason"],
+            "message": "请提供本次报销原因。",
+        }, ensure_ascii=False)
+
+        first_decisions = [
+            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+        ]
+
+        def repeated_finish(*_args, **_kwargs):
+            repeated_finish.calls += 1
+            if repeated_finish.calls == 1:
+                return _tool(
+                    "travel_record_tool", {}, "need_travel_history",
+                    expense_reason="拜访客户",
+                )
+            return _finish("不应在前置条件完成前结束。")
+
+        repeated_finish.calls = 0
+        with patch("app.agents.planner_node.call_llm") as llm, \
+             patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+             patch("app.agents.tool_executor_node.invoice_verify_tool") as inv, \
+             patch("app.agents.tool_executor_node.expense_proposal_tool") as prop:
+            travel.invoke.return_value = TRAVEL_ANSWER
+            inv.invoke.side_effect = [INVOICE_ANSWER, INVOICE_2_ANSWER]
+            prop.invoke.side_effect = [clarification_payload, proposal_payload]
+
+            llm.side_effect = first_decisions
+            first = run_langgraph_agent(
+                original,
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                execution_mode="TASK_RUNTIME",
+            )
+            assert first["missing_fields"] == ["reason"]
+            assert first["route"] == "action"
+            assert first["action_proposal"] is None
+            assert first["answer"] == "请提供本次报销原因。"
+
+            llm.reset_mock()
+            llm.side_effect = repeated_finish
+            second = run_langgraph_agent(
+                "拜访客户",
+                use_planner=True,
+                employee_id="E10001",
+                allow_business_actions=True,
+                business_date=date(2026, 8, 26),
+                memory_context=active_memory,
+                execution_mode="TASK_RUNTIME",
+            )
+
+        assert second["route"] == "action"
+        assert second["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
+        assert second["request_expense_reason"] == "拜访客户"
+        assert [item["tool_name"] for item in second["tool_history"]] == [
+            "travel_record_tool",
+            "invoice_verify_tool",
+            "invoice_verify_tool",
+            "expense_proposal_tool",
+        ]
+        assert inv.invoke.call_count == 2
+        assert prop.invoke.call_count == 2  # Q1 clarification + Q2 proposal
+        assert second["step_count"] == 5
+        assert second["tool_call_count"] == 4
+        assert not any(
+            item["tool_name"].startswith("leave_")
+            for item in second["tool_history"]
+        )
+        assert not any(
+            "planner semantic validation failure" in record.message
+            for record in caplog.records
+        )
+
     def test_continuation_prompt_labels_current_and_original_requests_separately(self):
         prompt = build_planner_prompt(
             "客户拜访",
