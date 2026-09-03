@@ -142,6 +142,7 @@ def leave_proposal_tool(
     question: str = '',
     business_date: str = '',
     trace_id: str = '',
+    continuation_state: dict | None = None,
 ) -> str:
     """生成年假申请草稿(Proposal)供用户确认;不提交任何写操作。
 
@@ -164,6 +165,7 @@ def leave_proposal_tool(
         question,
         business_date=date.fromisoformat(business_date),
         trace_id=trace_id,
+        continuation_state=continuation_state,
     )
     if result.kind == 'proposal':
         return _payload(
@@ -188,6 +190,7 @@ def leave_proposal_tool(
                 'kind': 'clarification',
                 'action_proposal': None,
                 'missing_fields': result.clarification.missing_fields,
+                'continuation_state': result.clarification.continuation_state,
                 'message': result.clarification.question,
             },
             None,

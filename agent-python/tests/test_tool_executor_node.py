@@ -186,7 +186,7 @@ class TestToolExecution:
         }, ensure_ascii=False)
         with patch('app.agents.tool_executor_node.expense_proposal_tool') as proposal:
             proposal.invoke.return_value = proposal_result
-            result = tool_executor_node(state(
+            tool_executor_node(state(
                 question='根据最近一次已批准出差和对应发票准备报销。',
                 employee_id='E10001',
                 allow_business_actions=True,
@@ -200,6 +200,40 @@ class TestToolExecution:
                 ),
             ))
         assert proposal.invoke.call_args.args[0]['expense_reason'] is None
+
+    def test_leave_continuation_state_is_injected_and_returned_as_structured_state(self):
+        continuation = {
+            'continuation_type': 'leave_clarification',
+            'start_date': '2026-08-27',
+            'end_date': '2026-08-27',
+            'half_day': 'PM',
+            'reason': None,
+            'waiting_for': 'reason',
+            'missing_fields': ['reason'],
+        }
+        proposal_result = json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'continuation_state': continuation,
+            'message': '请补充年假申请原因。',
+        }, ensure_ascii=False)
+        with patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal:
+            proposal.invoke.return_value = proposal_result
+            result = tool_executor_node(state(
+                question='家里有事',
+                employee_id='E10001',
+                allow_business_actions=True,
+                business_date=__import__('datetime').date(2026, 8, 26),
+                continuation_leave_state=continuation,
+                planner_decision=_tool_decision(LEAVE_PROPOSAL_TOOL_NAME, {}),
+            ))
+
+        invoked = proposal.invoke.call_args.args[0]
+        assert invoked['question'] == '家里有事'
+        assert invoked['continuation_state'] == continuation
+        assert result['continuation_leave_state'] == continuation
 
     def test_tool_exception_becomes_observation_and_counts(self):
         with patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
@@ -681,7 +715,7 @@ class TestEnterpriseOaToolExecution:
         assert fake.travel_calls == []
 
     def test_travel_record_tool_requires_employee_id(self):
-        fake = self._patch_fake_client(
+        self._patch_fake_client(
             travel_response={'success': True, 'items': []},
             invoice_response={'success': True, 'valid': True},
         )
@@ -722,7 +756,7 @@ class TestEnterpriseOaToolExecution:
 
     def test_invoice_verify_tool_cross_employee_ownership_reject(self):
         """Stress G 端到端：跨员工 invoice 验真 → MCP ownership reject 透传。"""
-        fake = self._patch_fake_client(
+        self._patch_fake_client(
             travel_response={'success': True, 'items': []},
             invoice_response={
                 'success': False,

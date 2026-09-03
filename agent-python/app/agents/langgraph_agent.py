@@ -20,6 +20,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
 from app.agents.action_proposal_policy import PROPOSAL_TOOL_NAMES, is_confirmable_action_proposal
+from app.agents.domain_provider_registry import DOMAIN_PROVIDER_REGISTRY
 from app.agents.execution_history_policy import merge_execution_history
 from app.agents.planner_node import (
     _active_expense_original_request,
@@ -65,6 +66,8 @@ class AgentState(TypedDict):
     # ACTIVE Expense reason continuation 的原始业务请求；不属于 trusted
     # Runtime Context，仅供确定性差旅/发票输入解析，当前 question 仍是本轮输入。
     continuation_original_request: str | None
+    # ACTIVE Leave clarification 的确定性槽位；仅在当前输入命中待补字段时注入。
+    continuation_leave_state: dict | None
     # Agent Loop P0：step_count = Planner 已完成的决策次数（Finish/Refuse 也算一次）；
     # tool_call_count = 通过执行前校验后，实际发起 Tool 执行的次数——
     # 无论最终成功、超时、Provider 异常还是 Tool 自身失败，只要真正发起执行就计数。
@@ -763,6 +766,10 @@ def run_langgraph_agent(
         "request_expense_reason": None,
         "continuation_original_request": (
             _active_expense_original_request(memory_context)
+            if use_planner else None
+        ),
+        "continuation_leave_state": (
+            DOMAIN_PROVIDER_REGISTRY.leave_continuation_state(question, memory_context)
             if use_planner else None
         ),
         "step_count": 0,

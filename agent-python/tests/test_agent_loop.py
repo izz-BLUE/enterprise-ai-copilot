@@ -9,7 +9,9 @@ import json
 from datetime import date
 from unittest.mock import Mock, patch
 
-from app.agents.langgraph_agent import run_langgraph_agent
+from langgraph.checkpoint.memory import MemorySaver
+
+from app.agents.langgraph_agent import compile_agent_loop_graph, run_langgraph_agent
 from app.agents.planner_node import MAX_PLANNER_STEPS
 from app.agents.tool_executor_node import MAX_TOOL_CALLS
 from app.schemas.action_schema import (
@@ -986,3 +988,130 @@ class TestGuardsPreserved:
         serialized = str(result['action_proposal'])
         for forbidden in ('actionId', 'nonce', 'employeeId'):
             assert forbidden not in serialized
+
+    def test_leave_memory_continuation_reaches_proposal_with_absolute_slots(self):
+        continuation = {
+            'continuation_type': 'leave_clarification',
+            'start_date': '2026-07-17',
+            'end_date': '2026-07-17',
+            'half_day': 'PM',
+            'reason': None,
+            'waiting_for': 'reason',
+            'missing_fields': ['reason'],
+        }
+        decisions = [
+            _tool('leave_proposal_tool', {}, 'need_proposal'),
+            _finish('已生成年假申请草稿，请确认后提交。'),
+        ]
+        proposal_payload = json.dumps({
+            'kind': 'proposal',
+            'action_proposal': {
+                'action_type': 'ANNUAL_LEAVE_REQUEST',
+                'start_date': '2026-07-17',
+                'end_date': '2026-07-17',
+                'reason': '家里有事',
+                'half_day': 'PM',
+            },
+            'missing_fields': [],
+            'message': '已生成年假申请草稿，请确认后提交。',
+        }, ensure_ascii=False)
+        proposal_tool = Mock()
+        proposal_tool.invoke.return_value = proposal_payload
+        memory_context = {
+            'taskType': 'LEAVE_REQUEST',
+            'status': 'ACTIVE',
+            'taskStateJson': json.dumps(continuation, ensure_ascii=False),
+        }
+
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions), \
+             patch('app.agents.tool_executor_node.leave_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '家里有事',
+                allow_business_actions=True,
+                business_date=date(2026, 7, 17),
+                employee_id='E1001',
+                memory_context=memory_context,
+                use_planner=True,
+            )
+
+        invoked = proposal_tool.invoke.call_args.args[0]
+        assert invoked['question'] == '家里有事'
+        assert invoked['continuation_state'] == continuation
+        assert result['action_proposal']['start_date'] == date(2026, 7, 17)
+        assert result['action_proposal']['half_day'] == 'PM'
+        assert result['action_proposal']['reason'] == '家里有事'
+
+    def test_leave_clarification_continuation_survives_checkpoint_refresh(self):
+        graph = compile_agent_loop_graph(checkpointer=MemorySaver())
+        thread_id = 'leave-clarification-checkpoint'
+        continuation = {
+            'continuation_type': 'leave_clarification',
+            'start_date': '2026-07-17',
+            'end_date': '2026-07-17',
+            'half_day': 'NONE',
+            'reason': None,
+            'waiting_for': 'reason',
+            'missing_fields': ['reason'],
+        }
+        clarification_payload = json.dumps({
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'continuation_state': continuation,
+            'message': '请补充年假申请原因。',
+        }, ensure_ascii=False)
+        proposal_payload = json.dumps({
+            'kind': 'proposal',
+            'action_proposal': {
+                'action_type': 'ANNUAL_LEAVE_REQUEST',
+                'start_date': '2026-07-17',
+                'end_date': '2026-07-17',
+                'reason': '家里有事',
+                'half_day': 'NONE',
+            },
+            'missing_fields': [],
+        }, ensure_ascii=False)
+
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+            _tool('leave_proposal_tool', {}, 'need_proposal'),
+            _finish('请补充年假申请原因。'),
+        ]), patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal_tool:
+            proposal_tool.invoke.return_value = clarification_payload
+            first = run_langgraph_agent(
+                '帮我申请明天一天年假',
+                allow_business_actions=True,
+                business_date=date(2026, 7, 16),
+                employee_id='E1001',
+                graph=graph,
+                runtime_thread_id=thread_id,
+                use_planner=True,
+            )
+
+        snapshot = graph.get_state({'configurable': {'thread_id': thread_id}})
+        assert first['continuation_leave_state'] == continuation
+        assert snapshot.values['continuation_leave_state'] == continuation
+
+        memory_context = {
+            'taskType': 'LEAVE_REQUEST',
+            'status': 'ACTIVE',
+            'taskStateJson': json.dumps(continuation, ensure_ascii=False),
+        }
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+            _tool('leave_proposal_tool', {}, 'need_proposal'),
+            _finish('已生成年假申请草稿，请确认后提交。'),
+        ]), patch('app.agents.tool_executor_node.leave_proposal_tool') as proposal_tool:
+            proposal_tool.invoke.return_value = proposal_payload
+            second = run_langgraph_agent(
+                '家里有事',
+                allow_business_actions=True,
+                business_date=date(2026, 7, 17),
+                employee_id='E1001',
+                memory_context=memory_context,
+                graph=graph,
+                runtime_thread_id=thread_id,
+                use_planner=True,
+            )
+
+        assert second['action_proposal']['start_date'] == date(2026, 7, 17)
+        assert second['action_proposal']['reason'] == '家里有事'
+        assert second['continuation_leave_state'] is None

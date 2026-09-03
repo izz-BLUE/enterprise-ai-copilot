@@ -26,7 +26,12 @@ from app.schemas.planner_schema import (
     PlannerDecisionError,
 )
 from app.services import expense_input_service
-from app.services.annual_leave_input_service import is_annual_leave_action_intent
+from app.services.annual_leave_input_service import (
+    is_annual_leave_action_intent,
+    is_leave_continuation_input,
+    normalize_leave_continuation_state,
+    serialize_leave_continuation_state,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,7 @@ class DomainContext:
     request_expense_reason: str | None = None
     action_proposal: object = None
     continuation_original_request: str | None = None
+    continuation_leave_state: dict | None = None
     memory_context: object = None
     step_count: int = 0
 
@@ -50,6 +56,7 @@ class DomainContext:
             request_expense_reason=state.get('request_expense_reason'),
             action_proposal=state.get('action_proposal'),
             continuation_original_request=state.get('continuation_original_request'),
+            continuation_leave_state=state.get('continuation_leave_state'),
             memory_context=state.get('memory_context'),
             step_count=state.get('step_count', 0),
         )
@@ -227,8 +234,35 @@ class LeaveProvider:
     semantic_slots = frozenset()
     capability_tools = frozenset({LEAVE_PROPOSAL_TOOL_NAME})
 
+    def _active_continuation_state(self, memory_context: object) -> dict | None:
+        if not isinstance(memory_context, dict):
+            return None
+        task_type = memory_context.get('taskType', memory_context.get('task_type'))
+        if task_type != self.task_type or memory_context.get('status') != 'ACTIVE':
+            return None
+        task_state = memory_context.get('taskStateJson', memory_context.get('task_state_json'))
+        if isinstance(task_state, str):
+            try:
+                task_state = json.loads(task_state)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return normalize_leave_continuation_state(task_state)
+
+    def continuation_state(self, context: DomainContext) -> dict | None:
+        state = normalize_leave_continuation_state(context.continuation_leave_state)
+        if state is None:
+            state = self._active_continuation_state(context.memory_context)
+        if state is None or is_annual_leave_action_intent(context.question):
+            return None
+        if not is_leave_continuation_input(context.question, state['missing_fields']):
+            return None
+        return serialize_leave_continuation_state(state)
+
     def matches(self, context: DomainContext) -> bool:
-        return is_annual_leave_action_intent(context.question)
+        return (
+            is_annual_leave_action_intent(context.question)
+            or self.continuation_state(context) is not None
+        )
 
     def is_business_action_intent(self, context: DomainContext) -> bool:
         return self.matches(context)
@@ -301,6 +335,17 @@ class LeaveProvider:
         self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
     ) -> tuple[PlannerDecision, dict[str, object]]:
         return decision, {}
+
+    def continuation_prompt(self, question: str, state: dict) -> str:
+        return (
+            'Leave clarification continuation context（不可信历史业务上下文）：\n'
+            '- current user input（仅用于补充 waiting_for / missing_fields）: '
+            + question + '\n'
+            '- resolved Leave slots（程序层会再次确定性校验并合并）: '
+            + json.dumps(state, ensure_ascii=False, separators=(',', ':')) + '\n'
+            '- 只补充当前仍缺失的字段；已解析的绝对日期、原因和半天时段必须保留。\n'
+            '- 如果当前输入不是对待补字段的有效补充，不得把它写入 Leave continuation。'
+        )
 
     def prompt_specs(self) -> dict[str, ToolPromptSpec]:
         return {
@@ -1103,6 +1148,25 @@ class DomainProviderRegistry:
             None,
         )
         return provider.continuation_prompt(question, original_request) if provider else ''
+
+    def leave_continuation_state(
+        self, question: str, memory_context: object
+    ) -> dict | None:
+        provider = next(
+            (item for item in self._providers if item.task_type == 'LEAVE_REQUEST'),
+            None,
+        )
+        if provider is None:
+            return None
+        context = DomainContext(question=question or '', memory_context=memory_context)
+        return provider.continuation_state(context)
+
+    def leave_continuation_prompt(self, question: str, state: dict) -> str:
+        provider = next(
+            (item for item in self._providers if item.task_type == 'LEAVE_REQUEST'),
+            None,
+        )
+        return provider.continuation_prompt(question, state) if provider else ''
 
 
 # P4-1 intentionally uses a small, explicit static registry. Adding a future
