@@ -817,6 +817,28 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                 decision = PlannerDecision.model_validate(terminal_refusal)
             decision.validate_decision()
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
+            _, error_code, _ = _planner_validation_metadata(exc)
+            try:
+                recovered_decision = DOMAIN_PROVIDER_REGISTRY.recover_completion_decision(
+                    decision,
+                    current_visible_tools,
+                    domain_context,
+                    error_code,
+                ) if decision is not None else None
+            except DomainProviderAmbiguityError:
+                recovered_decision = None
+            if recovered_decision is not None:
+                # Provider 已经根据当前 tool_history 确定了唯一 prerequisite；
+                # 不再依赖 LLM semantic repair 自我修正，也不接受原 finish。
+                decision = recovered_decision
+                logger.info(
+                    '[%s] planner completion recovered deterministic tool=%s '
+                    'reason_code=%s',
+                    trace_id,
+                    decision.tool_name,
+                    decision.reason_code,
+                )
+                break
             _log_planner_validation_failure(
                 trace_id,
                 payload,

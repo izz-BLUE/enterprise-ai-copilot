@@ -130,6 +130,16 @@ class TestExpenseProposalHappy:
         assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
         assert proposal["reason"] == "客户拜访"
 
+    def test_recent_trip_without_approved_qualifier_selects_approved_trip_and_all_invoices(self):
+        out = _invoke("帮我报销最近这次出差", expense_reason="拜访客户")
+
+        assert out["success"] is True
+        assert out["kind"] == "proposal"
+        proposal = out["action_proposal"]
+        assert proposal["trip_id"] == "TRIP-20260818-001"
+        assert proposal["invoice_ids"] == ["INV-001", "INV-002"]
+        assert proposal["reason"] == "拜访客户"
+
     def test_relative_invoice_selection_still_requires_verified_invoice_facts(self):
         context = {
             "travel_record": _HAPPY_CONTEXT["travel_record"],

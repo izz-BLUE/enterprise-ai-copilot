@@ -135,7 +135,7 @@ def test_first_planner_reason_is_frozen_for_current_request():
     assert result['planner_decision']['expense_reason'] == '客户拜访'
 
 
-def test_expense_planner_repairs_premature_finish_to_legal_invoice(monkeypatch):
+def test_expense_planner_recovers_premature_finish_to_legal_invoice(monkeypatch, caplog):
     monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://127.0.0.1:8100/mcp')
     travel_history = [{
         'tool_name': TRAVEL_RECORD_TOOL_NAME,
@@ -153,11 +153,6 @@ def test_expense_planner_repairs_premature_finish_to_legal_invoice(monkeypatch):
     premature_finish = (
         '{"action":"finish","answer":"已完成。","reason_code":"task_complete"}'
     )
-    invoice = (
-        '{"action":"tool","tool_name":"invoice_verify_tool",'
-        '"arguments":{"invoice_id":"INV-1"},"reason_code":"need_invoice_verify",'
-        '"expense_reason":"客户拜访"}'
-    )
     initial = state(
         question='报销原因为客户拜访，帮我根据最近一次已批准的出差和对应发票准备差旅报销申请。',
         allow_business_actions=True,
@@ -170,18 +165,18 @@ def test_expense_planner_repairs_premature_finish_to_legal_invoice(monkeypatch):
     )
 
     with patch('app.agents.planner_node.call_llm',
-               side_effect=[premature_finish, invoice]) as llm:
+               return_value=premature_finish) as llm:
         planner_result = planner_node(initial)
 
-    assert llm.call_count == 2
+    assert llm.call_count == 1
     assert planner_result['planner_decision']['action'] == 'tool'
     assert planner_result['planner_decision']['tool_name'] == 'invoice_verify_tool'
     assert planner_result['stop_reason'] == 'continue'
     assert planner_result['step_count'] == 2
-    repair_prompt = llm.call_args_list[1].args[1]
-    assert EXPENSE_PROPOSAL_TOOL_NAME not in repair_prompt
-    assert '当前合法能力清单' in repair_prompt
-    assert 'action="tool"' in repair_prompt
+    assert not any(
+        'planner semantic validation failure' in record.message
+        for record in caplog.records
+    )
 
     after_planner = {**initial, **planner_result}
     invoice_tool = Mock()

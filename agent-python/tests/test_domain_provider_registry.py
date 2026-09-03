@@ -457,6 +457,89 @@ def test_expense_provider_preserves_selected_trip_prerequisite_order():
     ) == [TRAVEL_RECORD_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME]
 
 
+def test_expense_provider_completion_recovery_selects_pending_invoice_then_proposal():
+    provider = ExpenseProvider()
+    tools = [
+        RAG_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+    ]
+
+    first = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(_history())),
+        'expense_proposal_missing',
+    )
+    assert first is not None
+    assert first.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert first.arguments == {'invoice_id': 'INV-1'}
+
+    second = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(_history('INV-1'))),
+        'expense_proposal_missing',
+    )
+    assert second is not None
+    assert second.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert second.arguments == {'invoice_id': 'INV-2'}
+
+    final = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(_history('INV-1', 'INV-2'))),
+        'expense_proposal_missing',
+    )
+    assert final is not None
+    assert final.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert final.arguments == {}
+
+
+def test_expense_provider_completion_recovery_stays_fail_closed_without_selected_trip():
+    assert ExpenseProvider().recover_completion_decision(
+        _finish_decision(),
+        [RAG_TOOL_NAME, EXPENSE_PROPOSAL_TOOL_NAME],
+        _context(tool_history=tuple()),
+        'expense_proposal_missing',
+    ) is None
+
+
+def test_expense_provider_completion_recovery_handles_single_invoice():
+    provider = ExpenseProvider()
+    history = _history()
+    travel_payload = json.loads(history[0]['observation'])
+    travel_payload['items'][0]['expense_documents'] = [{'invoice_id': 'INV-1'}]
+    history[0]['observation'] = json.dumps(travel_payload)
+    tools = [
+        RAG_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+    ]
+
+    invoice = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(history)),
+        'expense_proposal_missing',
+    )
+    assert invoice is not None
+    assert invoice.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert invoice.arguments == {'invoice_id': 'INV-1'}
+
+    history.extend(_history('INV-1')[1:])
+    proposal = provider.recover_completion_decision(
+        _finish_decision(),
+        tools,
+        _context(tool_history=tuple(history)),
+        'expense_proposal_missing',
+    )
+    assert proposal is not None
+    assert proposal.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+
+
 def test_executor_second_gate_blocks_illegal_expense_proposal():
     state = {
         'question': QUESTION,
