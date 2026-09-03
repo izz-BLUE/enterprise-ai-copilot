@@ -679,6 +679,9 @@ class TestPlannerSelection:
             assert first["missing_fields"] == ["reason"]
             assert first["action_proposal"] is None
             assert first["answer"] == "请提供本次报销原因。"
+            assert first["step_count"] == 2
+            assert first["tool_call_count"] == 1
+            assert llm.call_count == 1
 
             llm.reset_mock()
             llm.side_effect = second_decisions
@@ -695,6 +698,9 @@ class TestPlannerSelection:
         assert second["route"] == "action"
         assert second["missing_fields"] == []
         assert second["action_proposal"]["reason"] == "客户拜访"
+        assert second["step_count"] == 5
+        assert second["tool_call_count"] == 4
+        assert llm.call_count == 5
 
     def test_missing_reason_short_circuits_read_only_tools(self):
         """首次原因为空时，程序层直接进入 reason-first clarification。"""

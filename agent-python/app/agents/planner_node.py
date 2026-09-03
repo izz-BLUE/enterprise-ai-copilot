@@ -680,12 +680,31 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         current_visible_tools = DOMAIN_PROVIDER_REGISTRY.legal_tools(
             current_visible_tools, domain_context
         )
+        terminal_clarification = DOMAIN_PROVIDER_REGISTRY.terminal_clarification(
+            domain_context
+        )
     except DomainProviderAmbiguityError as exc:
         logger.warning('[%s] domain provider ambiguity: %s', trace_id, exc)
         return _decision_result(
             state,
             _refuse_decision('当前请求同时命中多个业务领域，已拒绝处理。', 'cannot_complete'),
             'invalid_decision',
+        )
+
+    if terminal_clarification is not None:
+        # Proposal Tool 已明确要求用户补充原因；这是当前请求的终态澄清，
+        # 不应再次调用 LLM 或重新打开出差/发票依赖链。
+        decision = PlannerDecision.model_validate({
+            'action': 'finish',
+            'answer': terminal_clarification,
+            'reason_code': 'task_complete',
+            'expense_reason': None,
+        }).model_dump()
+        return _decision_result(
+            state,
+            decision,
+            'task_complete',
+            category='business_action',
         )
 
     user_prompt = build_planner_prompt(
