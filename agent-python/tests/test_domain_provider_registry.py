@@ -374,6 +374,72 @@ def test_expense_allowed_clarification_still_allows_finish():
     )
 
 
+def test_expense_reason_clarification_is_terminal_for_planner():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请提供本次报销原因。',
+        }),
+    },)
+
+    assert ExpenseProvider().terminal_clarification(
+        DomainContext(question=QUESTION, tool_history=history)
+    ) == '请提供本次报销原因。'
+
+
+def test_expense_invoice_clarification_is_not_terminal_for_planner():
+    history = ({
+        'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+        'status': 'success',
+        'observation': json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['invoice_ids'],
+            'message': '请补充发票信息。',
+        }),
+    },)
+
+    assert ExpenseProvider().terminal_clarification(
+        DomainContext(question=QUESTION, tool_history=history)
+    ) is None
+
+
+def test_expense_terminal_clarification_uses_latest_proposal_result():
+    history = (
+        {
+            'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+            'status': 'success',
+            'observation': json.dumps({
+                'success': True,
+                'kind': 'clarification',
+                'action_proposal': None,
+                'missing_fields': ['reason'],
+                'message': '请提供本次报销原因。',
+            }),
+        },
+        {
+            'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,
+            'status': 'success',
+            'observation': json.dumps({
+                'success': True,
+                'kind': 'proposal',
+                'action_proposal': {'action_type': 'EXPENSE_CLAIM'},
+                'missing_fields': [],
+            }),
+        },
+    )
+
+    assert ExpenseProvider().terminal_clarification(
+        DomainContext(question=QUESTION, tool_history=history)
+    ) is None
+
+
 def test_expense_invoice_clarification_still_cannot_finish():
     history = ({
         'tool_name': EXPENSE_PROPOSAL_TOOL_NAME,

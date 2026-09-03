@@ -90,6 +90,8 @@ class DomainProvider(Protocol):
 
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]: ...
 
+    def terminal_clarification(self, context: DomainContext) -> str | None: ...
+
     def validate_tool_call(
         self, tool_name: str, arguments: dict[str, Any], context: DomainContext
     ) -> None: ...
@@ -226,6 +228,9 @@ class LeaveProvider:
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
         # Leave 当前没有额外的领域依赖顺序；保留 capability gate 原集合。
         return list(tools)
+
+    def terminal_clarification(self, context: DomainContext) -> str | None:
+        return None
 
     def validate_tool_call(
         self, tool_name: str, arguments: dict[str, Any], context: DomainContext
@@ -405,6 +410,24 @@ class ExpenseProvider:
         if target_invoice_ids - verified_invoice_ids:
             return [name for name in tools if name != EXPENSE_PROPOSAL_TOOL_NAME]
         return [name for name in tools if name != INVOICE_VERIFY_TOOL_NAME]
+
+    def terminal_clarification(self, context: DomainContext) -> str | None:
+        """原因缺失时返回 Tool 的澄清文案，避免重新规划依赖链。"""
+        proposal_results = _successful_observations(
+            context.tool_history, EXPENSE_PROPOSAL_TOOL_NAME
+        )
+        latest = proposal_results[-1] if proposal_results else None
+        if (
+            latest is None
+            or latest.get('kind') != 'clarification'
+            or latest.get('action_proposal') is not None
+        ):
+            return None
+        missing_fields = latest.get('missing_fields')
+        if not isinstance(missing_fields, list) or missing_fields != ['reason']:
+            return None
+        message = latest.get('message')
+        return message if isinstance(message, str) and message.strip() else None
 
     def validate_tool_call(
         self, tool_name: str, arguments: dict[str, Any], context: DomainContext
@@ -830,6 +853,10 @@ class DomainProviderRegistry:
         legal = provider.legal_tools(original, context)
         allowed = set(original)
         return [name for name in legal if name in allowed]
+
+    def terminal_clarification(self, context: DomainContext) -> str | None:
+        provider = self.resolve(context)
+        return provider.terminal_clarification(context) if provider is not None else None
 
     def validate_tool_call(
         self, tool_name: str, arguments: dict[str, Any], context: DomainContext

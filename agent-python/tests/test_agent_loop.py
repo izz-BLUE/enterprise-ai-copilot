@@ -23,10 +23,11 @@ RAG_RESULT = '{"answer":"年假制度：入职满1年5天。","success":true,"so
 EVAL_RESULT = json.dumps({'retrieval': {'final_pass_rate': 0.8}}, ensure_ascii=False)
 
 
-def _tool(tool_name, arguments, reason):
+def _tool(tool_name, arguments, reason, expense_reason=None):
     return json.dumps({
         'action': 'tool', 'tool_name': tool_name,
         'arguments': arguments, 'reason_code': reason,
+        'expense_reason': expense_reason,
     }, ensure_ascii=False)
 
 
@@ -211,6 +212,139 @@ class TestFailureRecovery:
         assert 'provider timeout' not in result['observation']
         assert '"error_code": "tool_execution_failed"' in result['observation']
         assert result['tool_history'][0]['status'] == 'error'
+
+
+class TestExpenseClarificationConvergence:
+    def test_reason_clarification_stops_before_dependency_tools(self):
+        """Expense reason clarification is terminal until the user answers it."""
+        clarification_payload = json.dumps({
+            'success': True,
+            'kind': 'clarification',
+            'action_proposal': None,
+            'missing_fields': ['reason'],
+            'message': '请提供本次报销原因。',
+        }, ensure_ascii=False)
+        decisions = [
+            _tool('expense_proposal_tool', {}, 'need_expense_proposal'),
+            _tool('travel_record_tool', {}, 'need_travel_history'),
+            _tool('invoice_verify_tool', {'invoice_id': 'INV-001'}, 'need_invoice_verify'),
+            _tool('invoice_verify_tool', {'invoice_id': 'INV-002'}, 'need_invoice_verify'),
+            _tool('expense_proposal_tool', {}, 'need_expense_proposal'),
+            _tool('expense_proposal_tool', {}, 'need_expense_proposal'),
+        ]
+        proposal_tool = Mock()
+        proposal_tool.invoke.return_value = clarification_payload
+        travel_tool = Mock()
+        travel_tool.invoke.return_value = json.dumps({
+            'success': True,
+            'items': [{
+                'trip_id': 'TRIP-001',
+                'status': 'APPROVED',
+                'expense_documents': [
+                    {'invoice_id': 'INV-001'}, {'invoice_id': 'INV-002'},
+                ],
+            }],
+        }, ensure_ascii=False)
+        invoice_tool = Mock()
+        invoice_tool.invoke.side_effect = lambda args: json.dumps({
+            'success': True, 'invoice_id': args['invoice_id'], 'valid': True,
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.planner_node._enterprise_oa_mcp_url_config',
+                      return_value='http://oa.test'), \
+                patch('app.agents.tool_executor_node.expense_proposal_tool', proposal_tool), \
+                patch('app.agents.tool_executor_node.travel_record_tool', travel_tool), \
+                patch('app.agents.tool_executor_node.invoice_verify_tool', invoice_tool):
+            result = run_langgraph_agent(
+                '根据最近一次已批准的出差和对应发票准备报销。',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'action'
+        assert result['action_proposal'] is None
+        assert result['missing_fields'] == ['reason']
+        assert result['step_count'] == 2
+        assert result['tool_call_count'] == 1
+        assert llm.call_count == 1
+        assert proposal_tool.invoke.call_count == 1
+        travel_tool.invoke.assert_not_called()
+        invoice_tool.invoke.assert_not_called()
+
+    def test_two_invoice_expense_proposal_completes_before_budget(self):
+        """两张发票均验真后生成 Proposal，不触发独立预算边界。"""
+        proposal_payload = json.dumps({
+            'success': True,
+            'kind': 'proposal',
+            'action_proposal': {
+                'action_type': 'EXPENSE_CLAIM',
+                'trip_id': 'TRIP-001',
+                'expense_items': [],
+                'claimed_amount': '1830.00',
+                'reimbursable_amount': '1730.00',
+                'cost_center': 'COST-DEFAULT',
+                'reason': '客户拜访',
+                'invoice_ids': ['INV-001', 'INV-002'],
+                'stay_nights': 2,
+            },
+            'missing_fields': [],
+        }, ensure_ascii=False)
+        decisions = [
+            _tool('travel_record_tool', {}, 'need_travel_history', expense_reason='客户拜访'),
+            _tool('invoice_verify_tool', {'invoice_id': 'INV-001'}, 'need_invoice_verify'),
+            _tool('invoice_verify_tool', {'invoice_id': 'INV-002'}, 'need_invoice_verify'),
+            _tool('expense_proposal_tool', {}, 'need_expense_proposal'),
+            _finish('已生成报销申请草稿，请确认后提交。'),
+        ]
+        travel_tool = Mock()
+        travel_tool.invoke.return_value = json.dumps({
+            'success': True,
+            'items': [{
+                'trip_id': 'TRIP-001',
+                'status': 'APPROVED',
+                'expense_documents': [
+                    {'invoice_id': 'INV-001'}, {'invoice_id': 'INV-002'},
+                ],
+            }],
+        }, ensure_ascii=False)
+        invoice_tool = Mock()
+        invoice_tool.invoke.side_effect = lambda args: json.dumps({
+            'success': True, 'invoice_id': args['invoice_id'], 'valid': True,
+        }, ensure_ascii=False)
+        proposal_tool = Mock()
+        proposal_tool.invoke.return_value = proposal_payload
+        with patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.planner_node._enterprise_oa_mcp_url_config',
+                      return_value='http://oa.test'), \
+                patch('app.agents.tool_executor_node.travel_record_tool', travel_tool), \
+                patch('app.agents.tool_executor_node.invoice_verify_tool', invoice_tool), \
+                patch('app.agents.tool_executor_node.expense_proposal_tool', proposal_tool):
+            result = run_langgraph_agent(
+                '根据最近一次已批准的出差和对应发票 INV-001、INV-002 准备报销，'
+                '报销原因是客户拜访。',
+                allow_business_actions=True,
+                business_date=BUSINESS_DATE,
+                employee_id='E10001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'action'
+        assert result['action_proposal']['invoice_ids'] == ['INV-001', 'INV-002']
+        assert result['action_proposal']['reason'] == '客户拜访'
+        assert result['step_count'] == 5
+        assert result['tool_call_count'] == 4
+        assert llm.call_count == 5
+        assert travel_tool.invoke.call_count == 1
+        assert invoice_tool.invoke.call_count == 2
+        assert proposal_tool.invoke.call_count == 1
 
 
 class TestPlannerSemanticRepair:
