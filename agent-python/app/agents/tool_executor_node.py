@@ -141,6 +141,8 @@ class _ExecutorContext:
     # ACTIVE Expense continuation 的 Q1 仅供 expense_proposal_tool 的
     # 差旅/发票确定性解析；普通 Tool 仍只接收当前请求 question。
     expense_request_question: str | None = None
+    # ACTIVE Leave clarification 的结构化槽位；只用于 Leave Proposal 输入合并。
+    leave_continuation_state: dict | None = None
     tool_history: list[dict] = field(default_factory=list)  # 用于构造 ExpenseProposalContext
 
 
@@ -194,6 +196,8 @@ def _inject_leave_proposal(args: dict, ctx: _ExecutorContext) -> dict:
     merged['question'] = ctx.question
     merged['business_date'] = ctx.business_date.isoformat() if ctx.business_date else ''
     merged['trace_id'] = ctx.trace_id
+    if ctx.leave_continuation_state is not None:
+        merged['continuation_state'] = ctx.leave_continuation_state
     return merged
 
 
@@ -269,6 +273,7 @@ def _leave_proposal_post(parsed: dict, tool_name: str) -> dict:
     return {
         'action_proposal': _restore_iso_date_fields(parsed.get('action_proposal')),
         'missing_fields': parsed.get('missing_fields', []),
+        'continuation_leave_state': parsed.get('continuation_state'),
     }
 
 
@@ -292,7 +297,7 @@ _LEAVE_SYSTEM_ARG_KEYS = frozenset({'employee_id', 'trace_id'})
 # 模型 arguments 中不得夹带任何一项(业务参数由受控链路基于原始问题解析)
 _PROPOSAL_SYSTEM_ARG_KEYS = frozenset({
     'employee_id', 'trace_id', 'business_date',
-    'start_date', 'end_date', 'reason', 'half_day',
+    'start_date', 'end_date', 'reason', 'half_day', 'continuation_state',
 })
 
 
@@ -615,6 +620,12 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             # 最新 PlannerDecision 覆盖此前的 null 或有效原因。
             expense_reason=state.get('request_expense_reason'),
             expense_request_question=state.get('continuation_original_request'),
+            leave_continuation_state=(
+                state.get('continuation_leave_state')
+                or DOMAIN_PROVIDER_REGISTRY.leave_continuation_state(
+                    state.get('question', ''), state.get('memory_context')
+                )
+            ),
             tool_history=tool_history,
         )
         if spec.pre_inject is not None:

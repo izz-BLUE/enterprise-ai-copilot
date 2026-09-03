@@ -17,8 +17,10 @@ class AnnualLeaveActionProposal(BaseModel):
 class AnnualLeaveClarification(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    missing_fields: list[Literal["start_date", "end_date", "reason"]]
+    missing_fields: list[Literal["start_date", "end_date", "reason", "half_day"]]
     question: str
+    # 仅供 Memory continuation 持久化；业务写入仍由 Java Proposal 链路负责。
+    continuation_state: dict | None = None
 
 
 class ProposalPlanningResult(BaseModel):

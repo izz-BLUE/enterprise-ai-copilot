@@ -19,6 +19,7 @@ from app.schemas.action_schema import (
 from app.services.annual_leave_input_service import (
     AnnualLeaveInputError,
     analyze_annual_leave_input,
+    build_leave_continuation_state,
     clarification_question,
 )
 from app.services.llm_service import _get_controlled_tool_client
@@ -92,11 +93,16 @@ def plan_annual_leave_action(
     business_date: date,
     policy_context: str = "",
     trace_id: str = "",
+    continuation_state: dict | None = None,
     completion_create: Callable[..., Any] | None = None,
 ) -> ToolPlanningResult:
     del policy_context, trace_id  # Never send business or tracing data to the model.
     try:
-        analysis = analyze_annual_leave_input(question, business_date=business_date)
+        analysis = analyze_annual_leave_input(
+            question,
+            business_date=business_date,
+            continuation_state=continuation_state,
+        )
     except AnnualLeaveInputError:
         return _invalid("tool_arguments_invalid")
     if analysis.missing_fields:
@@ -104,6 +110,7 @@ def plan_annual_leave_action(
             clarification=AnnualLeaveClarification(
                 missing_fields=analysis.missing_fields,
                 question=clarification_question(analysis.missing_fields),
+                continuation_state=build_leave_continuation_state(analysis),
             )
         )
 

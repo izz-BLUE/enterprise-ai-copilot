@@ -936,6 +936,58 @@ def test_leave_provider_is_simple_and_has_no_expense_semantic_slot():
     assert provider.semantic_slots == frozenset()
 
 
+def test_leave_continuation_is_scoped_to_active_leave_state_and_matching_slot_input():
+    state = {
+        'continuation_type': 'leave_clarification',
+        'start_date': '2026-07-17',
+        'end_date': '2026-07-17',
+        'half_day': 'NONE',
+        'reason': None,
+        'waiting_for': 'reason',
+        'missing_fields': ['reason'],
+    }
+    memory = {
+        'taskType': 'LEAVE_REQUEST',
+        'status': 'ACTIVE',
+        'taskStateJson': json.dumps({'phase': 'clarify', **state}, ensure_ascii=False),
+    }
+    provider = LeaveProvider()
+
+    assert provider.continuation_state(
+        DomainContext(question='家里有事', memory_context=memory)
+    ) == state
+    assert provider.matches(
+        DomainContext(question='家里有事', memory_context=memory)
+    )
+    assert provider.continuation_state(
+        DomainContext(question='公司的年假制度是什么', memory_context=memory)
+    ) is None
+    assert provider.continuation_state(
+        DomainContext(question='帮我申请明天一天年假', memory_context=memory)
+    ) is None
+    assert provider.continuation_state(
+        DomainContext(question='取消', memory_context=memory)
+    ) is None
+    assert provider.continuation_state(DomainContext(
+        question='家里有事',
+        memory_context={
+            'taskType': 'EXPENSE_REQUEST',
+            'status': 'ACTIVE',
+            'taskStateJson': json.dumps(state, ensure_ascii=False),
+        },
+    )) is None
+    assert provider.continuation_state(
+        DomainContext(
+            question='家里有事',
+            memory_context={
+                'taskType': 'LEAVE_REQUEST',
+                'status': 'ABANDONED',
+                'taskStateJson': json.dumps(state, ensure_ascii=False),
+            },
+        )
+    ) is None
+
+
 def test_multiple_provider_match_fails_closed():
     with pytest.raises(DomainProviderAmbiguityError):
         DOMAIN_PROVIDER_REGISTRY.resolve(

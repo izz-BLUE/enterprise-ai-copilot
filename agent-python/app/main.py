@@ -69,6 +69,7 @@ from app.schemas.task_decomposition_schema import (
     TaskDecompositionResult,
 )
 from app.schemas.version_schema import VersionResponse
+from app.services.annual_leave_input_service import serialize_leave_continuation_state
 from app.services.llm_service import call_llm
 from app.services.rag_service import process_chat
 from app.services.task_decomposition_service import decompose_write_tasks
@@ -378,6 +379,74 @@ def _attach_expense_original_request(
     enriched_state['original_request'] = original_request
     # 与 MemoryWritePolicy / Java AiTaskMemoryService 保持同一 fail-closed
     # 上限；超限时不返回一个可能被下游拒绝的提案。
+    if len(json.dumps(enriched_state, ensure_ascii=False).encode('utf-8')) > 16 * 1024:
+        return command
+    return command.model_copy(update={'task_state': enriched_state})
+
+
+_LEAVE_CONTINUATION_TASK_KEYS = frozenset({
+    'continuation_type', 'start_date', 'end_date', 'half_day', 'reason',
+    'waiting_for', 'missing_fields', 'original_request',
+})
+
+
+def _leave_clarification_succeeded(agent_result: dict) -> bool:
+    """确认 Leave Tool 本轮确实返回了 clarification。"""
+    tool_history = agent_result.get('tool_history')
+    if not isinstance(tool_history, list):
+        return False
+    for item in tool_history:
+        if (
+            not isinstance(item, dict)
+            or item.get('tool_name') != 'leave_proposal_tool'
+            or item.get('status') != 'success'
+        ):
+            continue
+        observation = item.get('observation')
+        if isinstance(observation, str):
+            try:
+                observation = json.loads(observation)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if isinstance(observation, dict) and observation.get('kind') == 'clarification':
+            return True
+    return False
+
+
+def _attach_leave_clarification_state(
+    command: MemoryWriteCommand,
+    agent_result: dict,
+) -> MemoryWriteCommand:
+    """把 Leave Tool 已确定槽位写入当前 Leave Memory command。
+
+    该适配只消费 Tool 返回的结构化 continuation_state，不从历史对话、summary
+    或 LLM 自由文本反推日期/原因；Proposal 成功时清理旧 Leave 槽位。
+    """
+    if (
+        command.action != 'UPSERT'
+        or command.status != 'ACTIVE'
+        or command.task_type != 'LEAVE_REQUEST'
+        or not isinstance(command.task_state, dict)
+    ):
+        return command
+
+    enriched_state = dict(command.task_state)
+    if agent_result.get('action_proposal') is not None:
+        changed = False
+        for key in _LEAVE_CONTINUATION_TASK_KEYS:
+            changed = enriched_state.pop(key, None) is not None or changed
+        if not changed:
+            return command
+    else:
+        if not _leave_clarification_succeeded(agent_result):
+            return command
+        continuation_state = serialize_leave_continuation_state(
+            agent_result.get('continuation_leave_state')
+        )
+        if continuation_state is None:
+            return command
+        enriched_state.update(continuation_state)
+
     if len(json.dumps(enriched_state, ensure_ascii=False).encode('utf-8')) > 16 * 1024:
         return command
     return command.model_copy(update={'task_state': enriched_state})
@@ -707,6 +776,7 @@ def langgraph_chat(request: ChatRequest, req: Request) -> AgentResponse | JSONRe
                         response_writer.command,
                         result,
                     )
+                    command = _attach_leave_clarification_state(command, result)
                     memory_proposal = AgentMemoryProposal(
                         task_type=command.task_type,
                         task_state=command.task_state,

@@ -8,6 +8,7 @@ from fastapi import Request
 
 from app.main import (
     _attach_expense_original_request,
+    _attach_leave_clarification_state,
     app,
     langgraph_chat,
 )
@@ -174,6 +175,68 @@ def test_non_expense_memory_command_is_not_enriched_with_original_request():
     }
 
     assert _attach_expense_original_request(command, result) is command
+
+
+def test_leave_clarification_memory_persists_only_validated_absolute_slots():
+    continuation = {
+        "continuation_type": "leave_clarification",
+        "start_date": "2026-07-17",
+        "end_date": "2026-07-17",
+        "half_day": "PM",
+        "reason": None,
+        "waiting_for": "reason",
+        "missing_fields": ["reason"],
+    }
+    command = MemoryWriteCommand(
+        action="UPSERT",
+        task_type="LEAVE_REQUEST",
+        status="ACTIVE",
+        task_state={"phase": "clarify"},
+    )
+    result = {
+        "action_proposal": None,
+        "continuation_leave_state": continuation,
+        "tool_history": [{
+            "tool_name": "leave_proposal_tool",
+            "status": "success",
+            "observation": json.dumps({
+                "success": True,
+                "kind": "clarification",
+                "action_proposal": None,
+                "missing_fields": ["reason"],
+                "continuation_state": continuation,
+            }),
+        }],
+    }
+
+    enriched = _attach_leave_clarification_state(command, result)
+
+    assert enriched.task_state == {"phase": "clarify", **continuation}
+
+
+def test_leave_proposal_success_clears_previous_leave_continuation_slots():
+    command = MemoryWriteCommand(
+        action="UPSERT",
+        task_type="LEAVE_REQUEST",
+        status="ACTIVE",
+        task_state={
+            "continuation_type": "leave_clarification",
+            "start_date": "2026-07-17",
+            "end_date": "2026-07-17",
+            "half_day": "NONE",
+            "reason": "家里有事",
+            "waiting_for": "reason",
+            "missing_fields": ["reason"],
+        },
+    )
+    result = {
+        "action_proposal": {"action_type": "ANNUAL_LEAVE_REQUEST"},
+        "tool_history": [],
+    }
+
+    enriched = _attach_leave_clarification_state(command, result)
+
+    assert enriched.task_state == {}
 
 
 def test_invalid_or_missing_business_date_does_not_use_python_clock():

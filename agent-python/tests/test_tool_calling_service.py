@@ -340,6 +340,135 @@ def test_proposal_is_built_only_from_deterministic_analysis(
     assert result.proposal.half_day == half_day
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "申请2026-07-20一天年假，原因家里有事",
+        "申请2026-07-20一天年假，原因：家里有事",
+        "申请2026-07-20一天年假，原因是家里有事",
+        "申请2026-07-20一天年假，因为家里有事",
+    ],
+)
+def test_common_reason_prefixes_are_supported(question):
+    result = plan(question, completion([tool_call()]))
+
+    assert result.kind == "proposal"
+    assert result.proposal.reason == "家里有事"
+
+
+def test_leave_continuation_merges_current_reason_with_absolute_date_slots():
+    result = plan_annual_leave_action(
+        "家里有事",
+        business_date=BUSINESS_DATE,
+        continuation_state={
+            "continuation_type": "leave_clarification",
+            "start_date": "2026-07-17",
+            "end_date": "2026-07-17",
+            "half_day": "NONE",
+            "waiting_for": "reason",
+            "missing_fields": ["reason"],
+        },
+        completion_create=completion([tool_call()]),
+    )
+
+    assert result.kind == "proposal"
+    assert result.proposal.start_date == date(2026, 7, 17)
+    assert result.proposal.end_date == date(2026, 7, 17)
+    assert result.proposal.half_day == "NONE"
+    assert result.proposal.reason == "家里有事"
+
+
+def _continuation(result):
+    assert result.kind == "clarification"
+    return result.clarification.continuation_state
+
+
+def test_leave_case_2_reason_continuation_preserves_date_across_business_date_change():
+    first = plan_annual_leave_action(
+        "帮我申请明天一天年假",
+        business_date=date(2026, 7, 16),
+        completion_create=completion([tool_call()]),
+    )
+    second = plan_annual_leave_action(
+        "家里有事",
+        business_date=date(2026, 7, 17),
+        continuation_state=_continuation(first),
+        completion_create=completion([tool_call()]),
+    )
+
+    assert second.kind == "proposal"
+    assert second.proposal.start_date == date(2026, 7, 17)
+    assert second.proposal.end_date == date(2026, 7, 17)
+    assert second.proposal.reason == "家里有事"
+
+
+def test_leave_case_3_date_continuation_preserves_reason():
+    first = plan_annual_leave_action(
+        "帮我申请年假，原因家里有事",
+        business_date=BUSINESS_DATE,
+        completion_create=completion([tool_call()]),
+    )
+    second = plan_annual_leave_action(
+        "明天一天",
+        business_date=BUSINESS_DATE,
+        continuation_state=_continuation(first),
+        completion_create=completion([tool_call()]),
+    )
+
+    assert second.kind == "proposal"
+    assert second.proposal.start_date == date(2026, 7, 17)
+    assert second.proposal.end_date == date(2026, 7, 17)
+    assert second.proposal.reason == "家里有事"
+
+
+def test_leave_case_4_reason_continuation_preserves_pm():
+    first = plan_annual_leave_action(
+        "帮我申请明天下午半天年假",
+        business_date=BUSINESS_DATE,
+        completion_create=completion([tool_call()]),
+    )
+    second = plan_annual_leave_action(
+        "家里有事",
+        business_date=BUSINESS_DATE,
+        continuation_state=_continuation(first),
+        completion_create=completion([tool_call()]),
+    )
+
+    assert second.kind == "proposal"
+    assert second.proposal.half_day == "PM"
+
+
+def test_leave_case_5_ambiguous_half_day_remains_clarification_until_am_or_pm():
+    first = plan_annual_leave_action(
+        "帮我申请明天半天年假",
+        business_date=BUSINESS_DATE,
+        completion_create=completion([tool_call()]),
+    )
+    assert first.kind == "clarification"
+    assert first.clarification.missing_fields == ["reason", "half_day"]
+    assert first.clarification.continuation_state["half_day"] is None
+
+    with_reason = plan_annual_leave_action(
+        "家里有事",
+        business_date=BUSINESS_DATE,
+        continuation_state=_continuation(first),
+        completion_create=completion([tool_call()]),
+    )
+    assert with_reason.kind == "clarification"
+    assert with_reason.clarification.missing_fields == ["half_day"]
+
+    complete = plan_annual_leave_action(
+        "下午",
+        business_date=BUSINESS_DATE,
+        continuation_state=_continuation(with_reason),
+        completion_create=completion([tool_call()]),
+    )
+    assert complete.kind == "proposal"
+    assert complete.proposal.start_date == date(2026, 7, 17)
+    assert complete.proposal.half_day == "PM"
+    assert complete.proposal.reason == "家里有事"
+
+
 def test_provider_cannot_override_business_fields():
     result = plan(COMPLETE, completion([tool_call('{"reason":"provider-value"}')]))
     assert result.error_code == "tool_arguments_invalid"

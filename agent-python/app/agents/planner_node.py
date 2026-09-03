@@ -268,6 +268,7 @@ def build_planner_prompt(
     memory_context: dict | None = None,
     execution_history: list[dict] | None = None,
     continuation_original_request: str | None = None,
+    continuation_leave_state: dict | None = None,
 ) -> str:
     """组装 Planner 用户 Prompt；系统字段（trace_id / 权限）不进入 Prompt。
 
@@ -327,6 +328,10 @@ def build_planner_prompt(
     if continuation_original_request:
         base += '\n\n' + DOMAIN_PROVIDER_REGISTRY.continuation_prompt(
             question, continuation_original_request
+        )
+    if continuation_leave_state:
+        base += '\n\n' + DOMAIN_PROVIDER_REGISTRY.leave_continuation_prompt(
+            question, continuation_leave_state
         )
     return base
 
@@ -667,6 +672,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         request_expense_reason=state.get('request_expense_reason'),
         action_proposal=state.get('action_proposal'),
         continuation_original_request=continuation_original_request,
+        continuation_leave_state=state.get('continuation_leave_state'),
         memory_context=state.get('memory_context'),
         step_count=step_count,
     )
@@ -728,6 +734,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         state.get('memory_context'),
         state.get('execution_history', []),
         continuation_original_request,
+        state.get('continuation_leave_state'),
     )
     system_prompt = build_planner_system_prompt(current_visible_tools)
 

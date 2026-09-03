@@ -28,11 +28,23 @@ _DATE_PATTERN = re.compile(
     r"|大后天|后天|明天|今天"
 )
 _REASON_PATTERN = re.compile(
-    r"(?:原因为|原因是|原因[:：]|因为|由于|为了)([^，。；;\r\n]+)"
+    r"(?:原因为|原因是|原因[:：]?|因为|由于|为了)([^，。；;\r\n]+)"
 )
 _AM_EXPRESSIONS = ("上午半天", "上午", "早上")
 _PM_EXPRESSIONS = ("下午半天", "下午", "午后")
+_FULL_DAY_EXPRESSIONS = ("一天", "全天", "一整天")
 _HALF_DAY_WORD = "半天"
+_CONTINUATION_TYPE = "leave_clarification"
+_CONTINUATION_MISSING_FIELDS = frozenset({
+    "start_date", "end_date", "reason", "half_day",
+})
+_CONTINUATION_WAITING_FOR = frozenset({"date", "reason", "half_day"})
+_NON_REASON_EXPRESSIONS = (
+    "请问", "怎么", "如何", "什么", "多少", "是否", "能否", "年假",
+    "请假", "报销", "出差", "发票", "费用", "制度", "政策", "余额",
+    "流程", "申请", "提交", "取消", "算了", "放弃", "不用", "不需要",
+    "你好", "谢谢", "再见", "cancel",
+)
 
 
 class AnnualLeaveInputError(ValueError):
@@ -49,6 +61,175 @@ class AnnualLeaveInputAnalysis(BaseModel):
     reason_evidence: str
     half_day: Literal["NONE", "AM", "PM"]
     missing_fields: list[Literal["start_date", "end_date", "reason", "half_day"]]
+    half_day_ambiguous: bool = False
+
+
+def _validate_reason_evidence(reason: str) -> str:
+    reason = reason.strip()
+    if reason and (
+        len(reason) > 200
+        or any(unicodedata.category(character) == "Cc" for character in reason)
+    ):
+        raise AnnualLeaveInputError("invalid_reason")
+    return reason
+
+
+def _parse_continuation_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def normalize_leave_continuation_state(state: object) -> dict | None:
+    """校验并规范化 Memory 中的 Leave clarification 槽位。
+
+    Memory 是不可信历史数据；这里只接受带明确类型标记、绝对 ISO 日期和
+    有限枚举的结构，不从 summary 或 raw original_request 推断业务字段。
+    """
+    if not isinstance(state, dict) or state.get("continuation_type") != _CONTINUATION_TYPE:
+        return None
+    # task_state 允许同时保留 Memory Extractor 的通用字段；这里只消费并
+    # 规范化下方 Leave continuation 白名单字段，未知字段不会进入业务解析。
+    start_date = _parse_continuation_date(state.get("start_date"))
+    end_date = _parse_continuation_date(state.get("end_date"))
+    if state.get("start_date") is not None and start_date is None:
+        return None
+    if state.get("end_date") is not None and end_date is None:
+        return None
+    if start_date and end_date and start_date > end_date:
+        return None
+
+    half_day = state.get("half_day")
+    if half_day not in (None, "NONE", "AM", "PM"):
+        return None
+    reason = state.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        return None
+    try:
+        reason = _validate_reason_evidence(reason or "") or None
+    except AnnualLeaveInputError:
+        return None
+
+    missing_fields = state.get("missing_fields")
+    if (
+        not isinstance(missing_fields, list)
+        or not missing_fields
+        or any(field not in _CONTINUATION_MISSING_FIELDS for field in missing_fields)
+        or len(set(missing_fields)) != len(missing_fields)
+    ):
+        return None
+    waiting_for = state.get("waiting_for")
+    if waiting_for not in _CONTINUATION_WAITING_FOR:
+        return None
+    expected_missing_fields = []
+    if start_date is None:
+        expected_missing_fields.append("start_date")
+    if end_date is None:
+        expected_missing_fields.append("end_date")
+    if not reason:
+        expected_missing_fields.append("reason")
+    if half_day is None:
+        expected_missing_fields.append("half_day")
+    if missing_fields != expected_missing_fields or waiting_for != _waiting_for(missing_fields):
+        return None
+    return {
+        "continuation_type": _CONTINUATION_TYPE,
+        "start_date": start_date,
+        "end_date": end_date,
+        "half_day": half_day,
+        "reason": reason,
+        "waiting_for": waiting_for,
+        "missing_fields": list(missing_fields),
+    }
+
+
+def serialize_leave_continuation_state(state: object) -> dict | None:
+    """把已校验槽位转换为可安全写入 Memory / Checkpoint 的 JSON 结构。"""
+    normalized = normalize_leave_continuation_state(state)
+    if normalized is None:
+        return None
+    return {
+        **normalized,
+        "start_date": (
+            normalized["start_date"].isoformat()
+            if normalized["start_date"] else None
+        ),
+        "end_date": (
+            normalized["end_date"].isoformat()
+            if normalized["end_date"] else None
+        ),
+    }
+
+
+def _waiting_for(missing_fields: list[str]) -> str:
+    if "start_date" in missing_fields or "end_date" in missing_fields:
+        return "date"
+    if "reason" in missing_fields:
+        return "reason"
+    return "half_day"
+
+
+def build_leave_continuation_state(analysis: AnnualLeaveInputAnalysis) -> dict:
+    return {
+        "continuation_type": _CONTINUATION_TYPE,
+        "start_date": analysis.start_date.isoformat() if analysis.start_date else None,
+        "end_date": analysis.end_date.isoformat() if analysis.end_date else None,
+        "half_day": None if analysis.half_day_ambiguous else analysis.half_day,
+        "reason": analysis.reason_evidence or None,
+        "waiting_for": _waiting_for(analysis.missing_fields),
+        "missing_fields": list(analysis.missing_fields),
+    }
+
+
+def _is_bare_reason_candidate(value: str) -> bool:
+    """判断 clarification 中不带前缀的短文本是否可作为原因。
+
+    只在当前 ACTIVE Leave 缺 reason 时调用；问题词、知识咨询词和其它
+    业务词显式排除，避免把 unrelated question 写进 Leave Memory。
+    """
+    normalized = value.strip()
+    if not normalized or len(normalized) > 200:
+        return False
+    if any(unicodedata.category(character) == "Cc" for character in normalized):
+        return False
+    if normalized.endswith(("?", "？")):
+        return False
+    if any(expression in normalized for expression in _NON_REASON_EXPRESSIONS):
+        return False
+    if _DATE_PATTERN.search(normalized):
+        return False
+    if any(expression in normalized for expression in (*_AM_EXPRESSIONS, *_PM_EXPRESSIONS)):
+        return False
+    if _HALF_DAY_WORD in normalized:
+        return False
+    return True
+
+
+def is_leave_continuation_input(question: str, missing_fields: list[str]) -> bool:
+    """判断当前输入是否提供了某个待补 Leave 槽位的证据。"""
+    normalized = question.strip()
+    if not normalized or not isinstance(missing_fields, list):
+        return False
+    if "reason" in missing_fields and (
+        _REASON_PATTERN.search(normalized) is not None
+        or _is_bare_reason_candidate(normalized)
+    ):
+        return True
+    if set(missing_fields) & {"start_date", "end_date"} and _DATE_PATTERN.search(normalized):
+        return True
+    if "half_day" in missing_fields and (
+        any(expression in normalized for expression in (*_AM_EXPRESSIONS, *_PM_EXPRESSIONS))
+        or _HALF_DAY_WORD in normalized
+    ):
+        return True
+    return False
 
 
 def is_annual_leave_action_intent(question: str) -> bool:
@@ -105,8 +286,12 @@ def analyze_annual_leave_input(
     question: str,
     *,
     business_date: date,
+    continuation_state: dict | None = None,
 ) -> AnnualLeaveInputAnalysis:
     normalized = question.strip()
+    normalized_continuation = normalize_leave_continuation_state(continuation_state)
+    if continuation_state is not None and normalized_continuation is None:
+        raise AnnualLeaveInputError("invalid_continuation_state")
 
     # 原因子句（因为/由于/为了/原因为…到标点）内的日期、上午/下午、半天等
     # 业务词属于原因内容，不属于申请字段；把原因区间替换为空格生成 scan_text，
@@ -114,11 +299,7 @@ def analyze_annual_leave_input(
     # 有婚礼"把原因日期误当申请日期。
     reason_match = _REASON_PATTERN.search(normalized)
     reason_evidence = reason_match.group(1).strip() if reason_match else ""
-    if reason_evidence and (
-        len(reason_evidence) > 200
-        or any(unicodedata.category(character) == "Cc" for character in reason_evidence)
-    ):
-        raise AnnualLeaveInputError("invalid_reason")
+    reason_evidence = _validate_reason_evidence(reason_evidence)
     if reason_match:
         masked_chars = list(normalized)
         reason_start, reason_end = reason_match.span(1)
@@ -147,6 +328,18 @@ def analyze_annual_leave_input(
     # 不再静默按全天生成草稿（"申请8月25日半天年假"原本会生成全天 Proposal）。
     half_day_ambiguous = half_day == "NONE" and _HALF_DAY_WORD in scan_text
 
+    if (
+        not reason_evidence
+        and normalized_continuation is not None
+        and "reason" in normalized_continuation["missing_fields"]
+        and not date_evidence
+        and not has_am
+        and not has_pm
+        and not half_day_ambiguous
+        and _is_bare_reason_candidate(normalized)
+    ):
+        reason_evidence = _validate_reason_evidence(normalized)
+
     missing_fields: list[Literal["start_date", "end_date", "reason", "half_day"]] = []
     if start_date is None:
         missing_fields.append("start_date")
@@ -157,6 +350,29 @@ def analyze_annual_leave_input(
     if half_day_ambiguous:
         missing_fields.append("half_day")
 
+    if normalized_continuation is not None:
+        current_has_half_day = bool(
+            has_am or has_pm or half_day_ambiguous
+            or any(expression in scan_text for expression in _FULL_DAY_EXPRESSIONS)
+        )
+        start_date = start_date or normalized_continuation["start_date"]
+        end_date = end_date or normalized_continuation["end_date"]
+        reason_evidence = reason_evidence or normalized_continuation["reason"] or ""
+        if current_has_half_day:
+            merged_half_day = None if half_day_ambiguous else half_day
+        else:
+            merged_half_day = normalized_continuation["half_day"]
+        missing_fields = []
+        if start_date is None:
+            missing_fields.append("start_date")
+        if end_date is None:
+            missing_fields.append("end_date")
+        if not reason_evidence:
+            missing_fields.append("reason")
+        if merged_half_day is None:
+            missing_fields.append("half_day")
+        half_day = merged_half_day or "NONE"
+
     return AnnualLeaveInputAnalysis(
         normalized_question=normalized,
         date_evidence=date_evidence,
@@ -165,6 +381,8 @@ def analyze_annual_leave_input(
         reason_evidence=reason_evidence,
         half_day=half_day,
         missing_fields=missing_fields,
+        half_day_ambiguous=normalized_continuation is not None and merged_half_day is None
+        if normalized_continuation is not None else half_day_ambiguous,
     )
 
 
