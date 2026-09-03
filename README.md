@@ -9,7 +9,7 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。差旅报销与年假申请验证了不同业务事实如何复用同一 Java authority、PendingAction 和 HITL 边界。
 
 - 在线演示：<https://copilot.jintianchi.cn>
-- 最新 tagged release：[v1.1.1](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v1.1.1)。当前 `main` 包含该 release 之后的维护与收敛修改，尚未为这些 post-release 改动重新打 tag。
+- 最新 tagged release：[v1.1.2](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v1.1.2)。当前 `main` 包含该 release 之后的维护与收敛修改，尚未为这些 post-release 改动重新打 tag。
 - 项目定位：小规格单机部署与受控演示验证；不承诺生产 SLA。
 
 ## 项目定位
