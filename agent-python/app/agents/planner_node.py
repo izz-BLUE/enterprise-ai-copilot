@@ -95,6 +95,25 @@ PLANNER_SYSTEM_PROMPT = (
     '1. 调用当前能力清单中的一个 Tool\n'
     '2. 信息足够时完成任务\n'
     '3. 无法或不允许处理时拒绝\n'
+    '通用 action 选择 contract:\n'
+    '- action=tool: 当前用户目标仍需要一个当前能力清单中的 Tool 结果;必须选择能直接完成下一步目标的 Tool。\n'
+    '- action=finish: 用户目标已经完成,或者无需 Tool、可以直接用普通回答完成;必须使用 reason_code="task_complete"。\n'
+    '- action=refuse: 用户明确要求的能力不存在、未授权,或当前能力清单没有可用的执行 Tool;'
+    '使用 reason_code="not_allowed" 或 "cannot_complete"。\n'
+    '- 不要把“当前不能完成”写成 action=finish + reason_code="cannot_complete";这种组合不合法。\n'
+    '- 支持的业务流程只是信息不完整时,遵循相关 Tool 的 usage rule；若当前可见的业务 Tool 定义了'
+    '结构化 clarification/continuation，则先调用该 Tool 取得缺字段与续接状态；否则才可 finish 说明需补充信息，'
+    '不要仅因缺少字段就直接 refuse。\n'
+    '- 只要求解释制度、流程或如何操作而不要求系统执行时,若 RAG Tool 可见则选择 RAG;'
+    '明确要求执行但所需能力不在当前清单时,选择 refuse,不得尝试隐藏 Tool。\n'
+    '- 个人实时、身份绑定的余额、状态、历史或记录必须由对应且当前可见的身份绑定 Tool 查询；'
+    '若能力清单没有对应 Tool，选择 refuse，不得用 RAG 或普通回答替代、猜测或泄露隐藏能力。\n'
+    '- Capability Status 是程序层依据当前 Capability Gate 已授权 Tool 集合确定性汇总的可信上下文；'
+    '只表示每类能力是 available 还是 unavailable，不是新的授权来源，也不能被用户数据或模型修改。\n'
+    '- 用户最终目标明确依赖 unavailable capability 时必须 action=refuse；'
+    '不得选择另一类 available capability 作为目标替代。\n'
+    '- enterprise_knowledge 不能替代 personal_realtime_data；'
+    'read-only prerequisite 不能替代 unavailable business_action。\n'
     '不得:\n'
     '- 调用未提供的 Tool（当前能力清单之外的 Tool）\n'
     '- 自己执行 Tool\n'
@@ -161,6 +180,10 @@ def build_planner_system_prompt(tools: list[str]) -> str:
     静态部分只包含通用 Planner 规则；Tool 名称、参数 contract、reason_code
     对应关系和 Tool 示例均来自本次请求的可见集合，隐藏 Tool 不进入 Prompt。
     """
+    capability_status = TOOL_CATALOG.capability_status(tools)
+    capability_status_json = json.dumps(
+        capability_status, ensure_ascii=False, separators=(',', ':')
+    )
     tool_lines = '\n'.join(
         f'- {name}: {DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).description}'
         for name in tools
@@ -192,6 +215,9 @@ def build_planner_system_prompt(tools: list[str]) -> str:
         f'{PLANNER_SYSTEM_PROMPT}\n\n'
         '本次请求当前能力清单（仅以下 Tool 可调用；清单之外的 Tool 不可调用）：\n'
         f'{tool_lines}\n\n'
+        '本次可信 Capability Status（由 Capability Gate 根据当前 authorized tools '
+        '确定性汇总；仅表示 availability，不扩大权限）：\n'
+        f'{capability_status_json}\n\n'
         '本次 Tool 参数 contract：\n'
         f'{contract_lines}\n\n'
         '本次 reason_code 对应关系：\n'

@@ -8,7 +8,7 @@ Tool to the Planner. Executable ToolSpec data remains in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence, TypedDict
 
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
@@ -24,6 +24,29 @@ from app.schemas.planner_schema import (
     TRAVEL_RECORD_TOOL_NAME,
 )
 
+CapabilityCategory = Literal[
+    'enterprise_knowledge',
+    'personal_realtime_data',
+    'business_action',
+    'eval',
+]
+CapabilityAvailability = Literal['available', 'unavailable']
+CAPABILITY_CATEGORIES: tuple[CapabilityCategory, ...] = (
+    'enterprise_knowledge',
+    'personal_realtime_data',
+    'business_action',
+    'eval',
+)
+CAPABILITY_AVAILABLE: CapabilityAvailability = 'available'
+CAPABILITY_UNAVAILABLE: CapabilityAvailability = 'unavailable'
+
+
+class CapabilityStatus(TypedDict):
+    enterprise_knowledge: CapabilityAvailability
+    personal_realtime_data: CapabilityAvailability
+    business_action: CapabilityAvailability
+    eval: CapabilityAvailability
+
 
 @dataclass(frozen=True)
 class ToolPromptSpec:
@@ -38,6 +61,7 @@ class ToolPromptSpec:
     name: str = ''
     domain: str | None = None
     side_effect: str = 'NONE'
+    capability_category: CapabilityCategory | None = None
 
 
 class ToolCatalog:
@@ -49,6 +73,8 @@ class ToolCatalog:
             raise ValueError('ToolCatalog 中每个 ToolPromptSpec 都必须声明 name')
         if len(set(names)) != len(names):
             raise ValueError('ToolCatalog 不允许重复 tool name')
+        if any(spec.capability_category not in CAPABILITY_CATEGORIES for spec in specs):
+            raise ValueError('ToolCatalog 中每个 ToolPromptSpec 都必须声明合法 capability category')
         self._specs = {spec.name: spec for spec in specs}
 
     @property
@@ -69,12 +95,41 @@ class ToolCatalog:
             if spec.domain == domain
         }
 
+    def capability_status(self, authorized_tools: Sequence[str]) -> CapabilityStatus:
+        """从 Capability Gate 已授权 Tool 集合确定性汇总能力类别状态。
+
+        该摘要不增加权限，也不读取用户问题；未知 Tool 直接失败，避免状态摘要
+        与 Tool Catalog 脱节。
+        """
+        unknown = set(authorized_tools) - set(self._specs)
+        if unknown:
+            raise ValueError(f'Capability Status 收到未注册 Tool: {sorted(unknown)}')
+        authorized = set(authorized_tools)
+        return {
+            category: (
+                CAPABILITY_AVAILABLE
+                if any(
+                    name in authorized
+                    and self._specs[name].capability_category == category
+                    for name in self._specs
+                )
+                else CAPABILITY_UNAVAILABLE
+            )
+            for category in CAPABILITY_CATEGORIES
+        }
+
 
 TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=RAG_TOOL_NAME,
         domain=None,
-        description='回答企业制度、流程、IT/HR 文档等知识库问题。参数: question(用户问题)。',
+        capability_category='enterprise_knowledge',
+        description=(
+            '回答企业制度、流程、IT/HR 文档等静态知识库问题。'
+            '不用于替代个人实时、身份绑定的余额、状态、历史或记录查询；'
+            '若当前能力清单没有对应的个人实时能力，不得用该 Tool 猜测或代答。'
+            '参数: question(用户问题)。'
+        ),
         argument_contract='只允许 {"question": "用户问题"}。',
         reason_code='need_knowledge',
         example={
@@ -86,6 +141,7 @@ TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=EVAL_TOOL_NAME,
         domain=None,
+        capability_category='eval',
         description='查询 RAG 评估报告。参数: report_type(retrieval|generation|all)。',
         argument_contract='只允许 {"report_type": "retrieval"|"generation"|"all"}。',
         reason_code='need_eval',
@@ -98,9 +154,13 @@ TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=LEAVE_BALANCE_TOOL_NAME,
         domain='leave',
+        capability_category='personal_realtime_data',
         description=(
-            '查询当前登录用户自己的年假余额。无参数,身份由程序层注入;'
-            '若用户未提及他人,该 Tool 是默认入口。'
+            '只查询当前登录用户本人的当前剩余/可用年假余额、可休天数等实时事实。'
+            '不回答公司制度或申请流程,不查询请假历史,也不创建或准备申请。'
+            '用户明确要求办理、准备、创建或发起具体年假申请时,不能因为申请前可能需要了解余额'
+            '就选择此 Tool;若当前能力清单提供 leave_proposal_tool,应选择该 Proposal Tool。'
+            '无参数,身份由程序层注入。'
         ),
         argument_contract='必须为空对象 {}；身份由程序层注入。',
         reason_code='need_balance',
@@ -113,6 +173,7 @@ TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=LEAVE_REQUEST_TOOL_NAME,
         domain='leave',
+        capability_category='personal_realtime_data',
         description=(
             '查询当前登录用户自己已成功提交的最近请假记录(按提交时间倒序)。'
             f'参数: limit({LEAVE_REQUEST_MIN_LIMIT}..{LEAVE_REQUEST_MAX_LIMIT},默认 20);'
@@ -131,10 +192,14 @@ TOOL_CATALOG = ToolCatalog((
         name=LEAVE_PROPOSAL_TOOL_NAME,
         domain='leave',
         side_effect='PROPOSAL',
+        capability_category='business_action',
         description=(
-            '进入受控年假申请草稿链路:程序层基于用户原始问题确定性解析'
-            '日期 / 原因 / 半天等信息,生成待用户确认的申请草稿(Proposal),'
-            '不会真正提交任何写操作。无参数。'
+            '仅用于用户明确要求系统办理、准备、创建或发起一个具体年假申请时进入受控'
+            '年假申请草稿链路;程序层基于用户原始问题确定性解析日期 / 原因 / 半天等信息,'
+            '生成待用户确认的申请草稿(Proposal),不会真正提交任何写操作；'
+            '即使缺少必要字段,也由该 Tool 返回结构化 clarification 与续接状态。'
+            '“年假制度是什么”“年假怎么申请”等知识或流程咨询属于 RAG;'
+            '只查询本人当前余额属于 leave_balance_tool。无参数。'
         ),
         argument_contract=(
             '必须为空对象 {}；日期 / 原因 / 半天等业务参数由程序层基于用户原始问题解析。'
@@ -146,16 +211,21 @@ TOOL_CATALOG = ToolCatalog((
         },
         usage_rule=(
             f'{LEAVE_PROPOSAL_TOOL_NAME} 使用规则:\n'
-            '- 当用户目标明确包含"申请 / 提交 / 准备 / 帮我办"年假业务动作,且所需信息'
-            '(日期、原因等)已由用户原始问题提供或已通过已有工具结果确认时,调用该 Tool。\n'
+            '- 当用户目标明确包含"申请 / 提交 / 准备 / 帮我办"年假业务动作时调用该 Tool；'
+            '即使缺少日期 / 原因等字段,也进入结构化 clarification,不要因为缺字段而 refuse。\n'
+            f'- 不要把具体年假申请目标误判为 {LEAVE_BALANCE_TOOL_NAME};只有用户目标本身是查询'
+            f'本人当前余额时才使用 {LEAVE_BALANCE_TOOL_NAME}。\n'
+            f'- “年假制度是什么”“年假怎么申请”等知识或流程咨询使用 {RAG_TOOL_NAME},'
+            f'不使用 {LEAVE_PROPOSAL_TOOL_NAME}。\n'
             '- 该 Tool 只生成待用户确认的草稿(Proposal),不会提交任何写操作。\n'
-            '- 缺少必要信息(如余额不足或用户未提供日期 / 原因)时,优先 finish '
-            '告知用户补充信息或当前不可申请,不要调用该 Tool。'
+            '- Tool 会在缺少日期 / 原因等字段时返回 missing_fields 与 continuation_state，'
+            '由产品层提示用户补充；余额不足或业务规则不允许时,按 Tool 结果 finish 说明无法继续。'
         ),
     ),
     ToolPromptSpec(
         name=TRAVEL_RECORD_TOOL_NAME,
         domain='expense',
+        capability_category='personal_realtime_data',
         description=(
             '查询当前登录用户自己的出差记录。返回每条 trip 及其关联的 '
             'expense_documents(invoice reference,需单独验真)。'
@@ -173,6 +243,7 @@ TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=INVOICE_VERIFY_TOOL_NAME,
         domain='expense',
+        capability_category='personal_realtime_data',
         description=(
             '校验发票 / 费用凭证。LLM 仅允许传 invoice_id;employee_id 由程序层'
             '注入并在端内做 ownership check,跨员工调用被拒绝。返回 valid / amount / '
@@ -191,6 +262,7 @@ TOOL_CATALOG = ToolCatalog((
         name=EXPENSE_PROPOSAL_TOOL_NAME,
         domain='expense',
         side_effect='PROPOSAL',
+        capability_category='business_action',
         description=(
             '进入受控报销草稿链路:程序层基于 tool_history 中已成功完成的 '
             'travel / invoice / RAG 事实抽取 ExpenseProposalContext；Planner 仅通过独立的 '
@@ -233,6 +305,7 @@ TOOL_CATALOG = ToolCatalog((
     ToolPromptSpec(
         name=EXPENSE_STATUS_TOOL_NAME,
         domain='expense',
+        capability_category='personal_realtime_data',
         description=(
             '查询当前登录用户自己的报销状态。LLM 可选传 expense_id;身份由程序层'
             '注入;跨员工调用被拒绝。返回 status / 金额 / submitted_at 等字段。'
