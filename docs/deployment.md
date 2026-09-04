@@ -108,8 +108,8 @@ model.onnx: f2220ab6b0959ee6ecf4c52dc793a77798aefa98f267f5bcce15c497612d4238
 | 维度 | main 代码能力（已实装） | 仓库部署默认（`deploy/docker-compose.prod.yml` + `agent-python/.env.example`） | 公网实际状态 |
 |------|------------------------|------------------------------------------------------------------------|--------------|
 | Python Agent 状态图 | 生产入口固定为 `safety → planner ⇄ tool_executor`（Planner-first）；legacy Router-first 仅测试/离线兼容 | Compose 不再注入图选择开关，服务启动后固定走 Planner-first | 仓库无证据 |
-| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；公开 `demo` 由 Java 固定为 `allow_business_actions=false`；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；Compose 注入 Enterprise OA MCP 内部 URL，但 Java read 配置仍默认未注入，因此对应 Java read Tool 不暴露给 Planner。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
-| `leave_balance_tool` / `leave_request_tool`（Python → Java 只读） | 通过 `JavaReadClient` 调 `/api/internal/leave/*`，依赖受信任 `employee_id`、`JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` | compose **未注入** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` / `JAVA_TIMEOUT_SECONDS` ⇒ 两个 Tool 不暴露给 Planner；若绕过 Planner 直接调用，下游仍返回 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` | 仓库无证据 |
+| Planner-first 可见 Tool（按可信状态动态收缩） | `rag_answer_tool` 始终可见；受信任 `employee_id` + `JAVA_BASE_URL` + `JAVA_INTERNAL_TOKEN` 齐全时追加 Java read Tool；Enterprise OA MCP URL + employee 时追加 travel/invoice；`allow_eval=true` 追加 `eval_report_tool`；`allow_business_actions=true` 且有受信任 `employee_id` 时追加 leave/expense proposal；公开 `demo` 由 Java 固定为 `allow_business_actions=false`；模型不能自行扩大 Tool 权限 | Planner-first 默认开启；Compose 固定注入 Java 内部 URL，并要求共享 `JAVA_INTERNAL_TOKEN`；同时注入 Enterprise OA MCP 内部 URL。RAG 不受影响；Java 端的 `allow_eval` / `allow_business_actions` 仍受 Admin/业务开关约束 | 仓库无证据 |
+| `leave_balance_tool` / `leave_request_tool` / `expense_status_tool`（Python → Java 只读） | 通过 `JavaReadClient` 调 `/api/internal/leave/*` 或 `/api/internal/expense/*`，依赖受信任 `employee_id`、`JAVA_BASE_URL` 与 `JAVA_INTERNAL_TOKEN` | Compose 固定注入 `JAVA_BASE_URL=http://java-backend:8080`、共享必填 `JAVA_INTERNAL_TOKEN` 和默认 5 秒超时；若绕过 Planner 直接调用，下游仍返回 `LEAVE_READ_DISABLED` / `LEAVE_READ_FORBIDDEN` | 仓库无证据 |
 | `leave_proposal_tool` | Planner-first 下生成 `action_proposal` / `missing_fields`，**不执行写操作**，且**不依赖** `JAVA_BASE_URL` / `JAVA_INTERNAL_TOKEN` | Planner-first 默认开启 ⇒ 请求具备 `allow_business_actions=true` 与受信任 `employee_id` 时可见；公开 `demo` 永远不可见；即使 Planner-first 启用，仍需 `BUSINESS_ACTIONS_ENABLED=true` 才能让 Java 接收 Proposal 并创建 PendingAction | 仓库无证据 |
 | `BusinessActionService` / PendingAction / confirm / cancel | Java 权威控制面：`createPending` 生成 `confirmationNonce`；`/api/agent/actions/{id}/confirm` 与 `/cancel`；owner / nonce / 状态机 / TTL / 幂等 / PostgreSQL 事务 | compose 默认 `BUSINESS_ACTIONS_ENABLED=${:-false}` ⇒ 受控业务动作默认关闭 | 仓库无证据 |
 | Admin / Evaluation 权限 | 浏览器使用 Java 已验证 JWT 的 `role=ADMIN`；Java 通过 `X-Allow-Eval` 告知 Python | `ADMIN_TOKEN` 仅保留为业务动作的可选 server-side hardening，compose `:?` 强制非空 | 仓库无证据 |
@@ -312,9 +312,9 @@ graph LR
 | DEMO_AUTH_DEFAULT_PASSWORD | `DEMO_AUTH_ENABLED=true` 时必填；仅用于 lisi/wangwu legacy seed，不写入前端 bundle |
 | BUSINESS_ACTIONS_ENABLED | compose 默认 `${:-false}`；启用后 Java 才接收 Proposal 并创建 PendingAction |
 | BUSINESS_ACTIONS_REQUIRE_ADMIN | compose 默认 `${:-false}`；`true` 时业务动作还要求内部请求提供匹配的 `ADMIN_TOKEN`，浏览器不发送该 Token |
-| JAVA_INTERNAL_TOKEN | compose 默认未注入；缺值时只读企业 Tool 不可用 |
-| JAVA_BASE_URL | compose 默认未注入；缺值时只读企业 Tool 返回 `LEAVE_READ_DISABLED` |
-| JAVA_TIMEOUT_SECONDS | compose 默认未注入；Python 端 `.env.example` 默认 5 |
+| JAVA_INTERNAL_TOKEN | production Compose 对 Java/Python 共享注入且 `:?` 必填；只存在 server-side，缺值时 Compose 校验失败 |
+| JAVA_BASE_URL | production Compose 固定注入 `http://java-backend:8080`；不写入 `.env.example` |
+| JAVA_TIMEOUT_SECONDS | Python Compose 默认注入 `5`；可由服务器 `.env` 覆盖 |
 | MEMORY_WRITE_MODE | compose `${MEMORY_WRITE_MODE:-DISABLED}`；默认 `DISABLED`；`AUDIT_ONLY` 仅审计，`ENABLED` 随 Agent 响应返回提案 |
 | ENTERPRISE_OA_MCP_IMAGE | Enterprise OA MCP fixture 镜像；必填，推荐 `registry/repository:<git-sha>` |
 | ENTERPRISE_OA_MCP_URL | `:?` 必填；默认内部服务地址 `http://enterprise-oa-mcp:8100/mcp`，不得使用 localhost、127.0.0.1 或 `host.docker.internal` |
