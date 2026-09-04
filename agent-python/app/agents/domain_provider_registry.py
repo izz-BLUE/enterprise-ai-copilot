@@ -29,6 +29,7 @@ from app.services import expense_input_service
 from app.services.annual_leave_input_service import (
     is_annual_leave_action_intent,
     is_leave_continuation_input,
+    is_personal_annual_leave_balance_query,
     normalize_leave_continuation_state,
     serialize_leave_continuation_state,
 )
@@ -261,13 +262,22 @@ class LeaveProvider:
     def matches(self, context: DomainContext) -> bool:
         return (
             is_annual_leave_action_intent(context.question)
+            or is_personal_annual_leave_balance_query(context.question)
             or self.continuation_state(context) is not None
         )
 
     def is_business_action_intent(self, context: DomainContext) -> bool:
-        return self.matches(context)
+        return (
+            (
+                is_annual_leave_action_intent(context.question)
+                and not is_personal_annual_leave_balance_query(context.question)
+            )
+            or self.continuation_state(context) is not None
+        )
 
     def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
+        if is_personal_annual_leave_balance_query(context.question):
+            return [name for name in tools if name == LEAVE_BALANCE_TOOL_NAME]
         # Leave 当前没有额外的领域依赖顺序；保留 capability gate 原集合。
         return list(tools)
 
@@ -314,6 +324,15 @@ class LeaveProvider:
     ) -> None:
         if (
             decision.action == 'finish'
+            and is_personal_annual_leave_balance_query(context.question)
+            and LEAVE_BALANCE_TOOL_NAME not in {
+                item.get('tool_name') for item in context.tool_history
+                if _tool_invocation_has_business_success(item)
+            }
+        ):
+            raise PlannerDecisionError('finish 前未完成 leave_balance_tool 当前余额查询')
+        if (
+            decision.action == 'finish'
             and LEAVE_PROPOSAL_TOOL_NAME in tools
             and LEAVE_PROPOSAL_TOOL_NAME not in {
                 item.get('tool_name') for item in context.tool_history
@@ -329,6 +348,18 @@ class LeaveProvider:
         context: DomainContext,
         error_code: str,
     ) -> PlannerDecision | None:
+        if (
+            error_code == 'leave_balance_missing'
+            and decision.action == 'finish'
+            and is_personal_annual_leave_balance_query(context.question)
+            and LEAVE_BALANCE_TOOL_NAME in tools
+        ):
+            return PlannerDecision.model_validate({
+                'action': 'tool',
+                'tool_name': LEAVE_BALANCE_TOOL_NAME,
+                'arguments': {},
+                'reason_code': 'need_balance',
+            })
         return None
 
     def postprocess_decision(
@@ -1115,6 +1146,10 @@ class DomainProviderRegistry:
             'finish 前未完成 leave_proposal_tool Proposal 阶段': (
                 'planner_completion_validation', 'leave_proposal_missing',
                 '当前用户目标包含年假申请，但尚未完成 leave_proposal_tool；请继续规划剩余目标。',
+            ),
+            'finish 前未完成 leave_balance_tool 当前余额查询': (
+                'planner_completion_validation', 'leave_balance_missing',
+                '当前本人年假余额尚未通过 leave_balance_tool 查询。',
             ),
             'finish 前未完成 expense_proposal_tool Proposal 阶段': (
                 'planner_completion_validation', 'expense_proposal_missing',

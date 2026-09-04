@@ -130,6 +130,59 @@ class TestUnauthorizedBusinessIntentPreflight:
         assert llm.call_count == 2
         assert rag.invoke.call_count == 1
 
+    def test_personal_leave_balance_is_read_only_and_never_falls_back_to_rag(self):
+        """本人余额查询必须由领域契约收敛到 balance Tool。"""
+        def fake_llm(system_prompt, _user_prompt, **_kwargs):
+            if 'rag_answer_tool' in system_prompt:
+                return _tool('rag_answer_tool', {
+                    'question': '查询我的年假余额',
+                }, 'need_knowledge')
+            if balance_tool.invoke.call_count == 0:
+                return _tool('leave_balance_tool', {}, 'need_balance')
+            return _finish('当前年假余额为 5 天。')
+
+        balance_tool = Mock()
+        balance_tool.invoke.return_value = json.dumps({
+            'success': True, 'data': {'remaining_days': 5},
+        }, ensure_ascii=False)
+        with patch('app.agents.planner_node.call_llm', side_effect=fake_llm) as llm, \
+                patch('app.agents.planner_node.JAVA_BASE_URL', 'http://java.test'), \
+                patch('app.agents.planner_node.JAVA_INTERNAL_TOKEN', 'internal-secret'), \
+                patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool) as balance, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            result = run_langgraph_agent(
+                '请查询我的年假余额',
+                allow_business_actions=False,
+                business_date=BUSINESS_DATE,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'agent'
+        assert llm.call_count == 2
+        assert balance.invoke.call_count == 1
+        rag.invoke.assert_not_called()
+        assert [item['tool_name'] for item in result['tool_history']] == [
+            'leave_balance_tool',
+        ]
+
+    def test_personal_leave_balance_without_read_capability_fails_closed(self):
+        with patch('app.agents.planner_node.call_llm',
+                   side_effect=[_finish('当前无法完成。'), _finish('当前无法完成。')]) as llm, \
+                patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            result = run_langgraph_agent(
+                '查询我的年假余额',
+                allow_business_actions=False,
+                employee_id='E1001',
+                use_planner=True,
+            )
+
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert llm.call_count == 2
+        rag.invoke.assert_not_called()
+
     def test_expense_knowledge_question_is_not_rejected_by_business_preflight(self):
         with patch('app.agents.planner_node.call_llm', side_effect=[
                 _tool('rag_answer_tool', {'question': '报销流程是什么？'}, 'need_knowledge'),

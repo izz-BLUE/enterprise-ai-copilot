@@ -338,6 +338,27 @@ def test_leave_legal_tools_filter_expense_domain_tools_but_keep_platform_tools()
     }
 
 
+def test_personal_leave_balance_resolves_read_only_leave_domain_and_converges_tools():
+    context = DomainContext(question='查询我的年假余额')
+    provider = DOMAIN_PROVIDER_REGISTRY.resolve(context)
+    assert isinstance(provider, LeaveProvider)
+    assert provider.is_business_action_intent(context) is False
+
+    tools = [
+        RAG_TOOL_NAME,
+        LEAVE_BALANCE_TOOL_NAME,
+        LEAVE_REQUEST_TOOL_NAME,
+        LEAVE_PROPOSAL_TOOL_NAME,
+        TRAVEL_RECORD_TOOL_NAME,
+        INVOICE_VERIFY_TOOL_NAME,
+        EXPENSE_PROPOSAL_TOOL_NAME,
+        EXPENSE_STATUS_TOOL_NAME,
+    ]
+    assert DOMAIN_PROVIDER_REGISTRY.legal_tools(tools, context) == [
+        LEAVE_BALANCE_TOOL_NAME,
+    ]
+
+
 @pytest.mark.parametrize(
     ('question', 'continuation_original_request', 'tool_name'),
     [
@@ -599,6 +620,60 @@ def test_leave_proposal_business_failure_cannot_finish():
             _finish_decision(), [LEAVE_PROPOSAL_TOOL_NAME],
             DomainContext(question='帮我请明天年假', tool_history=history),
         )
+
+
+def test_personal_leave_balance_completion_requires_business_success():
+    provider = LeaveProvider()
+    context = DomainContext(question='查询我的年假余额')
+    with pytest.raises(ValueError, match='leave_balance_tool') as error:
+        provider.validate_completion(
+            _finish_decision(),
+            [LEAVE_BALANCE_TOOL_NAME],
+            context,
+        )
+
+    assert DOMAIN_PROVIDER_REGISTRY.validation_metadata(str(error.value)) == (
+        'planner_completion_validation',
+        'leave_balance_missing',
+        '当前本人年假余额尚未通过 leave_balance_tool 查询。',
+    )
+
+
+@pytest.mark.parametrize('observation', [
+    {'success': False, 'error_code': 'FIXTURE_FAILURE'},
+    {'success': True, 'data': {'remaining_days': 5}},
+])
+def test_personal_leave_balance_completion_checks_structured_result(observation):
+    provider = LeaveProvider()
+    context = DomainContext(
+        question='查询我的年假余额',
+        tool_history=(
+            _completion_item(LEAVE_BALANCE_TOOL_NAME, observation),
+        ),
+    )
+    if observation['success']:
+        provider.validate_completion(
+            _finish_decision(), [LEAVE_BALANCE_TOOL_NAME], context
+        )
+    else:
+        with pytest.raises(ValueError, match='leave_balance_tool'):
+            provider.validate_completion(
+                _finish_decision(), [LEAVE_BALANCE_TOOL_NAME], context
+            )
+
+
+def test_personal_leave_balance_premature_finish_recovers_to_balance_tool():
+    decision = LeaveProvider().recover_completion_decision(
+        _finish_decision(),
+        [LEAVE_BALANCE_TOOL_NAME],
+        DomainContext(question='查询我的年假余额'),
+        'leave_balance_missing',
+    )
+    assert decision is not None
+    assert decision.action == 'tool'
+    assert decision.tool_name == LEAVE_BALANCE_TOOL_NAME
+    assert decision.arguments == {}
+    assert decision.reason_code == 'need_balance'
 
 
 def test_leave_proposal_clarification_still_allows_finish():
