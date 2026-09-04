@@ -704,6 +704,35 @@ def _finalize_response_contract(state: dict) -> dict:
     return state
 
 
+def _finalize_rag_sources(state: dict) -> dict:
+    """从当前请求成功的 RAG observation 确定性恢复公开来源。"""
+    collected: list[str] = []
+    seen: set[str] = set()
+    for entry in state.get('tool_history') or []:
+        if (
+            not isinstance(entry, dict)
+            or entry.get('tool_name') != RAG_TOOL_NAME
+            or entry.get('status') != 'success'
+        ):
+            continue
+        observation = entry.get('observation')
+        if not isinstance(observation, str):
+            continue
+        try:
+            payload = json.loads(observation)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get('sources'), list):
+            continue
+        for source in payload['sources']:
+            if not isinstance(source, str) or not source.strip() or source in seen:
+                continue
+            seen.add(source)
+            collected.append(source)
+    state['sources'] = collected
+    return state
+
+
 def finalize_node(state: AgentState) -> dict:
     """Planner-first Graph 的唯一最终化节点。
 
@@ -713,6 +742,7 @@ def finalize_node(state: AgentState) -> dict:
     """
     state = _finalize_action_proposal(state)
     state = _finalize_response_contract(state)
+    state = _finalize_rag_sources(state)
     # 只在 Graph 内、最终 Checkpoint 写入前合并；不把 history 接入当前
     # tool dedup、ExpenseProposalContext 或 Memory Trigger。
     state['execution_history'] = merge_execution_history(

@@ -71,6 +71,7 @@ class TestAcceptanceScenario:
         assert result['step_count'] == 3
         assert result['tool_call_count'] == 2
         assert '年假制度' in result['answer']
+        assert result['sources'] == ['hr/annual_leave.md']
         # Observation 回传：最后一次观察是 Eval 结果
         assert 'final_pass_rate' in result['observation']
         assert [e['status'] for e in result['tool_history']] == ['success', 'success']
@@ -249,6 +250,7 @@ class TestTermination:
         assert result['step_count'] == 2
         assert result['tool_call_count'] == 1
         assert '年假制度' in result['answer']
+        assert result['sources'] == ['hr/annual_leave.md']
 
     def test_refuse_ends(self):
         with patch('app.agents.planner_node.call_llm', return_value=_refuse()) as llm, \

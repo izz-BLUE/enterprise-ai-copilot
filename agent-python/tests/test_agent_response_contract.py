@@ -22,7 +22,7 @@ import json
 from datetime import date
 from unittest.mock import Mock, patch
 
-from app.agents.langgraph_agent import run_langgraph_agent
+from app.agents.langgraph_agent import finalize_node, run_langgraph_agent
 
 BUSINESS_DATE = date(2026, 8, 18)
 
@@ -96,7 +96,8 @@ class TestTaskCompleteRoutes:
     def test_single_rag_tool_yields_rag_route(self):
         """实际执行 Tool 全部是 rag_answer_tool → route=rag。"""
         rag_payload = json.dumps(
-            {"answer": "年假制度：入职满1年5天。", "success": True, "sources": []},
+            {"answer": "年假制度：入职满1年5天。", "success": True,
+             "sources": ["hr/annual_leave.md"]},
             ensure_ascii=False,
         )
         rag_mock = Mock()
@@ -110,6 +111,7 @@ class TestTaskCompleteRoutes:
         assert result['route'] == 'rag'
         assert result['category'] == 'normal'
         assert result['reason'] == ''
+        assert result['sources'] == ['hr/annual_leave.md']
 
     def test_single_eval_tool_yields_eval_route(self):
         """实际执行 Tool 全部是 eval_report_tool → route=eval。"""
@@ -127,7 +129,8 @@ class TestTaskCompleteRoutes:
 
     def test_mixed_rag_and_eval_yields_agent_route(self):
         """混合 Tool（rag + eval）→ route=agent, category=normal。"""
-        rag_payload = json.dumps({"answer": "ok", "success": True, "sources": []})
+        rag_payload = json.dumps({"answer": "ok", "success": True,
+                                  "sources": ["hr/sick_leave.md"]})
         eval_payload = json.dumps({'retrieval': {'final_pass_rate': 0.9}})
         rag_mock = Mock()
         rag_mock.invoke.return_value = rag_payload
@@ -142,6 +145,7 @@ class TestTaskCompleteRoutes:
             result = run_langgraph_agent('先查知识再查评估', use_planner=True, allow_eval=True)
         assert result['route'] == 'agent'
         assert result['category'] == 'normal'
+        assert result['sources'] == ['hr/sick_leave.md']
 
     def test_enterprise_only_tool_yields_agent_route(self):
         """仅企业只读 Tool（leave_balance）→ route=agent（混合 Tool 边界）。"""
@@ -180,6 +184,93 @@ class TestTaskCompleteRoutes:
         assert result['stop_reason'] == 'task_complete'
         assert result['route'] == 'action'
         assert result['category'] == 'business_action'
+
+
+def _finalize_state(tool_history, **changes):
+    state = {
+        'safe': True,
+        'stop_reason': 'task_complete',
+        'route': '',
+        'category': '',
+        'reason': '',
+        'action_proposal': None,
+        'missing_fields': [],
+        'tool_history': tool_history,
+        'execution_history': [],
+    }
+    state.update(changes)
+    return state
+
+
+class TestRagSourceFinalization:
+    def test_rag_observation_sources_are_propagated(self):
+        result = finalize_node(_finalize_state([{
+            'tool_name': 'rag_answer_tool',
+            'status': 'success',
+            'observation': json.dumps({
+                'answer': '病假材料', 'success': True,
+                'sources': ['hr/sick_leave.md'],
+            }),
+        }]))
+
+        assert result['route'] == 'rag'
+        assert result['sources'] == ['hr/sick_leave.md']
+
+    def test_mixed_tool_sources_are_propagated_without_changing_agent_route(self):
+        result = finalize_node(_finalize_state([
+            {
+                'tool_name': 'leave_balance_tool',
+                'status': 'success',
+                'observation': json.dumps({'success': True}),
+            },
+            {
+                'tool_name': 'rag_answer_tool',
+                'status': 'success',
+                'observation': json.dumps({
+                    'answer': '病假材料', 'success': True,
+                    'sources': ['hr/sick_leave.md'],
+                }),
+            },
+        ]))
+
+        assert result['route'] == 'agent'
+        assert result['sources'] == ['hr/sick_leave.md']
+
+    def test_multiple_rag_sources_are_deduplicated_in_first_seen_order(self):
+        result = finalize_node(_finalize_state([
+            {
+                'tool_name': 'rag_answer_tool',
+                'status': 'success',
+                'observation': json.dumps({
+                    'success': True,
+                    'sources': ['a.md', 'b.md', 'a.md'],
+                }),
+            },
+        ]))
+
+        assert result['sources'] == ['a.md', 'b.md']
+
+    def test_malformed_rag_observations_are_ignored(self):
+        for observation in ('not-json', json.dumps({
+            'success': True,
+            'sources': 'a.md',
+        })):
+            result = finalize_node(_finalize_state([{
+                'tool_name': 'rag_answer_tool',
+                'status': 'success',
+                'observation': observation,
+            }]))
+
+            assert result['sources'] == []
+
+    def test_non_rag_sources_are_not_propagated(self):
+        result = finalize_node(_finalize_state([{
+            'tool_name': 'leave_balance_tool',
+            'status': 'success',
+            'observation': json.dumps({'sources': ['fake.md']}),
+        }]))
+
+        assert result['sources'] == []
 
 
 # ---------- refused ----------
