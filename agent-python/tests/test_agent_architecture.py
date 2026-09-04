@@ -52,11 +52,6 @@ def test_workflow_guard_registry_rejects_multiple_guard_owners():
         ))
 
 
-def test_registry_prompt_specs_are_catalog_metadata():
-    for tool_name in TOOL_CATALOG.tool_names:
-        assert DOMAIN_PROVIDER_REGISTRY.prompt_spec(tool_name) == TOOL_CATALOG.prompt_spec(tool_name)
-
-
 def test_planner_prompt_contains_unchanged_catalog_content():
     prompt = build_planner_system_prompt(list(get_args(ToolName)))
 

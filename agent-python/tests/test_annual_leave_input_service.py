@@ -7,7 +7,6 @@ from app.services.annual_leave_input_service import (
     analyze_annual_leave_input,
     clarification_question,
     is_annual_leave_action_intent,
-    is_personal_annual_leave_balance_query,
 )
 
 BUSINESS_DATE = date(2026, 7, 16)
@@ -56,32 +55,6 @@ def test_conservative_action_intent_accepts_explicit_requests(question):
 )
 def test_policy_and_balance_questions_remain_rag(question):
     assert not is_annual_leave_action_intent(question)
-
-
-@pytest.mark.parametrize(
-    ('question', 'expected'),
-    [
-        ('查询我的年假余额', True),
-        ('请查询我的年假余额', True),
-        ('我的年假余额是多少', True),
-        ('我还有多少年假', True),
-        ('我还剩多少天年假', True),
-        ('看一下我的年假余额', True),
-        ('查一下我今年还剩多少年假', True),
-        ('公司的年假制度是什么', False),
-        ('年假余额怎么计算', False),
-        ('年假怎么结转', False),
-        ('年假能请多少天', False),
-        ('入职一年有多少天年假', False),
-        ('帮我请明天一天年假', False),
-        ('怎么申请年假', False),
-        ('查询我的年假余额以及公司的年假计算规则', False),
-        ('查询我的年假余额以及公司的年假规则', False),
-        ('我的年假余额怎么查', False),
-    ],
-)
-def test_personal_annual_leave_balance_query_is_narrow(question, expected):
-    assert is_personal_annual_leave_balance_query(question) is expected
 
 
 @pytest.mark.parametrize(

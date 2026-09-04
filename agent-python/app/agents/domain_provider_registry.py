@@ -1,7 +1,8 @@
-"""Planner 领域 Provider 兼容 facade 与显式路由注册表。
+"""Workflow ownership and continuation registry for the Planner runtime.
 
-Provider 保留旧的 matches/resolve 兼容行为，并把确定性业务流程委托给
-workflow_guard；Planner semantic metadata 则统一来自 tool_catalog。
+The registry owns deterministic workflow lookup and completion handling. Semantic
+tool routing is owned by the Planner plus the Capability Gate; this module does
+not resolve a provider from the user's question.
 """
 
 from __future__ import annotations
@@ -9,9 +10,7 @@ from __future__ import annotations
 from typing import Any, Protocol, Sequence
 
 from app.agents.tool_catalog import (
-    _PLATFORM_PROMPT_SPECS,
     TOOL_CATALOG,
-    ToolPromptSpec,
 )
 from app.agents.workflow_guard.contracts import (
     _STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE,
@@ -33,11 +32,6 @@ from app.schemas.planner_schema import (
     PlannerDecision,
     PlannerDecisionError,
 )
-from app.services import expense_input_service
-from app.services.annual_leave_input_service import (
-    is_annual_leave_action_intent,
-    is_personal_annual_leave_balance_query,
-)
 
 
 def build_expense_proposal_context(tool_history: Sequence[dict]) -> dict:
@@ -45,60 +39,20 @@ def build_expense_proposal_context(tool_history: Sequence[dict]) -> dict:
     return _build_expense_proposal_context(tool_history)
 
 
-class DomainProviderAmbiguityError(PlannerDecisionError):
-    """一个请求同时命中多个 Provider。"""
-
-
 class DomainProvider(Protocol):
     domain_key: str
     task_type: str
     proposal_tool_names: frozenset[str]
-    semantic_slots: frozenset[str]
-    capability_tools: frozenset[str]
-
-    def matches(self, context: DomainContext) -> bool: ...
-
-    def is_business_action_intent(self, context: DomainContext) -> bool: ...
-
-    def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]: ...
-
-    def terminal_clarification(self, context: DomainContext) -> str | None: ...
-
-    def validate_tool_call(
-        self, tool_name: str, arguments: dict[str, Any], context: DomainContext
-    ) -> None: ...
-
-    def completion_contract(self, tools: Sequence[str]) -> str: ...
-
-    def validate_completion(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> None: ...
-
-    def recover_completion_decision(
-        self,
-        decision: PlannerDecision,
-        tools: Sequence[str],
-        context: DomainContext,
-        error_code: str,
-    ) -> PlannerDecision | None: ...
-
-    def postprocess_decision(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> tuple[PlannerDecision, dict[str, object]]: ...
-
-    def prompt_specs(self) -> dict[str, ToolPromptSpec]: ...
-
-    def is_completed_success(self, item: dict) -> bool: ...
+    workflow_tool_names: frozenset[str]
+    guard: WorkflowGuard
 
 
 class LeaveProvider:
-    """Leave 自然语言路由兼容层；业务流程交给 LeaveGuard。"""
+    """Leave workflow owner; semantic routing is not performed here."""
 
     domain_key = 'leave'
     task_type = 'LEAVE_REQUEST'
     proposal_tool_names = frozenset({LEAVE_PROPOSAL_TOOL_NAME})
-    semantic_slots = frozenset()
-    capability_tools = frozenset({LEAVE_PROPOSAL_TOOL_NAME})
     workflow_tool_names = LeaveGuard.tool_names
     guard: LeaveGuard = LeaveGuard()
 
@@ -108,181 +62,19 @@ class LeaveProvider:
     def continuation_state(self, context: DomainContext) -> dict | None:
         return self.guard.continuation_state(context)
 
-    def matches(self, context: DomainContext) -> bool:
-        return (
-            is_annual_leave_action_intent(context.question)
-            or is_personal_annual_leave_balance_query(context.question)
-            or self.continuation_state(context) is not None
-        )
-
-    def is_business_action_intent(self, context: DomainContext) -> bool:
-        return (
-            (
-                is_annual_leave_action_intent(context.question)
-                and not is_personal_annual_leave_balance_query(context.question)
-            )
-            or self.continuation_state(context) is not None
-        )
-
-    def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
-        return self.guard.legal_tools(
-            tools,
-            context,
-            balance_query=is_personal_annual_leave_balance_query(context.question),
-        )
-
-    def terminal_clarification(self, context: DomainContext) -> str | None:
-        return self.guard.terminal_clarification(context)
-
-    def validate_tool_call(
-        self, tool_name: str, arguments: dict[str, Any], context: DomainContext
-    ) -> None:
-        return self.guard.validate_tool_call(tool_name, arguments, context)
-
-    def completion_contract(self, tools: Sequence[str]) -> str:
-        return self.guard.completion_contract(tools)
-
-    def validate_completion(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> None:
-        return self.guard.validate_completion(
-            decision,
-            tools,
-            context,
-            balance_query=is_personal_annual_leave_balance_query(context.question),
-        )
-
-    def recover_completion_decision(
-        self,
-        decision: PlannerDecision,
-        tools: Sequence[str],
-        context: DomainContext,
-        error_code: str,
-    ) -> PlannerDecision | None:
-        return self.guard.recover_completion_decision(
-            decision,
-            tools,
-            context,
-            error_code,
-            balance_query=is_personal_annual_leave_balance_query(context.question),
-        )
-
-    def postprocess_decision(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> tuple[PlannerDecision, dict[str, object]]:
-        return self.guard.postprocess_decision(decision, tools, context)
-
     def continuation_prompt(self, question: str, state: dict) -> str:
         return self.guard.continuation_prompt(question, state)
 
-    def prompt_specs(self) -> dict[str, ToolPromptSpec]:
-        return TOOL_CATALOG.specs_for_domain(self.domain_key)
-
-    def is_completed_success(self, item: dict) -> bool:
-        return self.guard.is_completed_success(item)
-
 
 class ExpenseProvider:
-    """Expense 自然语言路由兼容层；业务流程交给 ExpenseGuard。"""
+    """Expense workflow owner; semantic routing is not performed here."""
 
     domain_key = 'expense'
     task_type = 'EXPENSE_REQUEST'
     proposal_tool_names = frozenset({EXPENSE_PROPOSAL_TOOL_NAME})
-    semantic_slots = frozenset({'expense_reason'})
-    capability_tools = frozenset({EXPENSE_PROPOSAL_TOOL_NAME})
     dependency_tools = ExpenseGuard.dependency_tools
     workflow_tool_names = ExpenseGuard.tool_names
     guard: ExpenseGuard = ExpenseGuard()
-
-    def matches(self, context: DomainContext) -> bool:
-        return bool(
-            expense_input_service.is_expense_claim_intent(context.question)
-            or context.continuation_original_request
-        )
-
-    def is_business_action_intent(self, context: DomainContext) -> bool:
-        if not self.matches(context):
-            return False
-        # 显式 trip / invoice 引用仍可用于读取报销事实；只有需要进入
-        # Proposal capability 的直接申请才走未授权业务动作 preflight。
-        return not (
-            expense_input_service.extract_trip_reference(context.question)
-            or expense_input_service.extract_invoice_references(context.question)
-        )
-
-    def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
-        return self.guard.legal_tools(
-            tools, context, matched=self.matches(context)
-        )
-
-    def recover_completion_decision(
-        self,
-        decision: PlannerDecision,
-        tools: Sequence[str],
-        context: DomainContext,
-        error_code: str,
-    ) -> PlannerDecision | None:
-        return self.guard.recover_completion_decision(
-            decision, tools, context, error_code
-        )
-
-    def _selected_invoice_progress(self, *args: Any, **kwargs: Any) -> Any:
-        return self.guard._selected_invoice_progress(*args, **kwargs)
-
-    @staticmethod
-    def _tool_decision(
-        tool_name: str,
-        arguments: dict[str, Any],
-        reason_code: str,
-        expense_reason: str | None,
-    ) -> PlannerDecision:
-        return ExpenseGuard._tool_decision(
-            tool_name, arguments, reason_code, expense_reason
-        )
-
-    def terminal_clarification(self, context: DomainContext) -> str | None:
-        return self.guard.terminal_clarification(context)
-
-    def validate_tool_call(
-        self, tool_name: str, arguments: dict[str, Any], context: DomainContext
-    ) -> None:
-        return self.guard.validate_tool_call(
-            tool_name, arguments, context, matched=self.matches(context)
-        )
-
-    def invoice_scope_allowed(
-        self, question: str, tool_history: Sequence[dict], invoice_id: str | None
-    ) -> bool:
-        return self.guard.invoice_scope_allowed(question, tool_history, invoice_id)
-
-    def completion_contract(self, tools: Sequence[str]) -> str:
-        return self.guard.completion_contract(tools)
-
-    def validate_completion(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> None:
-        return self.guard.validate_completion(decision, tools, context)
-
-    def postprocess_decision(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> tuple[PlannerDecision, dict[str, object]]:
-        return self.guard.postprocess_decision(
-            decision,
-            tools,
-            context,
-            matched=self.matches(context),
-            claim_intent=expense_input_service.is_expense_claim_intent(context.question),
-        )
-
-    @staticmethod
-    def _normalize_reason(value: object) -> str | None:
-        return ExpenseGuard._normalize_reason(value)
-
-    def is_completed_success(self, item: dict) -> bool:
-        return self.guard.is_completed_success(item)
-
-    def prompt_specs(self) -> dict[str, ToolPromptSpec]:
-        return TOOL_CATALOG.specs_for_domain(self.domain_key)
 
     def active_reason_task_state(self, memory_context: object) -> dict | None:
         return self.guard.active_reason_task_state(memory_context)
@@ -295,7 +87,7 @@ class ExpenseProvider:
 
 
 class DomainProviderRegistry:
-    """显式静态 Provider 注册表；不做动态 discovery。"""
+    """静态 workflow owner registry; it never routes from question text."""
 
     def __init__(self, providers: Sequence[DomainProvider]):
         self._providers = tuple(providers)
@@ -304,37 +96,12 @@ class DomainProviderRegistry:
         if len(set(keys)) != len(keys) or len(set(tasks)) != len(tasks):
             raise ValueError('DomainProviderRegistry 不允许重复 domain_key/task_type')
 
-        self._prompt_specs = dict(_PLATFORM_PROMPT_SPECS)
-        for provider in self._providers:
-            provider_specs = provider.prompt_specs()
-            overlap = self._prompt_specs.keys() & provider_specs.keys()
-            if overlap:
-                raise ValueError(f'Domain Provider Tool prompt 重复注册: {sorted(overlap)}')
-            self._prompt_specs.update(provider_specs)
-        ordered_specs = {
-            name: self._prompt_specs[name]
-            for name in TOOL_CATALOG.tool_names
-            if name in self._prompt_specs
-        }
-        ordered_specs.update({
-            name: spec
-            for name, spec in self._prompt_specs.items()
-            if name not in ordered_specs
-        })
-        self._prompt_specs = ordered_specs
-
         self._tool_owners: dict[str, DomainProvider] = {}
         for provider in self._providers:
-            owned_names = (
-                set(provider.prompt_specs())
-                | set(provider.proposal_tool_names)
-                | set(provider.capability_tools)
-                | set(getattr(provider, 'dependency_tools', frozenset()))
-            )
-            for tool_name in owned_names:
+            for tool_name in getattr(provider, 'workflow_tool_names', frozenset()):
                 owner = self._tool_owners.get(tool_name)
                 if owner is not None and owner is not provider:
-                    raise ValueError(f'Domain Provider Tool prompt 重复注册: {[tool_name]}')
+                    raise ValueError(f'Domain Tool 重复注册: {[tool_name]}')
                 self._tool_owners[tool_name] = provider
 
         assignments = []
@@ -351,14 +118,15 @@ class DomainProviderRegistry:
 
     @property
     def tool_names(self) -> tuple[str, ...]:
-        return tuple(self._prompt_specs)
+        """Return the authoritative Planner catalog names."""
+        return TOOL_CATALOG.tool_names
 
     @property
     def business_action_tools(self) -> frozenset[str]:
-        """所有领域声明的业务 capability Tool；不做动态 discovery。"""
+        """Return Catalog-declared proposal tools without question routing."""
         return frozenset(
-            name for provider in self._providers
-            for name in provider.capability_tools
+            name for name in TOOL_CATALOG.tool_names
+            if TOOL_CATALOG.prompt_spec(name).side_effect == 'PROPOSAL'
         )
 
     def workflow_guard_for_tool(self, tool_name: str) -> WorkflowGuard | None:
@@ -494,132 +262,31 @@ class DomainProviderRegistry:
             updates.update(guard_updates)
         return decision, updates
 
-    def capability_tools_for_question(self, question: str) -> list[str]:
-        """按当前请求贡献领域 capability，不改变上游权限集合。"""
-        context = DomainContext(question=question or '')
-        return [
-            name for provider in self._providers if provider.matches(context)
-            for name in provider.prompt_specs()
-            if name in provider.capability_tools
-        ]
-
-    def resolve(self, context: DomainContext) -> DomainProvider | None:
-        matches = tuple(provider for provider in self._providers if provider.matches(context))
-        if len(matches) > 1:
-            raise DomainProviderAmbiguityError(
-                f'请求同时命中多个业务领域: {", ".join(provider.domain_key for provider in matches)}'
-            )
-        return matches[0] if matches else None
-
     def provider_for_tool(self, tool_name: str) -> DomainProvider | None:
         return self._tool_owners.get(tool_name)
 
-    def legal_tools(self, tools: Sequence[str], context: DomainContext) -> list[str]:
-        provider = self.resolve(context)
-        if provider is None:
-            return list(tools)
-        original = list(tools)
-        legal = provider.legal_tools(original, context)
-        allowed = set(original)
-        return [
-            name for name in legal
-            if name in allowed
-            and (
-                (owner := self.provider_for_tool(name)) is None
-                or owner is provider
-            )
-        ]
-
-    def terminal_clarification(self, context: DomainContext) -> str | None:
-        provider = self.resolve(context)
-        return provider.terminal_clarification(context) if provider is not None else None
-
-    def validate_tool_call(
-        self, tool_name: str, arguments: dict[str, Any], context: DomainContext
-    ) -> None:
-        resolved_provider = self.resolve(context)
-        tool_owner = self.provider_for_tool(tool_name)
-        if (
-            resolved_provider is not None
-            and tool_owner is not None
-            and resolved_provider is not tool_owner
-        ):
-            raise DomainToolCallRejected(
-                'domain_tool_mismatch',
-                '当前请求领域与目标 Tool 所属领域不一致，已拒绝执行。',
-            )
-        if tool_owner is not None:
-            tool_owner.validate_tool_call(tool_name, arguments, context)
-
-    def validate_completion(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> None:
-        if (
-            decision.action == 'finish'
-            and decision.reason_code == 'task_complete'
-            and _latest_structured_tool_business_failure(context.tool_history) is not None
-        ):
-            raise PlannerDecisionError(_STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE)
-        provider = self.resolve(context)
-        if provider is not None:
-            provider.validate_completion(decision, tools, context)
-
-    def recover_completion_decision(
-        self,
-        decision: PlannerDecision,
-        tools: Sequence[str],
-        context: DomainContext,
-        error_code: str,
-    ) -> PlannerDecision | None:
-        provider = self.resolve(context)
-        if provider is None:
-            return None
-        return provider.recover_completion_decision(
-            decision, tools, context, error_code
-        )
-
-    def postprocess_decision(
-        self, decision: PlannerDecision, tools: Sequence[str], context: DomainContext
-    ) -> tuple[PlannerDecision, dict[str, object]]:
-        resolved_provider = self.resolve(context)
-        tool_owner_provider = None
-        if decision.action == 'tool' and decision.tool_name:
-            tool_owner_provider = self.provider_for_tool(decision.tool_name)
-
-        providers = []
-        if tool_owner_provider is not None:
-            providers.append(tool_owner_provider)
-        if resolved_provider is not None and resolved_provider is not tool_owner_provider:
-            providers.append(resolved_provider)
-        if not providers:
-            return decision, {}
-
-        updates: dict[str, object] = {}
-        for provider in providers:
-            decision, provider_updates = provider.postprocess_decision(
-                decision, tools, context
-            )
-            updates.update(provider_updates)
-        return decision, updates
-
     def completion_contract(self, tools: Sequence[str]) -> str:
+        """Aggregate completion contracts from Guards owning visible tools."""
+        guards: list[WorkflowGuard] = []
+        visible = set(tools)
+        for provider in self._providers:
+            guard = getattr(provider, 'guard', None)
+            if guard is not None and visible & set(getattr(guard, 'tool_names', ())):
+                if guard not in guards:
+                    guards.append(guard)
         contracts = [
-            provider.completion_contract(tools)
-            for provider in self._providers
-            if set(provider.prompt_specs()) & set(tools)
+            guard.completion_contract(tools)
+            for guard in guards
         ]
         return '\n\n'.join(contract for contract in contracts if contract)
-
-    def prompt_spec(self, tool_name: str) -> ToolPromptSpec:
-        return self._prompt_specs[tool_name]
 
     def is_completed_success(self, item: dict) -> bool:
         if not _tool_invocation_has_business_success(item):
             return False
-        provider = self.provider_for_tool(item.get('tool_name'))
-        if provider is None:
+        guard = self.workflow_guard_for_tool(item.get('tool_name'))
+        if guard is None:
             return item.get('status') == 'success'
-        return provider.is_completed_success(item)
+        return guard.is_completed_success(item)
 
     def validation_metadata(self, message: str) -> tuple[str, str, str] | None:
         known = {

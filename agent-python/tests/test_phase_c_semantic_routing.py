@@ -102,7 +102,7 @@ def test_authorized_tools_are_question_independent_and_gate_sensitive():
     )
 
 
-def test_formal_planner_candidate_set_equals_authorized_tools_without_resolve(monkeypatch):
+def test_formal_planner_candidate_set_equals_authorized_tools(monkeypatch):
     monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://oa-mcp')
     expected = authorized_tools(
         employee_id='E10001',
@@ -120,14 +120,6 @@ def test_formal_planner_candidate_set_equals_authorized_tools_without_resolve(mo
         with patch.object(planner_module, 'JAVA_BASE_URL', 'http://java'), \
                 patch.object(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal'), \
                 patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False), \
-                patch.object(
-                    planner_module, 'visible_tools',
-                    side_effect=AssertionError('Phase C must not call visible_tools'),
-                ), \
-                patch.object(
-                    planner_module.DOMAIN_PROVIDER_REGISTRY, 'resolve',
-                    side_effect=AssertionError('Phase C Planner must not resolve by question'),
-                ), \
                 patch.object(planner_module, 'call_llm', return_value=raw) as llm:
             _invoke_planner(value)
 
@@ -157,10 +149,6 @@ def test_multi_domain_loop_uses_selected_tools_without_ambiguity_refusal():
     with patch.object(planner_module, 'JAVA_BASE_URL', 'http://java'), \
             patch.object(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal'), \
             patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False), \
-            patch.object(
-                planner_module.DOMAIN_PROVIDER_REGISTRY, 'resolve',
-                side_effect=AssertionError('production loop must not resolve by question'),
-            ), \
             patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
             patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool), \
             patch('app.agents.tool_executor_node.expense_status_tool', status_tool):
