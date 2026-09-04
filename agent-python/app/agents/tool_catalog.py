@@ -159,7 +159,7 @@ TOOL_CATALOG = ToolCatalog((
             '只查询当前登录用户本人的当前剩余/可用年假余额、可休天数等实时事实。'
             '不回答公司制度或申请流程,不查询请假历史,也不创建或准备申请。'
             '用户明确要求办理、准备、创建或发起具体年假申请时,不能因为申请前可能需要了解余额'
-            '就选择此 Tool;若当前能力清单提供 leave_proposal_tool,应选择该 Proposal Tool。'
+            '就选择此 Tool;应使用当前能力清单中可见的 business-action Proposal Tool。'
             '无参数,身份由程序层注入。'
         ),
         argument_contract='必须为空对象 {}；身份由程序层注入。',
