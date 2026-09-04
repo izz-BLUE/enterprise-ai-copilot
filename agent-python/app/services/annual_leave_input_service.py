@@ -21,11 +21,6 @@ _QUERY_NOISE_EXPRESSIONS = (
 KNOWLEDGE_EXPRESSIONS = (
     "政策", "规定", "多少天", "余额", "怎么算", "计算", "结转", "流程", "制度",
 )
-_PERSONAL_BALANCE_KNOWLEDGE_EXPRESSIONS = (
-    "政策", "规定", "怎么算", "计算", "结转", "流程", "制度",
-    "规则", "能请", "可以请", "怎么申请", "如何申请", "怎么请", "申请",
-    "怎么查", "如何查", "查询方法", "查询流程",
-)
 _DATE_PATTERN = re.compile(
     r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
     r"|\d{4}年\d{1,2}月\d{1,2}[日号]"
@@ -246,31 +241,6 @@ def is_annual_leave_action_intent(question: str) -> bool:
     if any(expression in normalized for expression in _QUERY_NOISE_EXPRESSIONS):
         return False
     return _ACTION_PATTERN.search(normalized) is not None
-
-
-def is_personal_annual_leave_balance_query(question: str) -> bool:
-    """判断是否为明确的本人实时年假余额查询。"""
-    normalized = question.strip()
-    if "年假" not in normalized:
-        return False
-    if any(expression in normalized for expression in _PERSONAL_BALANCE_KNOWLEDGE_EXPRESSIONS):
-        return False
-    if any(expression in normalized for expression in ("以及", "并且", "同时", "和")):
-        return False
-
-    has_personal_reference = any(
-        expression in normalized for expression in ("我的", "本人", "个人")
-    )
-    has_personal_remaining = re.search(
-        r"我(?:今年)?还(?:有|剩)(?:多少|几)?", normalized
-    ) is not None
-    has_balance_fact = any(
-        expression in normalized for expression in ("余额", "剩余", "还剩", "还有多少")
-    )
-    if not ((has_personal_reference or has_personal_remaining) and has_balance_fact):
-        return False
-    # 保留现有动作判断作为最后一层保护，避免带本人词的申请句被误判为只读。
-    return not is_annual_leave_action_intent(normalized)
 
 
 def parse_date_evidence(value: str, *, business_date: date) -> date:

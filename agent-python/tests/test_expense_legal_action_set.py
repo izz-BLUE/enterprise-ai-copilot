@@ -6,8 +6,9 @@ import json
 from datetime import date
 from unittest.mock import patch
 
-from app.agents.domain_provider_registry import DomainContext, ExpenseProvider
+from app.agents.domain_provider_registry import DomainContext
 from app.agents.planner_node import authorized_tools, planner_node
+from app.agents.workflow_guard.expense_guard import ExpenseGuard
 from app.schemas.planner_schema import (
     EXPENSE_PROPOSAL_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
@@ -67,7 +68,7 @@ def _travel_history(*invoice_ids: str, include_other_trip: bool = False) -> list
 
 
 def _legal(history=None, *, reason="客户拜访", proposal=None, question=QUESTION):
-    return ExpenseProvider().legal_tools(
+    return ExpenseGuard().legal_tools(
         TOOLS,
         DomainContext(
             question=question,
@@ -133,11 +134,6 @@ def test_existing_action_proposal_removes_expense_dependency_tools():
     assert INVOICE_VERIFY_TOOL_NAME not in legal
     assert EXPENSE_PROPOSAL_TOOL_NAME not in legal
     assert RAG_TOOL_NAME in legal
-
-
-def test_non_expense_capability_is_unchanged():
-    history = _travel_history("INV-001", "INV-002")
-    assert _legal(history, question="公司的年假制度是什么") == TOOLS
 
 
 def test_missing_reason_preserves_read_only_capabilities():

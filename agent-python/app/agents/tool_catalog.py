@@ -88,13 +88,6 @@ class ToolCatalog:
     def prompt_spec(self, tool_name: str) -> ToolPromptSpec:
         return self._specs[tool_name]
 
-    def specs_for_domain(self, domain: str | None) -> dict[str, ToolPromptSpec]:
-        return {
-            name: spec
-            for name, spec in self._specs.items()
-            if spec.domain == domain
-        }
-
     def capability_status(self, authorized_tools: Sequence[str]) -> CapabilityStatus:
         """从 Capability Gate 已授权 Tool 集合确定性汇总能力类别状态。
 
@@ -319,8 +312,3 @@ TOOL_CATALOG = ToolCatalog((
         freshness_rule='报销状态必须通过当前查询获得。',
     ),
 ))
-
-
-# Kept as a small compatibility name for code/tests that used the old module
-# local constant. The actual definitions live in TOOL_CATALOG above.
-_PLATFORM_PROMPT_SPECS = TOOL_CATALOG.specs_for_domain(None)

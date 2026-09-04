@@ -185,28 +185,28 @@ def build_planner_system_prompt(tools: list[str]) -> str:
         capability_status, ensure_ascii=False, separators=(',', ':')
     )
     tool_lines = '\n'.join(
-        f'- {name}: {DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).description}'
+        f'- {name}: {TOOL_CATALOG.prompt_spec(name).description}'
         for name in tools
     )
     contract_lines = '\n'.join(
-        f'- {name}: {DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).argument_contract}'
+        f'- {name}: {TOOL_CATALOG.prompt_spec(name).argument_contract}'
         for name in tools
     )
     reason_lines = '\n'.join(
-        f'- tool + {name} → "{DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).reason_code}"'
+        f'- tool + {name} → "{TOOL_CATALOG.prompt_spec(name).reason_code}"'
         for name in tools
     )
     example_lines = '\n'.join(
-        f'{index}. {json.dumps(DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).example, ensure_ascii=False)}'
+        f'{index}. {json.dumps(TOOL_CATALOG.prompt_spec(name).example, ensure_ascii=False)}'
         for index, name in enumerate(tools, start=1)
     )
     usage_rules = '\n\n'.join(
-        DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).usage_rule
-        for name in tools if DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).usage_rule
+        TOOL_CATALOG.prompt_spec(name).usage_rule
+        for name in tools if TOOL_CATALOG.prompt_spec(name).usage_rule
     )
     freshness_rules = '\n'.join(
-        f'- {name}: {DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).freshness_rule}'
-        for name in tools if DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).freshness_rule
+        f'- {name}: {TOOL_CATALOG.prompt_spec(name).freshness_rule}'
+        for name in tools if TOOL_CATALOG.prompt_spec(name).freshness_rule
     )
     completion_contract = _build_completion_contract(tools)
     finish_index = len(tools) + 1
@@ -238,63 +238,12 @@ def build_planner_system_prompt(tools: list[str]) -> str:
 
 
 def _build_completion_contract(tools: list[str]) -> str:
-    """由已注册 Provider 汇总当前可见工具的完成契约。"""
+    """由当前可见 Tool 所属 Workflow Guard 汇总完成契约。"""
     return DOMAIN_PROVIDER_REGISTRY.completion_contract(tools)
 
 
 def _has_value(value: str | None) -> bool:
     return bool(value and value.strip())
-
-
-def visible_tools(
-    *,
-    employee_id: str | None,
-    allow_eval: bool,
-    allow_business_actions: bool,
-    java_base_url: str,
-    java_internal_token: str,
-    enterprise_oa_mcp_url: str = '',
-    question: str = '',
-) -> list[str]:
-    """根据可信 Runtime Context 和 Python 服务配置计算当前可见 Tool。
-
-    Capability Gate 只决定 Planner 应看到什么；Executor、Tool、Java / MCP
-    仍保留各自的确定性执行校验。business_date 不属于本次 Gate 条件。
-
-    P2-A Expense Workflow V1（V2 §三、§十一）：
-    - travel_record_tool：按 OA MCP 配置 + employee_id 可见
-    - invoice_verify_tool：按 OA MCP 配置 + employee_id 可见（ownership
-      check 由 MCP 端做；身份仍由 Executor 注入）
-    - expense_proposal_tool：allow_business_actions + employee_id 可见
-    - expense_status_tool：按 Java config + employee_id 可见
-    """
-    has_employee_id = _has_value(employee_id)
-    has_java_read_config = (
-        has_employee_id
-        and _has_value(java_base_url)
-        and _has_value(java_internal_token)
-    )
-    has_oamcp_config = _has_value(enterprise_oa_mcp_url)
-    tools = [RAG_TOOL_NAME]
-    if has_java_read_config:
-        tools.extend([LEAVE_BALANCE_TOOL_NAME, LEAVE_REQUEST_TOOL_NAME])
-    if has_oamcp_config and has_employee_id:
-        tools.extend([TRAVEL_RECORD_TOOL_NAME, INVOICE_VERIFY_TOOL_NAME])
-    if allow_eval:
-        tools.append(EVAL_TOOL_NAME)
-    if allow_business_actions and has_employee_id:
-        tools.append(LEAVE_PROPOSAL_TOOL_NAME)
-        # expense_proposal_tool 与 leave_proposal_tool 共享同一个授权条件：
-        # 受控业务动作 + 员工身份。Phase 7 时由 registry 兜底（Tool 未注册则
-        # Planner 不会见到对应名称）。
-        tools.append(EXPENSE_PROPOSAL_TOOL_NAME)
-        for name in DOMAIN_PROVIDER_REGISTRY.capability_tools_for_question(question):
-            if name not in tools:
-                tools.append(name)
-    if has_java_read_config:
-        # expense_status_tool 走 Java /api/internal/expense/status（Phase 8）。
-        tools.append(EXPENSE_STATUS_TOOL_NAME)
-    return tools
 
 
 def authorized_tools(
@@ -308,9 +257,8 @@ def authorized_tools(
 ) -> list[str]:
     """Return config/identity-authorized Tools before semantic route pruning.
 
-    This is intentionally separate from ``visible_tools``: Shadow Routing sees
-    only trusted context, service configuration, and registered Catalog entries,
-    never the question or a provider's ``matches()/resolve()`` result.
+    Shadow Routing sees only trusted context, service configuration, and
+    registered Catalog entries; it never sees the question.
     """
     registered = set(TOOL_CATALOG.tool_names)
     tools: list[str] = []
@@ -367,7 +315,7 @@ def build_planner_prompt(
     消费，不与当前用户输入拼接。
     """
     tool_lines = '\n'.join(
-        f'- {name}: {DOMAIN_PROVIDER_REGISTRY.prompt_spec(name).description}'
+        f'- {name}: {TOOL_CATALOG.prompt_spec(name).description}'
         for name in tools
     )
     if tool_history:
@@ -952,7 +900,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             category='access_control',
         )
 
-    # 受控业务动作权限边界由 Provider Registry 声明：
+    # 受控业务动作权限边界由 Catalog/Workflow Registry 声明：
     # 业务动作授权 + Java 业务日期是前置条件，任一缺失都直接 refuse。
     if (
         decision.action == 'tool'

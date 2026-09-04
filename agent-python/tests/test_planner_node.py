@@ -9,9 +9,9 @@ import pytest
 from app.agents.planner_node import (
     MAX_PLANNER_STEPS,
     PLANNER_SYSTEM_PROMPT,
+    authorized_tools,
     build_planner_prompt,
     build_planner_system_prompt,
-    visible_tools,
 )
 from app.agents.planner_node import planner_node as _planner_node
 from app.agents.tool_executor_node import tool_executor_node
@@ -464,7 +464,7 @@ class TestUntrustedDataBoundary:
 
 
 class TestPromptInputs:
-    def test_visible_tools_respect_permissions(self):
+    def test_authorized_tools_respect_permissions(self):
         full = dict(
             employee_id='E10001',
             allow_eval=False,
@@ -474,24 +474,24 @@ class TestPromptInputs:
         )
         # P2-A: java config 齐全 + employee_id 已注入 → expense_status_tool 也可见。
         # OA MCP URL 为空 → travel / invoice 不可见（V2 §三 visibility_gate）。
-        assert visible_tools(**full) == [
+        assert authorized_tools(**full) == [
             RAG_TOOL_NAME,
             LEAVE_BALANCE_TOOL_NAME,
             LEAVE_REQUEST_TOOL_NAME,
             EXPENSE_STATUS_TOOL_NAME,
         ]
-        assert visible_tools(**{**full, 'allow_eval': True}) == [
+        assert authorized_tools(**{**full, 'allow_eval': True}) == [
             RAG_TOOL_NAME,
             LEAVE_BALANCE_TOOL_NAME,
             LEAVE_REQUEST_TOOL_NAME,
             EVAL_TOOL_NAME,
             EXPENSE_STATUS_TOOL_NAME,
         ]
-        assert LEAVE_PROPOSAL_TOOL_NAME not in visible_tools(**full)
-        assert LEAVE_PROPOSAL_TOOL_NAME in visible_tools(
+        assert LEAVE_PROPOSAL_TOOL_NAME not in authorized_tools(**full)
+        assert LEAVE_PROPOSAL_TOOL_NAME in authorized_tools(
             **{**full, 'allow_business_actions': True}
         )
-        assert visible_tools(**{
+        assert authorized_tools(**{
             **full, 'allow_eval': True, 'allow_business_actions': True,
         }) == [
             RAG_TOOL_NAME,
@@ -504,12 +504,12 @@ class TestPromptInputs:
         ]
         # 配置 OA MCP 后，travel / invoice 可见
         with_mcp = {**full, 'enterprise_oa_mcp_url': 'http://mcp.test'}
-        tools_with_mcp = visible_tools(**with_mcp)
+        tools_with_mcp = authorized_tools(**with_mcp)
         assert TRAVEL_RECORD_TOOL_NAME in tools_with_mcp
         assert INVOICE_VERIFY_TOOL_NAME in tools_with_mcp
 
     def test_capability_gate_hides_employee_tools_without_employee_id(self):
-        tools = visible_tools(
+        tools = authorized_tools(
             employee_id='',
             allow_eval=True,
             allow_business_actions=True,
@@ -521,7 +521,7 @@ class TestPromptInputs:
         assert tools == [RAG_TOOL_NAME, EVAL_TOOL_NAME]
 
     def test_capability_gate_hides_employee_tools_without_java_base_url(self):
-        tools = visible_tools(
+        tools = authorized_tools(
             employee_id='E10001',
             allow_eval=False,
             allow_business_actions=True,
@@ -537,7 +537,7 @@ class TestPromptInputs:
         ]
 
     def test_capability_gate_hides_employee_tools_without_java_internal_token(self):
-        tools = visible_tools(
+        tools = authorized_tools(
             employee_id='E10001',
             allow_eval=False,
             allow_business_actions=True,
@@ -607,16 +607,16 @@ class TestPromptInputs:
             java_internal_token='internal-secret',
         )
         denied = build_planner_prompt(
-            '评估', visible_tools(allow_eval=False, **common), [], '', 5,
+            '评估', authorized_tools(allow_eval=False, **common), [], '', 5,
         )
         assert EVAL_TOOL_NAME not in denied
         allowed = build_planner_prompt(
-            '评估', visible_tools(allow_eval=True, **common), [], '', 5,
+            '评估', authorized_tools(allow_eval=True, **common), [], '', 5,
         )
         assert EVAL_TOOL_NAME in allowed
 
     def test_dynamic_system_prompt_excludes_hidden_tools(self):
-        visible = visible_tools(
+        visible = authorized_tools(
             employee_id='',
             allow_eval=True,
             allow_business_actions=True,

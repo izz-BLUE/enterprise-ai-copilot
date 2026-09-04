@@ -240,7 +240,7 @@ _EXPENSE_CTCX_SYSTEM_ARG_KEYS = frozenset({
 })
 
 
-# ExpenseProposalContext 构造和 invoice scope 判断均由 ExpenseProvider 负责。
+# ExpenseProposalContext 构造和 invoice scope 判断均由 ExpenseGuard 负责。
 _build_expense_proposal_context = build_expense_proposal_context
 
 def _inject_expense_proposal(args: dict, ctx: _ExecutorContext) -> dict:
@@ -285,7 +285,7 @@ def _expense_proposal_post(parsed: dict, tool_name: str) -> dict:
 
 
 def _is_completed_success(item: dict) -> bool:
-    """成功去重的领域完成语义由 Provider Registry 决定。"""
+    """成功去重的领域完成语义由 Workflow Guard Registry 决定。"""
     return DOMAIN_PROVIDER_REGISTRY.is_completed_success(item)
 
 
@@ -540,7 +540,7 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
         return _blocked(state, runtime, 'not_allowed', 'eval_report_tool 需要管理员权限，已拒绝执行。',
                         tool_name=decision.tool_name, arguments=decision.arguments,
                         category='access_control')
-    # 受控业务动作统一权限（Provider capability tools，V2 §十二 HITL）
+    # 受控业务动作统一权限（注册的 Proposal tools，V2 §十二 HITL）
     if decision.tool_name in DOMAIN_PROVIDER_REGISTRY.business_action_tools:
         if not runtime.context['allow_business_actions']:
             logger.warning('[%s] tool_executor 越权执行 %s 被拒绝',
@@ -556,7 +556,7 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
                             tool_name=decision.tool_name, arguments=decision.arguments,
                             category='business_action')
 
-    # 领域 second gate：Provider 只能拒绝非法动作，不能扩大上游 capability gate。
+    # 领域 second gate：Workflow Guard 只能拒绝非法动作，不能扩大上游 capability gate。
     try:
         DOMAIN_PROVIDER_REGISTRY.validate_selected_tool(
             decision.tool_name,

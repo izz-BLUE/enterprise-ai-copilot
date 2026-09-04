@@ -167,10 +167,6 @@ def test_phase_d1_expense_chain_regression_keeps_two_read_tools_and_finishes():
     with patch.object(planner_module, 'JAVA_BASE_URL', 'http://java'), \
             patch.object(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal'), \
             patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False), \
-            patch.object(
-                planner_module.DOMAIN_PROVIDER_REGISTRY, 'resolve',
-                side_effect=AssertionError('D1 regression must not resolve by question'),
-            ), \
             patch('app.agents.planner_node.call_llm', side_effect=decisions), \
             patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool), \
             patch('app.agents.tool_executor_node.expense_status_tool', status_tool):

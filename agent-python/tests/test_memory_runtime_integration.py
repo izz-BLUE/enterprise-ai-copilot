@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from app.agents.planner_node import build_planner_prompt, visible_tools
+from app.agents.planner_node import authorized_tools, build_planner_prompt
 from app.memory.memory_pipeline import MemoryPipeline
 from app.memory.memory_runtime_hook import MemoryRuntimeHook
 from app.memory.memory_write_dispatcher import MemoryWriteDispatcher
@@ -92,8 +92,8 @@ def test_rag_and_balance_success_do_not_trigger_extractor() -> None:
     assert calls == []
 
 
-def test_memory_is_untrusted_and_cannot_expand_visible_tools() -> None:
-    tools = visible_tools(
+def test_memory_is_untrusted_and_cannot_expand_authorized_tools() -> None:
+    tools = authorized_tools(
         employee_id='E10001',
         allow_eval=False,
         allow_business_actions=False,
