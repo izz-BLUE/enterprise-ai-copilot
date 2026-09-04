@@ -62,7 +62,6 @@ def test_same_runtime_context_keeps_candidate_set_and_status_question_independen
     monkeypatch.setenv('ENTERPRISE_OA_MCP_URL', 'http://oa-mcp')
     monkeypatch.setattr(planner_module, 'JAVA_BASE_URL', 'http://java')
     monkeypatch.setattr(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal')
-    monkeypatch.setattr(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False)
 
     questions = (
         '公司的年假制度是什么',
@@ -105,6 +104,26 @@ def test_same_runtime_context_keeps_candidate_set_and_status_question_independen
         LEAVE_BALANCE_TOOL_NAME,
         EXPENSE_STATUS_TOOL_NAME,
     ]
+
+
+def test_first_step_uses_only_formal_planner_call_after_shadow_cleanup():
+    planner_source = Path(planner_module.__file__).read_text(encoding='utf-8')
+    shadow_module = Path(planner_module.__file__).with_name('planner_shadow_routing.py')
+    assert 'planner_shadow_routing' not in planner_source
+    assert not shadow_module.exists()
+
+    with patch.object(
+        planner_module,
+        'call_llm',
+        return_value=_tool(RAG_TOOL_NAME, {'question': '公司的年假制度是什么'}, 'need_knowledge'),
+    ) as formal_llm:
+        result = planner_module.planner_node(
+            checkpoint_safe_state(_state('公司的年假制度是什么')),
+            runtime_for_state(_state('公司的年假制度是什么')),
+        )
+
+    formal_llm.assert_called_once()
+    assert result['planner_decision']['tool_name'] == RAG_TOOL_NAME
 
 
 def test_production_planner_and_registry_have_no_retired_question_router_symbols():

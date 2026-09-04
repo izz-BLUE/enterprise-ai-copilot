@@ -7,7 +7,7 @@
 3. 解析并调用 `PlannerDecision` 的严格 Schema 校验。
 4. 停止；不构造 Graph、不调用 Workflow Guard、不执行 Tool、不访问 Java/MCP/RAG/Memory/Checkpoint。
 
-这意味着报告衡量的是 Planner 的首步选择，而不是完整业务流程的执行结果。`matches()`、`resolve()`、legacy 图和 Phase B Shadow Routing 均未移除，也不由本评估器替代。
+这意味着报告衡量的是 Planner 的首步选择，而不是完整业务流程的执行结果。legacy Router-first 图仅作为直接测试/离线兼容实现保留，不由本评估器替代。
 
 ## 语料
 

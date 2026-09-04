@@ -119,7 +119,6 @@ def test_formal_planner_candidate_set_equals_authorized_tools(monkeypatch):
         value = _state(question=question)
         with patch.object(planner_module, 'JAVA_BASE_URL', 'http://java'), \
                 patch.object(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal'), \
-                patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False), \
                 patch.object(planner_module, 'call_llm', return_value=raw) as llm:
             _invoke_planner(value)
 
@@ -148,7 +147,6 @@ def test_multi_domain_loop_uses_selected_tools_without_ambiguity_refusal():
 
     with patch.object(planner_module, 'JAVA_BASE_URL', 'http://java'), \
             patch.object(planner_module, 'JAVA_INTERNAL_TOKEN', 'internal'), \
-            patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', False), \
             patch('app.agents.planner_node.call_llm', side_effect=decisions) as llm, \
             patch('app.agents.tool_executor_node.leave_balance_tool', balance_tool), \
             patch('app.agents.tool_executor_node.expense_status_tool', status_tool):

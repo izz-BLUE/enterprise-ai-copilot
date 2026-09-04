@@ -155,30 +155,6 @@ def test_span_attribute_failure_is_fail_open():
             )
 
 
-def test_shadow_routing_records_only_whitelisted_attributes():
-    span = MagicMock()
-    tracer = MagicMock()
-    tracer.start_as_current_span.return_value.__enter__.return_value = span
-    with patch.object(observability, '_tracer', tracer):
-        observability.record_routing_shadow({
-            'routing.shadow.enabled': True,
-            'routing.shadow_valid': False,
-            'routing.disagreement': True,
-            'routing.shadow_error_code': 'invalid_json',
-            'prompt': 'must not be recorded',
-            'employee_id': 'E10001',
-            'routing.shadow_tool': None,
-        })
-
-    tracer.start_as_current_span.assert_called_once_with('agent.routing.shadow')
-    attributes = {call.args for call in span.set_attribute.call_args_list}
-    assert ('routing.shadow.enabled', True) in attributes
-    assert ('routing.shadow_valid', False) in attributes
-    assert ('routing.disagreement', True) in attributes
-    assert ('routing.shadow_error_code', 'invalid_json') in attributes
-    assert not any(key in {'prompt', 'employee_id'} for key, _ in attributes)
-
-
 def test_shutdown_failure_does_not_raise():
     provider = MagicMock()
     provider.shutdown.side_effect = RuntimeError('flush failed')
