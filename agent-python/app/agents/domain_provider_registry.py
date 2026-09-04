@@ -364,6 +364,136 @@ class DomainProviderRegistry:
     def workflow_guard_for_tool(self, tool_name: str) -> WorkflowGuard | None:
         return self._workflow_guards.guard_for_tool(tool_name)
 
+    def workflow_guards_for_context(
+        self, context: DomainContext
+    ) -> tuple[WorkflowGuard, ...]:
+        """Find Guards from observed workflow state, never from question intent."""
+        names = {
+            item.get('tool_name')
+            for item in context.tool_history
+            if isinstance(item, dict)
+        }
+        if context.continuation_original_request:
+            names.add(EXPENSE_PROPOSAL_TOOL_NAME)
+        if context.continuation_leave_state is not None:
+            names.add(LEAVE_PROPOSAL_TOOL_NAME)
+
+        guards: list[WorkflowGuard] = []
+        for tool_name in names:
+            guard = self._workflow_guards.guard_for_tool(tool_name)
+            if (
+                guard is not None
+                and tool_name in getattr(guard, 'active_tool_names', frozenset())
+                # A read-only travel/invoice lookup is not, by itself, an
+                # active Expense claim. The semantic Planner owns that
+                # distinction; a frozen reason, continuation, or Proposal
+                # observation is the deterministic workflow evidence that
+                # enables the Expense Guard restrictions.
+                and (
+                    guard.domain_key != 'expense'
+                    or context.continuation_original_request
+                    or context.request_expense_reason is not None
+                    or EXPENSE_PROPOSAL_TOOL_NAME in names
+                )
+                and guard not in guards
+            ):
+                guards.append(guard)
+        return tuple(guards)
+
+    def validate_selected_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: DomainContext,
+    ) -> None:
+        """Validate one selected Tool against its Guard and active workflow."""
+        selected_guard = self.workflow_guard_for_tool(tool_name)
+        active_guards = self.workflow_guards_for_context(context)
+        if (
+            selected_guard is not None
+            and active_guards
+            and selected_guard not in active_guards
+        ):
+            raise DomainToolCallRejected(
+                'domain_tool_mismatch',
+                '当前请求领域与目标 Tool 所属领域不一致，已拒绝执行。',
+            )
+        if selected_guard is not None:
+            selected_guard.validate_tool_call(tool_name, arguments, context)
+
+    def terminal_clarification_for_workflow(
+        self, context: DomainContext
+    ) -> str | None:
+        """Read clarification from an already active workflow Guard."""
+        for guard in self.workflow_guards_for_context(context):
+            message = guard.terminal_clarification(context)
+            if message is not None:
+                return message
+        return None
+
+    def validate_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> None:
+        """Apply completion checks using observed Tools and active Guards."""
+        if (
+            decision.action == 'finish'
+            and decision.reason_code == 'task_complete'
+            and _latest_structured_tool_business_failure(context.tool_history) is not None
+        ):
+            raise PlannerDecisionError(_STRUCTURED_TOOL_FAILURE_COMPLETION_MESSAGE)
+        for guard in self.workflow_guards_for_context(context):
+            validator = getattr(guard, 'validate_completion_for_workflow', None)
+            if validator is not None:
+                validator(decision, tools, context)
+
+    def recover_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        """Recover from a validation error in the active workflow only."""
+        for guard in self.workflow_guards_for_context(context):
+            recover = getattr(guard, 'recover_completion_for_workflow', None)
+            if recover is None:
+                continue
+            recovered = recover(decision, tools, context, error_code)
+            if recovered is not None:
+                return recovered
+        return None
+
+    def postprocess_selected_tool(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> tuple[PlannerDecision, dict[str, object]]:
+        """Run selected/active Guard state handling without semantic rerouting."""
+        guards: list[WorkflowGuard] = []
+        selected_guard = (
+            self.workflow_guard_for_tool(decision.tool_name)
+            if decision.action == 'tool' and decision.tool_name
+            else None
+        )
+        if selected_guard is not None:
+            guards.append(selected_guard)
+        for guard in self.workflow_guards_for_context(context):
+            if guard not in guards:
+                guards.append(guard)
+
+        updates: dict[str, object] = {}
+        for guard in guards:
+            postprocess = getattr(guard, 'postprocess_selected_tool', None)
+            if postprocess is None:
+                continue
+            decision, guard_updates = postprocess(decision, tools, context)
+            updates.update(guard_updates)
+        return decision, updates
+
     def capability_tools_for_question(self, question: str) -> list[str]:
         """按当前请求贡献领域 capability，不改变上游权限集合。"""
         context = DomainContext(question=question or '')

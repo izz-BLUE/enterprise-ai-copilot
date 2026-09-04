@@ -111,7 +111,7 @@ def test_shadow_is_default_off_and_formal_path_calls_once():
     shadow.assert_not_called()
 
 
-def test_enabled_shadow_uses_authorized_tools_before_legacy_pruning():
+def test_enabled_shadow_and_formal_path_share_authorized_tools():
     value = _state()
     with patch.object(planner_module, 'PLANNER_SHADOW_ROUTING_ENABLED', True), \
          patch.object(planner_module, 'call_llm', return_value=LEAVE_BALANCE_RAW) as formal, \
@@ -124,9 +124,10 @@ def test_enabled_shadow_uses_authorized_tools_before_legacy_pruning():
     shadow.assert_called_once()
     formal_system = formal.call_args.args[0]
     shadow_system = shadow.call_args.args[0]
-    assert f'- {LEAVE_REQUEST_TOOL_NAME}:' not in formal_system
+    assert f'- {LEAVE_REQUEST_TOOL_NAME}:' in formal_system
     assert f'- {LEAVE_REQUEST_TOOL_NAME}:' in shadow_system
     assert f'- {EXPENSE_PROPOSAL_TOOL_NAME}:' not in shadow_system
+    assert formal_system == shadow_system
 
 
 def test_wrong_shadow_route_disagrees_but_formal_result_is_unchanged():

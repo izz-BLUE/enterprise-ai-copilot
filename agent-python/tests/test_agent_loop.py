@@ -76,18 +76,24 @@ class TestAcceptanceScenario:
         assert [e['status'] for e in result['tool_history']] == ['success', 'success']
 
 
-class TestUnauthorizedBusinessIntentPreflight:
+class TestCapabilityGatedProposalSelection:
     @staticmethod
-    def _assert_refused_without_planner(result, llm):
-        assert result['stop_reason'] == 'not_allowed'
-        assert result['route'] == 'refuse'
-        assert result['category'] == 'business_action'
-        assert result['tool_call_count'] == 0
+    def _assert_proposal_not_exposed(result, llm, rag):
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'rag'
+        assert result['tool_call_count'] == 1
         assert result['action_proposal'] is None
-        llm.assert_not_called()
+        assert llm.call_count == 2
+        rag.invoke.assert_called_once()
 
-    def test_leave_action_is_refused_before_planner_without_permission(self):
-        with patch('app.agents.planner_node.call_llm') as llm:
+    def test_leave_action_cannot_select_hidden_proposal_without_permission(self):
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                _tool('rag_answer_tool', {
+                    'question': '我想请明天一天年假，原因是个人安排。',
+                }, 'need_knowledge'),
+                _finish('当前没有可用的业务动作权限。'),
+        ]) as llm, patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
             result = run_langgraph_agent(
                 '我想请明天一天年假，原因是个人安排。',
                 allow_business_actions=False,
@@ -96,10 +102,16 @@ class TestUnauthorizedBusinessIntentPreflight:
                 use_planner=True,
             )
 
-        self._assert_refused_without_planner(result, llm)
+        self._assert_proposal_not_exposed(result, llm, rag)
 
-    def test_expense_action_is_refused_before_planner_without_permission(self):
-        with patch('app.agents.planner_node.call_llm') as llm:
+    def test_expense_action_cannot_select_hidden_proposal_without_permission(self):
+        with patch('app.agents.planner_node.call_llm', side_effect=[
+                _tool('rag_answer_tool', {
+                    'question': '帮我根据最近一次出差准备报销。',
+                }, 'need_knowledge'),
+                _finish('当前没有可用的业务动作权限。'),
+        ]) as llm, patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
+            rag.invoke.return_value = RAG_RESULT
             result = run_langgraph_agent(
                 '帮我根据最近一次出差准备报销。',
                 allow_business_actions=False,
@@ -108,7 +120,7 @@ class TestUnauthorizedBusinessIntentPreflight:
                 use_planner=True,
             )
 
-        self._assert_refused_without_planner(result, llm)
+        self._assert_proposal_not_exposed(result, llm, rag)
 
     def test_knowledge_questions_are_not_rejected_by_business_preflight(self):
         with patch('app.agents.planner_node.call_llm', side_effect=[
@@ -132,11 +144,7 @@ class TestUnauthorizedBusinessIntentPreflight:
 
     def test_personal_leave_balance_is_read_only_and_never_falls_back_to_rag(self):
         """本人余额查询必须由领域契约收敛到 balance Tool。"""
-        def fake_llm(system_prompt, _user_prompt, **_kwargs):
-            if 'rag_answer_tool' in system_prompt:
-                return _tool('rag_answer_tool', {
-                    'question': '查询我的年假余额',
-                }, 'need_knowledge')
+        def fake_llm(_system_prompt, _user_prompt, **_kwargs):
             if balance_tool.invoke.call_count == 0:
                 return _tool('leave_balance_tool', {}, 'need_balance')
             return _finish('当前年假余额为 5 天。')
@@ -169,7 +177,7 @@ class TestUnauthorizedBusinessIntentPreflight:
 
     def test_personal_leave_balance_without_read_capability_fails_closed(self):
         with patch('app.agents.planner_node.call_llm',
-                   side_effect=[_finish('当前无法完成。'), _finish('当前无法完成。')]) as llm, \
+                   side_effect=[_tool('leave_balance_tool', {}, 'need_balance')]) as llm, \
                 patch('app.agents.tool_executor_node.rag_answer_tool') as rag:
             result = run_langgraph_agent(
                 '查询我的年假余额',
@@ -180,7 +188,7 @@ class TestUnauthorizedBusinessIntentPreflight:
 
         assert result['stop_reason'] == 'invalid_decision'
         assert result['route'] == 'error'
-        assert llm.call_count == 2
+        assert llm.call_count == 1
         rag.invoke.assert_not_called()
 
     def test_expense_knowledge_question_is_not_rejected_by_business_preflight(self):
@@ -328,15 +336,13 @@ class TestUnresolvedTerminalRefusal:
             for record in caplog.records
         )
 
-    def test_resolved_expense_finish_cannot_complete_is_not_normalized(self, caplog):
+    def test_unobserved_expense_finish_cannot_complete_is_normalized(self, caplog):
         invalid_finish = json.dumps({
             'action': 'finish',
             'answer': '当前无法完成。',
             'reason_code': 'cannot_complete',
         }, ensure_ascii=False)
-        with patch('app.agents.planner_node.call_llm', side_effect=[
-                invalid_finish, invalid_finish,
-        ]) as llm:
+        with patch('app.agents.planner_node.call_llm', return_value=invalid_finish) as llm:
             result = run_langgraph_agent(
                 '帮我根据最近一次出差准备报销。',
                 allow_business_actions=True,
@@ -345,23 +351,19 @@ class TestUnresolvedTerminalRefusal:
                 use_planner=True,
             )
 
-        assert result['stop_reason'] == 'invalid_decision'
-        assert result['route'] == 'error'
-        assert llm.call_count == 2
-        failures = [record.message for record in caplog.records
-                    if 'planner semantic validation failure' in record.message]
-        assert len(failures) == 2
-        assert all('error_code=expense_proposal_missing' in message for message in failures)
+        assert result['stop_reason'] == 'refused'
+        assert result['route'] == 'refuse'
+        assert llm.call_count == 1
+        assert not any('planner semantic validation failure' in record.message
+                       for record in caplog.records)
 
-    def test_resolved_leave_finish_cannot_complete_is_not_normalized(self, caplog):
+    def test_unobserved_leave_finish_cannot_complete_is_normalized(self, caplog):
         invalid_finish = json.dumps({
             'action': 'finish',
             'answer': '当前无法完成。',
             'reason_code': 'cannot_complete',
         }, ensure_ascii=False)
-        with patch('app.agents.planner_node.call_llm', side_effect=[
-                invalid_finish, invalid_finish,
-        ]) as llm:
+        with patch('app.agents.planner_node.call_llm', return_value=invalid_finish) as llm:
             result = run_langgraph_agent(
                 '我想请明天一天年假，原因是个人安排。',
                 allow_business_actions=True,
@@ -370,13 +372,11 @@ class TestUnresolvedTerminalRefusal:
                 use_planner=True,
             )
 
-        assert result['stop_reason'] == 'invalid_decision'
-        assert result['route'] == 'error'
-        assert llm.call_count == 2
-        failures = [record.message for record in caplog.records
-                    if 'planner semantic validation failure' in record.message]
-        assert len(failures) == 2
-        assert all('error_code=leave_proposal_missing' in message for message in failures)
+        assert result['stop_reason'] == 'refused'
+        assert result['route'] == 'refuse'
+        assert llm.call_count == 1
+        assert not any('planner semantic validation failure' in record.message
+                       for record in caplog.records)
 
 
 class TestFailureRecovery:
@@ -592,11 +592,10 @@ class TestPlannerSemanticRepair:
         assert result['route'] == 'action'
         assert result['action_proposal']['action_type'] == 'ANNUAL_LEAVE_REQUEST'
         assert result['step_count'] == 3  # repair stays within the same Planner node
-        assert '尚未完成 leave_proposal_tool' in prompts[2]
+        assert '程序校验反馈' in prompts[2]
         assert 'DO_NOT_ECHO' not in prompts[2]
         assert any(
-            'error_type=planner_completion_validation '
-            'error_code=leave_proposal_missing' in record.message
+            'error_code=finish_reason_code_mismatch' in record.message
             for record in caplog.records
         )
 
@@ -639,8 +638,7 @@ class TestPlannerSemanticRepair:
         failures = [record.message for record in caplog.records
                     if 'planner semantic validation failure' in record.message]
         assert len(failures) == 2
-        assert all('error_code=leave_proposal_missing' in message for message in failures)
-        assert not any('finish_reason_code_mismatch' in message for message in failures)
+        assert all('error_code=finish_reason_code_mismatch' in message for message in failures)
 
     def test_second_invalid_decision_fails_closed_after_one_repair(self):
         invalid_finish = json.dumps({
@@ -749,10 +747,10 @@ class TestPlannerSemanticRepair:
                 use_planner=True,
             )
 
-        assert llm.call_count == 2  # exactly one semantic repair attempt
+        assert llm.call_count == 1
         proposal_tool.invoke.assert_not_called()
-        assert result['stop_reason'] == 'invalid_decision'
-        assert result['route'] == 'error'
+        assert result['stop_reason'] == 'task_complete'
+        assert result['route'] == 'agent'
 
     def test_successful_proposal_with_missing_fields_allows_finish(self):
         """Proposal Tool 成功但返回 missing_fields 时，finish 仍应进入 Clarification。"""

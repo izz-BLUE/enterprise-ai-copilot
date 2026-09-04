@@ -17,7 +17,6 @@ from pydantic import ValidationError
 from app.agents.domain_provider_registry import (
     DOMAIN_PROVIDER_REGISTRY,
     DomainContext,
-    DomainProviderAmbiguityError,
 )
 from app.agents.planner_shadow_routing import (
     SHADOW_ROUTING_DEADLINE_MARGIN_SECONDS,
@@ -550,21 +549,13 @@ def _is_unregistered_capability_attempt(
     context: DomainContext,
 ) -> bool:
     """仅识别明确的未注册 Tool 尝试，不掩盖一般 Planner contract 错误。"""
+    del context
     if not isinstance(payload, dict) or payload.get('action') != 'tool':
         return False
     tool_name = payload.get('tool_name')
     if not isinstance(tool_name, str) or not tool_name.strip():
         return False
-    try:
-        DOMAIN_PROVIDER_REGISTRY.prompt_spec(tool_name)
-    except KeyError:
-        pass
-    else:
-        return False
-    try:
-        return DOMAIN_PROVIDER_REGISTRY.resolve(context) is None
-    except DomainProviderAmbiguityError:
-        return False
+    return tool_name not in TOOL_CATALOG.tool_names
 
 
 def _unresolved_terminal_refusal(
@@ -576,22 +567,18 @@ def _unresolved_terminal_refusal(
         'cannot_complete', 'not_allowed',
     }:
         return None
-    try:
-        if DOMAIN_PROVIDER_REGISTRY.resolve(context) is not None:
-            return None
-    except DomainProviderAmbiguityError:
+    if DOMAIN_PROVIDER_REGISTRY.workflow_guards_for_context(context):
         return None
-    # 只读领域 Tool（例如 leave_balance_tool）可能在 request-level
-    # provider 未命中时仍已成功完成；保留该领域自身的 completion/repair
-    # 契约，避免把可完成的只读请求提前拒绝。
     if any(
-        DOMAIN_PROVIDER_REGISTRY.is_completed_success(item)
-        and any(
-            item.get('tool_name') in provider.prompt_specs()
-            for provider in DOMAIN_PROVIDER_REGISTRY.providers
-        )
+        DOMAIN_PROVIDER_REGISTRY.provider_for_tool(item.get('tool_name')) is not None
+        and DOMAIN_PROVIDER_REGISTRY.is_completed_success(item)
         for item in context.tool_history
+        if isinstance(item, dict)
     ):
+        # A successful observation is concrete execution evidence. Preserve
+        # the normal PlannerDecision reason-code validation so the next LLM
+        # turn may repair an inconsistent finish without inferring a domain
+        # from the question.
         return None
     answer = (
         '当前系统没有可用能力执行该请求。'
@@ -604,22 +591,12 @@ def _unresolved_terminal_refusal(
 def _validate_business_completion(
     decision: PlannerDecision,
     *,
-    question: str,
-    current_visible_tools: list[str],
-    tool_history: object,
-    continuation_original_request: str | None = None,
+    tools: list[str],
+    context: DomainContext,
 ) -> None:
-    """兼容旧调用名；业务完成条件由 resolved Provider 负责。"""
-    DOMAIN_PROVIDER_REGISTRY.validate_completion(
-        decision,
-        current_visible_tools,
-        DomainContext(
-            question=question,
-            tool_history=(
-                tuple(tool_history) if isinstance(tool_history, list) else tuple()
-            ),
-            continuation_original_request=continuation_original_request,
-        ),
+    """根据实际 workflow history/continuation 执行完成校验。"""
+    DOMAIN_PROVIDER_REGISTRY.validate_completion_for_workflow(
+        decision, tools, context
     )
 
 
@@ -705,15 +682,10 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         java_internal_token=JAVA_INTERNAL_TOKEN,
         enterprise_oa_mcp_url=enterprise_oa_mcp_url,
     )
-    current_visible_tools = visible_tools(
-        employee_id=employee_id,
-        allow_eval=allow_eval,
-        allow_business_actions=allow_business_actions,
-        java_base_url=JAVA_BASE_URL,
-        java_internal_token=JAVA_INTERNAL_TOKEN,
-        enterprise_oa_mcp_url=enterprise_oa_mcp_url,
-        question=question,
-    )
+    # Phase C: semantic routing is owned by Planner. The formal candidate set
+    # is the complete capability-gated set; workflow restrictions are applied
+    # only after a Tool is selected by its WorkflowGuard.
+    current_planner_tools = current_authorized_tools
 
     active_expense_reason_wait = _is_active_expense_reason_wait(
         state.get('memory_context'))
@@ -755,38 +727,9 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         memory_context=state.get('memory_context'),
         step_count=step_count,
     )
-    try:
-        resolved_provider = DOMAIN_PROVIDER_REGISTRY.resolve(domain_context)
-        if (
-            not allow_business_actions
-            and resolved_provider is not None
-            and resolved_provider.capability_tools
-            and resolved_provider.is_business_action_intent(domain_context)
-        ):
-            # 业务 intent 与 capability 都由程序层确定；未授权时无需让
-            # Planner 猜测一个当前不可见的 Proposal Tool。
-            return _decision_result(
-                state,
-                _refuse_decision(
-                    '业务动作功能未启用，或当前请求无执行权限。',
-                    'not_allowed',
-                ),
-                'not_allowed',
-                category='business_action',
-            )
-        current_visible_tools = DOMAIN_PROVIDER_REGISTRY.legal_tools(
-            current_visible_tools, domain_context
-        )
-        terminal_clarification = DOMAIN_PROVIDER_REGISTRY.terminal_clarification(
-            domain_context
-        )
-    except DomainProviderAmbiguityError as exc:
-        logger.warning('[%s] domain provider ambiguity: %s', trace_id, exc)
-        return _decision_result(
-            state,
-            _refuse_decision('当前请求同时命中多个业务领域，已拒绝处理。', 'cannot_complete'),
-            'invalid_decision',
-        )
+    terminal_clarification = DOMAIN_PROVIDER_REGISTRY.terminal_clarification_for_workflow(
+        domain_context
+    )
 
     if terminal_clarification is not None:
         # Proposal Tool 已明确要求用户补充原因；这是当前请求的终态澄清，
@@ -806,7 +749,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
 
     user_prompt = build_planner_prompt(
         question,
-        current_visible_tools,
+        current_planner_tools,
         state.get('tool_history', []),
         state.get('observation', ''),
         steps_left,
@@ -815,7 +758,7 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         continuation_original_request,
         state.get('continuation_leave_state'),
     )
-    system_prompt = build_planner_system_prompt(current_visible_tools)
+    system_prompt = build_planner_system_prompt(current_planner_tools)
 
     repair_feedback = ''
     repair_error_code = ''
@@ -893,10 +836,8 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             decision = PlannerDecision.model_validate(payload)
             _validate_business_completion(
                 decision,
-                question=question,
-                current_visible_tools=current_visible_tools,
-                tool_history=state.get('tool_history', []),
-                continuation_original_request=continuation_original_request,
+                tools=current_planner_tools,
+                context=domain_context,
             )
             terminal_refusal = _unresolved_terminal_refusal(decision, domain_context)
             if terminal_refusal is not None:
@@ -904,15 +845,12 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             decision.validate_decision()
         except (json.JSONDecodeError, ValidationError, PlannerDecisionError) as exc:
             _, error_code, _ = _planner_validation_metadata(exc)
-            try:
-                recovered_decision = DOMAIN_PROVIDER_REGISTRY.recover_completion_decision(
-                    decision,
-                    current_visible_tools,
-                    domain_context,
-                    error_code,
-                ) if decision is not None else None
-            except DomainProviderAmbiguityError:
-                recovered_decision = None
+            recovered_decision = DOMAIN_PROVIDER_REGISTRY.recover_completion_for_workflow(
+                decision,
+                current_planner_tools,
+                domain_context,
+                error_code,
+            ) if decision is not None else None
             if recovered_decision is not None:
                 # Provider 已经根据当前 tool_history 确定了唯一 prerequisite；
                 # 不再依赖 LLM semantic repair 自我修正，也不接受原 finish。
@@ -960,22 +898,14 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
     assert decision is not None
 
     state = dict(state)
-    try:
-        decision, domain_updates = DOMAIN_PROVIDER_REGISTRY.postprocess_decision(
-            decision, current_visible_tools, domain_context
-        )
-    except DomainProviderAmbiguityError as exc:
-        logger.warning('[%s] domain provider ambiguity after Planner decision: %s', trace_id, exc)
-        return _decision_result(
-            state,
-            _refuse_decision('当前请求同时命中多个业务领域，已拒绝处理。', 'cannot_complete'),
-            'invalid_decision',
-        )
+    decision, domain_updates = DOMAIN_PROVIDER_REGISTRY.postprocess_selected_tool(
+        decision, current_planner_tools, domain_context
+    )
     state.update(domain_updates)
 
     # Capability Gate 后置校验：Prompt 只是能力描述，模型不得通过直接输出隐藏
     # Tool 名称扩大本次请求的可用能力范围；隐藏 Tool 视为 Planner contract violation。
-    if decision.action == 'tool' and decision.tool_name not in current_visible_tools:
+    if decision.action == 'tool' and decision.tool_name not in current_planner_tools:
         logger.warning(
             '[%s] planner 选择当前不可见 Tool=%s，按 contract violation 拒绝',
             trace_id, decision.tool_name,

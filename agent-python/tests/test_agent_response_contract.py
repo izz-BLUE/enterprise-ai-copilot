@@ -227,7 +227,7 @@ class TestNotAllowed:
         assert result['category'] == 'business_action'
 
     def test_unauthorized_business_intent_is_legal_refusal_contract(self):
-        """未授权业务 intent 在 Planner 前确定性返回合法拒绝。"""
+        """未授权 Proposal 不进入候选集；模型若硬选则由 Planner contract 拒绝。"""
         proposal_mock = Mock()
         proposal_mock.invoke.return_value = _proposal_payload('2026-09-01', '2026-09-01')
         with patch('app.agents.planner_node.call_llm',
@@ -241,10 +241,10 @@ class TestNotAllowed:
                 use_planner=True,
                 employee_id='E1001',
             )
-        assert result['stop_reason'] == 'not_allowed'
-        assert result['route'] == 'refuse'
-        assert result['category'] == 'business_action'
-        assert llm.call_count == 0
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result['route'] == 'error'
+        assert result['category'] == 'error'
+        assert llm.call_count == 1
         # 受控链路未被触发，action_proposal 必须清空
         proposal_mock.invoke.assert_not_called()
         assert result['action_proposal'] is None

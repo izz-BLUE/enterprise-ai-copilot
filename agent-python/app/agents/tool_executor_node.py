@@ -24,7 +24,6 @@ from pydantic import ValidationError
 from app.agents.domain_provider_registry import (
     DOMAIN_PROVIDER_REGISTRY,
     DomainContext,
-    DomainProviderAmbiguityError,
     DomainToolCallRejected,
     build_expense_proposal_context,
 )
@@ -559,7 +558,7 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
 
     # 领域 second gate：Provider 只能拒绝非法动作，不能扩大上游 capability gate。
     try:
-        DOMAIN_PROVIDER_REGISTRY.validate_tool_call(
+        DOMAIN_PROVIDER_REGISTRY.validate_selected_tool(
             decision.tool_name,
             decision.arguments or {},
             DomainContext.from_state(state),
@@ -573,17 +572,6 @@ def tool_executor_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> di
             tool_name=decision.tool_name,
             arguments=decision.arguments,
         )
-    except DomainProviderAmbiguityError as exc:
-        logger.warning('[%s] executor domain provider ambiguity: %s', trace_id, exc)
-        return _blocked(
-            state,
-            runtime,
-            'invalid_decision',
-            '当前 Tool 同时属于多个业务领域，已拒绝执行。',
-            tool_name=decision.tool_name,
-            arguments=decision.arguments,
-        )
-
     # 4. Tool 调用预算（基于实际发起执行的次数）
     if tool_call_count >= MAX_TOOL_CALLS:
         return _blocked(state, runtime, 'tool_call_budget_exhausted',

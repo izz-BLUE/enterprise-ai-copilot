@@ -34,6 +34,7 @@ class LeaveGuard:
         LEAVE_REQUEST_TOOL_NAME,
         LEAVE_PROPOSAL_TOOL_NAME,
     })
+    active_tool_names = frozenset({LEAVE_PROPOSAL_TOOL_NAME})
 
     def _active_continuation_state(self, memory_context: object) -> dict | None:
         if not isinstance(memory_context, dict):
@@ -136,6 +137,47 @@ class LeaveGuard:
         ):
             raise PlannerDecisionError('finish 前未完成 leave_proposal_tool Proposal 阶段')
 
+    def validate_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> None:
+        """Validate only an actually observed Leave workflow.
+
+        Phase C no longer infers Leave from the current question. A prior
+        Leave Tool or an active Leave continuation is the deterministic
+        evidence that makes the guard relevant.
+        """
+        if decision.action != 'finish':
+            return None
+        history_tool_names = {
+            item.get('tool_name')
+            for item in context.tool_history
+            if isinstance(item, dict)
+        }
+        if LEAVE_PROPOSAL_TOOL_NAME in history_tool_names:
+            return self.validate_completion(
+                decision,
+                [LEAVE_PROPOSAL_TOOL_NAME],
+                context,
+            )
+        if (
+            context.continuation_leave_state is not None
+            and LEAVE_PROPOSAL_TOOL_NAME in tools
+        ):
+            raise PlannerDecisionError('finish 前未完成 leave_proposal_tool Proposal 阶段')
+        return None
+
+    def postprocess_selected_tool(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> tuple[PlannerDecision, dict[str, object]]:
+        """Keep Leave state handling without question-based route rewriting."""
+        return self.postprocess_decision(decision, tools, context)
+
     def recover_completion_decision(
         self,
         decision: PlannerDecision,
@@ -157,6 +199,43 @@ class LeaveGuard:
                 'arguments': {},
                 'reason_code': 'need_balance',
             })
+        return None
+
+    def recover_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        """Recover only from Leave evidence in history or continuation state."""
+        history_tool_names = {
+            item.get('tool_name')
+            for item in context.tool_history
+            if isinstance(item, dict)
+        }
+        if (
+            error_code == 'leave_balance_missing'
+            and LEAVE_BALANCE_TOOL_NAME in history_tool_names
+        ):
+            return self.recover_completion_decision(
+                decision,
+                tools,
+                context,
+                error_code,
+                balance_query=True,
+            )
+        if (
+            error_code == 'leave_proposal_missing'
+            and context.continuation_leave_state is not None
+            and LEAVE_PROPOSAL_TOOL_NAME in tools
+        ):
+            return PlannerDecision.model_validate({
+                'action': 'tool',
+                'tool_name': LEAVE_PROPOSAL_TOOL_NAME,
+                'arguments': {},
+                'reason_code': 'need_proposal',
+            }).validate_decision()
         return None
 
     def postprocess_decision(

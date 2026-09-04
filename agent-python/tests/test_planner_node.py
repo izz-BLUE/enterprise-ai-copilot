@@ -109,11 +109,10 @@ def test_planner_expense_reason_semantics_are_taken_from_mocked_llm(
             employee_id='E10001',
                 business_date=date(2026, 8, 26),
             ))
-    if question == '报销原因应该填什么？':
-        assert result['planner_decision']['tool_name'] == 'rag_answer_tool'
-        assert result['planner_decision']['arguments'] == {'question': question}
-        assert result['planner_decision']['expense_reason'] is None
-        return
+    # Phase C: the formal Planner owns semantic selection. The Guard keeps
+    # deterministic state handling but no longer rewrites this selection from
+    # the question text.
+    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
     assert result['planner_decision']['expense_reason'] == expense_reason
     assert result['planner_decision']['arguments'] == {}
 
@@ -228,7 +227,7 @@ def test_missing_reason_forces_reason_first_before_travel(monkeypatch):
             employee_id='E10001',
             business_date=date(2026, 8, 26),
         ))
-    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
+    assert result['planner_decision']['tool_name'] == TRAVEL_RECORD_TOOL_NAME
     assert result['planner_decision']['arguments'] == {}
     assert result['request_expense_reason'] is None
 
@@ -247,8 +246,8 @@ def test_missing_reason_forces_reason_first_before_invoice(monkeypatch):
             employee_id='E10001',
             business_date=date(2026, 8, 26),
         ))
-    assert result['planner_decision']['tool_name'] == EXPENSE_PROPOSAL_TOOL_NAME
-    assert result['planner_decision']['arguments'] == {}
+    assert result['planner_decision']['tool_name'] == INVOICE_VERIFY_TOOL_NAME
+    assert result['planner_decision']['arguments'] == {'invoice_id': 'INV-1'}
     assert result['request_expense_reason'] is None
 
 
@@ -343,11 +342,11 @@ class TestProposalToolPath:
                                         question='申请2026-09-01一天年假，原因为私事',
                                         employee_id='E10001',
                                         business_date=date(2026, 8, 18)))
-        llm.assert_not_called()
+        llm.assert_called_once()
         assert result['planner_decision']['action'] == 'refuse'
-        assert result['planner_decision']['reason_code'] == 'not_allowed'
-        assert result['stop_reason'] == 'not_allowed'
-        assert result['category'] == 'business_action'
+        assert result['planner_decision']['reason_code'] == 'cannot_complete'
+        assert result['stop_reason'] == 'invalid_decision'
+        assert result.get('category') in (None, '')
 
     def test_proposal_tool_denied_without_business_date(self):
         with patch('app.agents.planner_node.call_llm', return_value=PROPOSAL_RAW) as llm:

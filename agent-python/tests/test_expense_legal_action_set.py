@@ -7,9 +7,7 @@ from datetime import date
 from unittest.mock import patch
 
 from app.agents.domain_provider_registry import DomainContext, ExpenseProvider
-from app.agents.planner_node import (
-    planner_node,
-)
+from app.agents.planner_node import authorized_tools, planner_node
 from app.schemas.planner_schema import (
     EXPENSE_PROPOSAL_TOOL_NAME,
     INVOICE_VERIFY_TOOL_NAME,
@@ -147,7 +145,7 @@ def test_missing_reason_preserves_read_only_capabilities():
     assert legal == TOOLS
 
 
-def test_planner_prompt_uses_the_legal_action_set(monkeypatch):
+def test_planner_prompt_uses_the_authorized_action_set(monkeypatch):
     monkeypatch.setenv("ENTERPRISE_OA_MCP_URL", "http://127.0.0.1:8100/mcp")
     monkeypatch.setattr("app.agents.planner_node.JAVA_BASE_URL", "http://java.test")
     monkeypatch.setattr("app.agents.planner_node.JAVA_INTERNAL_TOKEN", "test-token")
@@ -178,11 +176,24 @@ def test_planner_prompt_uses_the_legal_action_set(monkeypatch):
         )
     system_prompt, user_prompt = llm.call_args.args
     assert result["planner_decision"]["tool_name"] == TRAVEL_RECORD_TOOL_NAME
-    assert INVOICE_VERIFY_TOOL_NAME not in system_prompt
-    assert EXPENSE_PROPOSAL_TOOL_NAME not in system_prompt
+    assert INVOICE_VERIFY_TOOL_NAME in system_prompt
+    assert EXPENSE_PROPOSAL_TOOL_NAME in system_prompt
     current_tools = user_prompt.split("当前可用工具：\n", 1)[1].split(
         "\n\n已有工具调用历史：", 1
     )[0]
     assert TRAVEL_RECORD_TOOL_NAME in current_tools
-    assert INVOICE_VERIFY_TOOL_NAME not in current_tools
-    assert EXPENSE_PROPOSAL_TOOL_NAME not in current_tools
+    assert INVOICE_VERIFY_TOOL_NAME in current_tools
+    assert EXPENSE_PROPOSAL_TOOL_NAME in current_tools
+    expected_tools = authorized_tools(
+        employee_id="E10001",
+        allow_eval=False,
+        allow_business_actions=True,
+        java_base_url="http://java.test",
+        java_internal_token="test-token",
+        enterprise_oa_mcp_url="http://127.0.0.1:8100/mcp",
+    )
+    actual_tools = [
+        line[2:].split(":", 1)[0]
+        for line in current_tools.strip().splitlines()
+    ]
+    assert actual_tools == expected_tools

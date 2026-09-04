@@ -183,7 +183,7 @@ def test_unresolved_finish_task_complete_remains_normal_finish():
     assert result['route'] == 'agent'
 
 
-def test_expense_provider_rejects_terminal_refusal_pair():
+def test_unobserved_expense_terminal_refusal_is_normalized():
     result = _run(
         '报销原因为客户拜访，帮我准备差旅报销申请。',
         ['{"action":"finish","answer":"当前无法完成。",'
@@ -193,11 +193,11 @@ def test_expense_provider_rejects_terminal_refusal_pair():
         business_date=date(2026, 9, 2),
     )
 
-    assert result['stop_reason'] == 'invalid_decision'
-    assert result['route'] == 'error'
+    assert result['stop_reason'] == 'refused'
+    assert result['route'] == 'refuse'
 
 
-def test_leave_provider_rejects_terminal_refusal_pair():
+def test_unobserved_leave_terminal_refusal_is_normalized():
     result = _run(
         '请帮我请明天年假。',
         ['{"action":"finish","answer":"当前无法完成。",'
@@ -207,8 +207,8 @@ def test_leave_provider_rejects_terminal_refusal_pair():
         business_date=date(2026, 9, 2),
     )
 
-    assert result['stop_reason'] == 'invalid_decision'
-    assert result['route'] == 'error'
+    assert result['stop_reason'] == 'refused'
+    assert result['route'] == 'refuse'
 
 
 def test_refuse_task_complete_remains_invalid():

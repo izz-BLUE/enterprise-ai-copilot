@@ -538,8 +538,8 @@ class TestPlannerSelection:
             "报销需要什么材料？",
         ],
     )
-    def test_expense_reason_question_routes_to_knowledge_not_proposal(self, question):
-        """报销咨询即使被模型误选 Proposal，也不得进入业务草稿链路。"""
+    def test_expense_reason_question_misroute_is_safe_clarification(self, question):
+        """Phase C：误选 Proposal 时由 Tool/Guard 安全澄清，不做语义重路由。"""
         decisions = [
             _tool("expense_proposal_tool", {}, "need_expense_proposal",
                   expense_reason="不应抽取"),
@@ -566,14 +566,14 @@ class TestPlannerSelection:
                 business_date=date(2026, 8, 26),
             )
 
-        assert rag.invoke.call_count == 1
-        proposal.invoke.assert_not_called()
+        rag.invoke.assert_not_called()
+        assert proposal.invoke.call_count == 1
         assert [h["tool_name"] for h in result["tool_history"]] == [
-            "rag_answer_tool",
+            "expense_proposal_tool",
         ]
-        assert result["route"] == "rag"
-        assert result["missing_fields"] == []
-        assert result["request_expense_reason"] is None
+        assert result["route"] == "action"
+        assert result["missing_fields"] == ["reason"]
+        assert result["request_expense_reason"] == "不应抽取"
         assert result["action_proposal"] is None
 
     def test_travel_record_selection(self):
@@ -588,7 +588,7 @@ class TestPlannerSelection:
             tk.invoke.return_value = TRAVEL_ANSWER
             result = run_langgraph_agent(
                 "我上周有哪些出差？", use_planner=True, employee_id="E10001")
-        assert result["route"] == "rag" or result["route"] == "agent"
+        assert result["route"] == "agent"
         assert any(h["tool_name"] == "travel_record_tool"
                    and h["status"] == "success" for h in result["tool_history"])
 
@@ -813,8 +813,8 @@ class TestPlannerSelection:
         assert second["tool_call_count"] == 4
         assert llm.call_count == 5
 
-    def test_missing_reason_short_circuits_read_only_tools(self):
-        """首次原因为空时，程序层直接进入 reason-first clarification。"""
+    def test_missing_reason_does_not_semantically_reroute_selected_tool(self):
+        """Phase C：缺少原因不改写 Planner 已选择的 read Tool。"""
         decisions = [
             _tool("travel_record_tool", {}, "need_travel_history"),
             _finish("模型不应覆盖 Tool clarification。"),
@@ -829,14 +829,13 @@ class TestPlannerSelection:
                 allow_business_actions=True,
                 business_date=date(2026, 8, 26),
             )
-        travel.invoke.assert_not_called()
+        travel.invoke.assert_called_once()
         inv.invoke.assert_not_called()
         assert result["request_expense_reason"] is None
-        assert result["missing_fields"] == ["reason"]
-        assert result["answer"] == "请提供本次报销原因。"
+        assert result["missing_fields"] == []
 
-    def test_rag_success_then_invalid_finish_repairs_to_expense_proposal(self, caplog):
-        """只读事实成功后合法但过早 finish，语义修复必须继续报销 Proposal。"""
+    def test_rag_success_does_not_infer_expense_workflow_for_finish(self, caplog):
+        """Phase C：RAG history 不能凭问题文本推断 Expense prerequisite。"""
         premature_finish = json.dumps({
             "action": "finish",
             "answer": "INVALID_FINISH_SHOULD_NOT_EXECUTE",
@@ -845,30 +844,10 @@ class TestPlannerSelection:
         decisions = [
             _tool("rag_answer_tool", {"question": "出差报销政策"}, "need_knowledge"),
             premature_finish,
-            _tool("expense_proposal_tool", {}, "need_expense_proposal",
-                  expense_reason="客户拜访"),
-            _finish("已生成报销申请草稿，请确认后提交。"),
         ]
-        expense_payload = json.dumps({
-            "success": True,
-            "kind": "proposal",
-            "action_proposal": {
-                "action_type": "EXPENSE_CLAIM",
-                "trip_id": "TRIP-20260818-001",
-                "claimed_amount": "1600.00",
-                "reimbursable_amount": "1500.00",
-                "cost_center": "COST-DEFAULT",
-                "reason": "客户拜访",
-                "invoice_ids": ["INV-001"],
-                "expense_items": [],
-                "stay_nights": 2,
-            },
-            "missing_fields": [],
-        }, ensure_ascii=False)
         rag = Mock()
         rag.invoke.return_value = RAG_ANSWER
         proposal = Mock()
-        proposal.invoke.return_value = expense_payload
         with patch("app.agents.planner_node.call_llm", side_effect=decisions) as llm, \
              patch("app.agents.tool_executor_node.rag_answer_tool", rag), \
              patch("app.agents.tool_executor_node.expense_proposal_tool", proposal):
@@ -880,17 +859,13 @@ class TestPlannerSelection:
                 business_date=date(2026, 8, 26),
             )
 
-        assert llm.call_count == 4
+        assert llm.call_count == 2
         assert rag.invoke.call_count == 1
-        assert proposal.invoke.call_count == 1
-        assert result["stop_reason"] == "task_complete"
-        assert result["route"] == "action"
-        assert result["action_proposal"]["action_type"] == "EXPENSE_CLAIM"
-        assert any(
-            "error_type=planner_completion_validation "
-            "error_code=expense_proposal_missing" in record.message
-            for record in caplog.records
-        )
+        proposal.invoke.assert_not_called()
+        assert result["stop_reason"] == "refused"
+        assert result["route"] == "refuse"
+        assert not any("expense_proposal_missing" in record.message
+                       for record in caplog.records)
 
 
 class TestStressScenarios:
@@ -957,15 +932,16 @@ class TestStressScenarios:
                 "帮我报销上周上海出差的酒店和打车费用",
                 use_planner=True, employee_id="E10001",
                 allow_business_actions=True, business_date=date(2026, 8, 26))
-        # Proposal 已创建后不再进入 Expense dependency Tool；第二次 Proposal
-        # 已从 Planner capability 清单移除，不会到达 Executor。
+        # Proposal 已创建后，第二次 Proposal 仍可被 Planner 选择，但由
+        # Expense Guard 在 Executor second gate 拒绝，绝不重复真正执行。
         blocked_proposal = [h for h in result["tool_history"]
                             if h["tool_name"] == "expense_proposal_tool"
                             and h["status"] == "blocked"]
-        assert blocked_proposal == []
+        assert len(blocked_proposal) == 1
+        assert 'expense_proposal_already_completed' in blocked_proposal[0]["observation"]
         # proposal tool 只真正执行一次
         assert prop.invoke.call_count == 1
-        assert result["stop_reason"] == "invalid_decision"
+        assert result["stop_reason"] == "task_complete"
 
     def test_stress_f_old_leave_memory_does_not_hijack_expense_query(self):
         """Stress F：ACTIVE LEAVE_REQUEST Memory + 报销状态问题 → 不回到 leave_proposal。"""

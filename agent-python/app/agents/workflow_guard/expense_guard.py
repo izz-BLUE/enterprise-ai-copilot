@@ -79,6 +79,7 @@ class ExpenseGuard:
         INVOICE_VERIFY_TOOL_NAME,
         EXPENSE_PROPOSAL_TOOL_NAME,
     })
+    active_tool_names = dependency_tools
 
     def legal_tools(
         self,
@@ -377,6 +378,57 @@ class ExpenseGuard:
             raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
         if 'invoice_ids' in missing_fields or payload.get('kind') not in (None, 'clarification'):
             raise PlannerDecisionError('finish 前未完成 expense_proposal_tool Proposal 阶段')
+
+    def validate_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> None:
+        """Validate Expense completion only after its workflow is observed."""
+        if decision.action != 'finish':
+            return None
+        if not self._has_active_claim_workflow(context):
+            return None
+        return self.validate_completion(decision, tools, context)
+
+    def recover_completion_for_workflow(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+        error_code: str,
+    ) -> PlannerDecision | None:
+        """Recover prerequisites only for an observed Expense workflow."""
+        if not self._has_active_claim_workflow(context):
+            return None
+        return self.recover_completion_decision(
+            decision, tools, context, error_code
+        )
+
+    def _has_active_claim_workflow(self, context: DomainContext) -> bool:
+        if context.continuation_original_request:
+            return True
+        return any(
+            isinstance(item, dict)
+            and item.get('tool_name') in self.dependency_tools
+            for item in context.tool_history
+        )
+
+    def postprocess_selected_tool(
+        self,
+        decision: PlannerDecision,
+        tools: Sequence[str],
+        context: DomainContext,
+    ) -> tuple[PlannerDecision, dict[str, object]]:
+        """Normalize workflow state without semantic intent rerouting."""
+        return self.postprocess_decision(
+            decision,
+            tools,
+            context,
+            matched=True,
+            claim_intent=False,
+        )
 
     def postprocess_decision(
         self,
