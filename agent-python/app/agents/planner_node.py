@@ -19,8 +19,21 @@ from app.agents.domain_provider_registry import (
     DomainContext,
     DomainProviderAmbiguityError,
 )
+from app.agents.planner_shadow_routing import (
+    SHADOW_ROUTING_DEADLINE_MARGIN_SECONDS,
+    SHADOW_ROUTING_TIMEOUT_SECONDS,
+    record_shadow_skip,
+    run_shadow_routing,
+)
 from app.agents.runtime_context import AgentRuntimeContext
-from app.core.config import JAVA_BASE_URL, JAVA_INTERNAL_TOKEN, LLM_TIMEOUT, logger
+from app.agents.tool_catalog import TOOL_CATALOG
+from app.core.config import (
+    JAVA_BASE_URL,
+    JAVA_INTERNAL_TOKEN,
+    LLM_TIMEOUT,
+    PLANNER_SHADOW_ROUTING_ENABLED,
+    logger,
+)
 from app.schemas.execution_history_schema import validate_execution_history
 from app.schemas.planner_schema import (
     EVAL_TOOL_NAME,
@@ -256,6 +269,51 @@ def visible_tools(
     if has_java_read_config:
         # expense_status_tool 走 Java /api/internal/expense/status（Phase 8）。
         tools.append(EXPENSE_STATUS_TOOL_NAME)
+    return tools
+
+
+def authorized_tools(
+    *,
+    employee_id: str | None,
+    allow_eval: bool,
+    allow_business_actions: bool,
+    java_base_url: str,
+    java_internal_token: str,
+    enterprise_oa_mcp_url: str = '',
+) -> list[str]:
+    """Return config/identity-authorized Tools before semantic route pruning.
+
+    This is intentionally separate from ``visible_tools``: Shadow Routing sees
+    only trusted context, service configuration, and registered Catalog entries,
+    never the question or a provider's ``matches()/resolve()`` result.
+    """
+    registered = set(TOOL_CATALOG.tool_names)
+    tools: list[str] = []
+
+    def add(tool_name: str) -> None:
+        if tool_name in registered and tool_name not in tools:
+            tools.append(tool_name)
+
+    has_employee_id = _has_value(employee_id)
+    has_java_read_config = (
+        has_employee_id
+        and _has_value(java_base_url)
+        and _has_value(java_internal_token)
+    )
+    add(RAG_TOOL_NAME)
+    if has_java_read_config:
+        add(LEAVE_BALANCE_TOOL_NAME)
+        add(LEAVE_REQUEST_TOOL_NAME)
+    if has_employee_id and _has_value(enterprise_oa_mcp_url):
+        add(TRAVEL_RECORD_TOOL_NAME)
+        add(INVOICE_VERIFY_TOOL_NAME)
+    if allow_eval:
+        add(EVAL_TOOL_NAME)
+    if allow_business_actions and has_employee_id:
+        add(LEAVE_PROPOSAL_TOOL_NAME)
+        add(EXPENSE_PROPOSAL_TOOL_NAME)
+    if has_java_read_config:
+        add(EXPENSE_STATUS_TOOL_NAME)
     return tools
 
 
@@ -638,13 +696,22 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         }
 
     steps_left = MAX_PLANNER_STEPS - step_count
+    enterprise_oa_mcp_url = _enterprise_oa_mcp_url_config()
+    current_authorized_tools = authorized_tools(
+        employee_id=employee_id,
+        allow_eval=allow_eval,
+        allow_business_actions=allow_business_actions,
+        java_base_url=JAVA_BASE_URL,
+        java_internal_token=JAVA_INTERNAL_TOKEN,
+        enterprise_oa_mcp_url=enterprise_oa_mcp_url,
+    )
     current_visible_tools = visible_tools(
         employee_id=employee_id,
         allow_eval=allow_eval,
         allow_business_actions=allow_business_actions,
         java_base_url=JAVA_BASE_URL,
         java_internal_token=JAVA_INTERNAL_TOKEN,
-        enterprise_oa_mcp_url=_enterprise_oa_mcp_url_config(),
+        enterprise_oa_mcp_url=enterprise_oa_mcp_url,
         question=question,
     )
 
@@ -652,6 +719,18 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         state.get('memory_context'))
     continuation_original_request = _active_expense_original_request(
         state.get('memory_context'))
+    shadow_skip_error_code: str | None = None
+    if step_count != 0:
+        shadow_skip_error_code = 'step_not_zero'
+    elif state.get('action_proposal') is not None:
+        shadow_skip_error_code = 'action_proposal_present'
+    elif (
+        active_expense_reason_wait
+        or continuation_original_request is not None
+        or state.get('continuation_original_request') is not None
+        or state.get('continuation_leave_state') is not None
+    ):
+        shadow_skip_error_code = 'active_continuation'
     if active_expense_reason_wait and continuation_original_request is None:
         # ACTIVE Expense reason continuation 没有可验证的原始请求时，不能
         # 让当前补槽文本被误当成完整 Expense request；也不能从 summary 猜测。
@@ -941,6 +1020,49 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                 'not_allowed',
                 category='business_action',
             )
+
+    if PLANNER_SHADOW_ROUTING_ENABLED:
+        if shadow_skip_error_code is not None:
+            record_shadow_skip(
+                legacy_action=decision.action,
+                legacy_tool=decision.tool_name,
+                error_code=shadow_skip_error_code,
+            )
+        else:
+            shadow_remaining_seconds = (
+                deadline - monotonic()
+                if isinstance(deadline, (int, float)) else None
+            )
+            if (
+                shadow_remaining_seconds is not None
+                and shadow_remaining_seconds
+                <= SHADOW_ROUTING_TIMEOUT_SECONDS
+                + SHADOW_ROUTING_DEADLINE_MARGIN_SECONDS
+            ):
+                record_shadow_skip(
+                    legacy_action=decision.action,
+                    legacy_tool=decision.tool_name,
+                    error_code='deadline_insufficient',
+                )
+            else:
+                run_shadow_routing(
+                    question=question,
+                    authorized_tools=current_authorized_tools,
+                    tool_history=list(state.get('tool_history', [])),
+                    observation=state.get('observation', ''),
+                    steps_left=steps_left,
+                    memory_context=state.get('memory_context'),
+                    execution_history=list(state.get('execution_history', [])),
+                    context=domain_context,
+                    guard_for_tool=DOMAIN_PROVIDER_REGISTRY.workflow_guard_for_tool,
+                    legacy_action=decision.action,
+                    legacy_tool=decision.tool_name,
+                    timeout_seconds=(
+                        shadow_remaining_seconds
+                        if shadow_remaining_seconds is not None
+                        else SHADOW_ROUTING_TIMEOUT_SECONDS
+                    ),
+                )
 
     stop_reason = {
         'tool': 'continue',
