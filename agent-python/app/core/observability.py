@@ -5,7 +5,7 @@
 """
 
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -149,31 +149,3 @@ def record_ai_response(
             span.set_attribute('ai.queue_wait_ms', queue_wait_ms)
     except Exception:
         logger.exception('Phoenix 响应属性写入失败；业务链路继续运行')
-
-
-def record_routing_shadow(attributes: Mapping[str, object]) -> None:
-    """记录 Shadow Routing 的固定低敏字段；观测失败不得影响正式链路。"""
-    if _tracer is None:
-        return
-
-    allowed_keys = frozenset({
-        'routing.shadow.enabled',
-        'routing.legacy_action',
-        'routing.legacy_tool',
-        'routing.shadow_action',
-        'routing.shadow_tool',
-        'routing.shadow_reason_code',
-        'routing.shadow_valid',
-        'routing.shadow_guard_allowed',
-        'routing.disagreement',
-        'routing.shadow_error_code',
-    })
-    try:
-        with _tracer.start_as_current_span('agent.routing.shadow') as span:
-            for key, value in attributes.items():
-                if key not in allowed_keys or value is None:
-                    continue
-                if isinstance(value, (str, bool, int, float)):
-                    span.set_attribute(key, value)
-    except Exception:
-        logger.exception('Phoenix Shadow Routing 观测失败；业务链路继续运行')

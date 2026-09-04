@@ -68,12 +68,6 @@ if not 0 <= LLM_MAX_RETRIES <= 2:
 if not 64 <= LLM_MAX_OUTPUT_TOKENS <= 8192:
     raise ValueError('LLM_MAX_OUTPUT_TOKENS 必须处于 [64, 8192]')
 
-# Phase B：Shadow Routing 默认关闭；开启后只增加一次旁路 Planner 调用，
-# 不改变正式 Planner / Tool Executor 的业务路径。
-PLANNER_SHADOW_ROUTING_ENABLED = (
-    os.getenv('PLANNER_SHADOW_ROUTING_ENABLED', 'false').strip().lower() == 'true'
-)
-
 # Phoenix/OpenTelemetry Observability（默认关闭）。启用时统一采用 BatchSpanProcessor，
 # Collector 故障不进入业务异常路径；默认不采集 Prompt、用户输入和模型输出正文。
 (

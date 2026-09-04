@@ -18,19 +18,12 @@ from app.agents.domain_provider_registry import (
     DOMAIN_PROVIDER_REGISTRY,
     DomainContext,
 )
-from app.agents.planner_shadow_routing import (
-    SHADOW_ROUTING_DEADLINE_MARGIN_SECONDS,
-    SHADOW_ROUTING_TIMEOUT_SECONDS,
-    record_shadow_skip,
-    run_shadow_routing,
-)
 from app.agents.runtime_context import AgentRuntimeContext
 from app.agents.tool_catalog import TOOL_CATALOG
 from app.core.config import (
     JAVA_BASE_URL,
     JAVA_INTERNAL_TOKEN,
     LLM_TIMEOUT,
-    PLANNER_SHADOW_ROUTING_ENABLED,
     logger,
 )
 from app.schemas.execution_history_schema import validate_execution_history
@@ -255,11 +248,7 @@ def authorized_tools(
     java_internal_token: str,
     enterprise_oa_mcp_url: str = '',
 ) -> list[str]:
-    """Return config/identity-authorized Tools before semantic route pruning.
-
-    Shadow Routing sees only trusted context, service configuration, and
-    registered Catalog entries; it never sees the question.
-    """
+    """Return config/identity-authorized Tools before semantic route selection."""
     registered = set(TOOL_CATALOG.tool_names)
     tools: list[str] = []
 
@@ -665,18 +654,6 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
         state.get('memory_context'))
     continuation_original_request = _active_expense_original_request(
         state.get('memory_context'))
-    shadow_skip_error_code: str | None = None
-    if step_count != 0:
-        shadow_skip_error_code = 'step_not_zero'
-    elif state.get('action_proposal') is not None:
-        shadow_skip_error_code = 'action_proposal_present'
-    elif (
-        active_expense_reason_wait
-        or continuation_original_request is not None
-        or state.get('continuation_original_request') is not None
-        or state.get('continuation_leave_state') is not None
-    ):
-        shadow_skip_error_code = 'active_continuation'
     if active_expense_reason_wait and continuation_original_request is None:
         # ACTIVE Expense reason continuation 没有可验证的原始请求时，不能
         # 让当前补槽文本被误当成完整 Expense request；也不能从 summary 猜测。
@@ -924,49 +901,6 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
                 'not_allowed',
                 category='business_action',
             )
-
-    if PLANNER_SHADOW_ROUTING_ENABLED:
-        if shadow_skip_error_code is not None:
-            record_shadow_skip(
-                legacy_action=decision.action,
-                legacy_tool=decision.tool_name,
-                error_code=shadow_skip_error_code,
-            )
-        else:
-            shadow_remaining_seconds = (
-                deadline - monotonic()
-                if isinstance(deadline, (int, float)) else None
-            )
-            if (
-                shadow_remaining_seconds is not None
-                and shadow_remaining_seconds
-                <= SHADOW_ROUTING_TIMEOUT_SECONDS
-                + SHADOW_ROUTING_DEADLINE_MARGIN_SECONDS
-            ):
-                record_shadow_skip(
-                    legacy_action=decision.action,
-                    legacy_tool=decision.tool_name,
-                    error_code='deadline_insufficient',
-                )
-            else:
-                run_shadow_routing(
-                    question=question,
-                    authorized_tools=current_authorized_tools,
-                    tool_history=list(state.get('tool_history', [])),
-                    observation=state.get('observation', ''),
-                    steps_left=steps_left,
-                    memory_context=state.get('memory_context'),
-                    execution_history=list(state.get('execution_history', [])),
-                    context=domain_context,
-                    guard_for_tool=DOMAIN_PROVIDER_REGISTRY.workflow_guard_for_tool,
-                    legacy_action=decision.action,
-                    legacy_tool=decision.tool_name,
-                    timeout_seconds=(
-                        shadow_remaining_seconds
-                        if shadow_remaining_seconds is not None
-                        else SHADOW_ROUTING_TIMEOUT_SECONDS
-                    ),
-                )
 
     stop_reason = {
         'tool': 'continue',
