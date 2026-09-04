@@ -1,0 +1,130 @@
+{"id":"d1-a-001","category":"knowledge_rag","question":"公司的年假制度是怎样的？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-002","category":"knowledge_rag","question":"入职满一年后年假天数怎么计算？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-003","category":"knowledge_rag","question":"研发环境的 VPN 申请流程在哪里看？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-004","category":"knowledge_rag","question":"忘记公司密码时，IT 服务台的处理流程是什么？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-005","category":"knowledge_rag","question":"普通员工报销需要准备哪些材料？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-006","category":"knowledge_rag","question":"发票重复报销的制度和处理规则是什么？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-007","category":"knowledge_rag","question":"新员工第一周需要完成哪些入职事项？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-008","category":"knowledge_rag","question":"公司允许远程办公吗，申请条件有哪些？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-009","category":"knowledge_rag","question":"国内出差的住宿标准和城市分级怎么规定？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-010","category":"knowledge_rag","question":"HR 文档里对员工个人信息的分级要求是什么？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-011","category":"knowledge_rag","question":"今年法定节假日加班的调休规则能解释一下吗？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-012","category":"knowledge_rag","question":"差旅报销中的交通票据有哪些合规要求？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-013","category":"knowledge_rag","question":"生产系统发生故障后，内部 IT 事件升级流程是什么？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-014","category":"knowledge_rag","question":"未休年假可以结转到下一年度吗？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-a-015","category":"knowledge_rag","question":"采购办公设备需要经过哪些审批环节？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-b-001","category":"leave_live_read","question":"我现在还剩多少年假？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-002","category":"leave_live_read","question":"帮我查一下自己的年假余额。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-003","category":"leave_live_read","question":"截至今天我的 annual leave 还剩几天？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-004","category":"leave_live_read","question":"我的假期余额能实时看一下吗？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-005","category":"leave_live_read","question":"请告诉我自己剩余的带薪年假天数。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-006","category":"leave_live_read","question":"查查我还有多少 PTO。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-007","category":"leave_live_read","question":"我能用的年休假余额是多少？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-008","category":"leave_live_read","question":"帮我看一下当前个人假期余额，别查制度。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-009","category":"leave_live_read","question":"我今年剩余可休年假有几天？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-b-010","category":"leave_live_read","question":"列出我最近提交成功的请假记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-011","category":"leave_live_read","question":"看看我最近的请假历史，最多给十条。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-012","category":"leave_live_read","question":"我上一次成功提交的休假是哪天？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-013","category":"leave_live_read","question":"请查询自己的 leave request 记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-014","category":"leave_live_read","question":"把我最近五条已提交的请假单找出来。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-015","category":"leave_live_read","question":"查下我过去申请过哪些假。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-016","category":"leave_live_read","question":"我的请假记录最近一条是什么？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-017","category":"leave_live_read","question":"请给我看近三十条成功的休假申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-b-018","category":"leave_live_read","question":"只查我自己的已提交 leave history。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool"]}}
+{"id":"d1-c-001","category":"leave_proposal","question":"请帮我申请 9 月 15 日的年假，原因是家庭事务。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-002","category":"leave_proposal","question":"准备下周一休半天年假，原因写个人事务。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-003","category":"leave_proposal","question":"我要提交 2026-10-01 到 2026-10-03 的休假申请，旅游用。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-004","category":"leave_proposal","question":"帮我办一张明天的年假，事由是看病。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-005","category":"leave_proposal","question":"申请本周五下午半天假，原因：孩子家长会。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-006","category":"leave_proposal","question":"请为我准备 11 月 2 日至 4 日的年假草稿，出行休息。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-007","category":"leave_proposal","question":"我想请 12 月 24 日一天年休假，原因是私人安排。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-008","category":"leave_proposal","question":"帮忙提交下周三的半天 leave，原因是办理证件。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-009","category":"leave_proposal","question":"发起 2026 年 9 月 20 日的年假申请，休息一天。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-010","category":"leave_proposal","question":"请准备我的国庆前一天年假，理由是家庭聚会。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-011","category":"leave_proposal","question":"我要请 10 月 12 日上午半天假去医院，请生成申请草稿。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-012","category":"leave_proposal","question":"帮我发起 9 月最后一个工作日的年假，原因是搬家。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-013","category":"leave_proposal","question":"提交一份 2026-11-11 全天年假，事由为个人休息。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-014","category":"leave_proposal","question":"请帮我安排下个月第一周周二的半天年假，处理家庭事情。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-c-015","category":"leave_proposal","question":"我确定要申请 8 月 29 日一天的年假，原因是参加婚礼。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-d-001","category":"expense_knowledge","question":"报销流程从提交到审批一般有哪些步骤？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-002","category":"expense_knowledge","question":"差旅报销要上传哪些凭证？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-003","category":"expense_knowledge","question":"公司报销制度里餐费标准如何规定？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-004","category":"expense_knowledge","question":"电子发票能不能用于报销，制度怎么说？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-005","category":"expense_knowledge","question":"报销被退回后应该怎样补材料？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-006","category":"expense_knowledge","question":"什么情况下需要提供出差审批单？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-007","category":"expense_knowledge","question":"发票验真和报销申请之间是什么关系？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-008","category":"expense_knowledge","question":"跨月的交通费用还能申请报销吗？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-009","category":"expense_knowledge","question":"请解释一下报销单里的 cost center 是做什么的。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-010","category":"expense_knowledge","question":"报销政策中对重复发票的定义是什么？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-011","category":"expense_knowledge","question":"出差住宿超标准时，合规处理方式是什么？","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-d-012","category":"expense_knowledge","question":"我只想了解差旅报销需要什么材料，不要创建申请。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["rag_answer_tool"]}}
+{"id":"d1-e-001","category":"expense_live_read","question":"查一下我最近的报销状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-002","category":"expense_live_read","question":"我的报销单 EXP-1001 现在到哪一步了？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-003","category":"expense_live_read","question":"请看我自己的 expense status。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-004","category":"expense_live_read","question":"最近一次报销有没有审批结果？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-005","category":"expense_live_read","question":"查我的差旅报销提交记录和当前状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-006","category":"expense_live_read","question":"报销编号 EXP-2048 的状态能实时确认吗？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-007","category":"expense_live_read","question":"看下我的费用申请是否已经付款。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-008","category":"expense_live_read","question":"我提交的上一张报销单目前是什么状态？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-009","category":"expense_live_read","question":"查询我名下最新一笔 expense。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-e-010","category":"expense_live_read","question":"帮我找最近一次已提交的出差记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-e-011","category":"expense_live_read","question":"看看我自己的 trip history，最近的一次就行。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-e-012","category":"expense_live_read","question":"查询我最近获批的出差及其费用凭证。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-e-013","category":"expense_live_read","question":"我上次去上海的出差记录能查到吗？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-e-014","category":"expense_live_read","question":"请列出我最近的 travel record。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-e-015","category":"expense_live_read","question":"验证我这张发票 INV-1001 是否有效。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["invoice_verify_tool"]}}
+{"id":"d1-e-016","category":"expense_live_read","question":"帮我查发票 INV-2048 有没有重复或验真问题。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["invoice_verify_tool"]}}
+{"id":"d1-e-017","category":"expense_live_read","question":"请确认 invoice INV-77 的金额和有效性。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["invoice_verify_tool"]}}
+{"id":"d1-e-018","category":"expense_live_read","question":"看看我的发票 INV-9001 是否已通过校验。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["invoice_verify_tool"]}}
+{"id":"d1-f-001","category":"expense_proposal","question":"我要把上次出差的费用拿去报销，帮我发起申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-002","category":"expense_proposal","question":"请准备我最近一次出差的报销草稿。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-003","category":"expense_proposal","question":"我想报销上周北京出差的交通和住宿费。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-004","category":"expense_proposal","question":"帮我申请这次 trip 的差旅报销，先按最近一次出差处理。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-005","category":"expense_proposal","question":"发起我上个月出差费用的 reimbursement。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-006","category":"expense_proposal","question":"请把最近一次获批出差对应的费用拿来报销。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-007","category":"expense_proposal","question":"我要提交去广州那次出差的报销申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-008","category":"expense_proposal","question":"帮我做一份上次商务旅行的费用申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-009","category":"expense_proposal","question":"准备报销我最近一次差旅，相关发票请按那次行程处理。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-010","category":"expense_proposal","question":"请开始办理这次出差的费用报销。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-011","category":"expense_proposal","question":"我要报销 8 月深圳出差产生的费用，帮我起草。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-012","category":"expense_proposal","question":"帮我把最后一次 approved trip 转成报销申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-013","category":"expense_proposal","question":"请发起最近一笔差旅报销，原因是客户拜访。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-014","category":"expense_proposal","question":"我决定提交上次出差的 reimbursement request。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-f-015","category":"expense_proposal","question":"开始为我最近的出差准备报销材料和申请。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool"]}}
+{"id":"d1-g-001","category":"cross_domain","question":"先查我还剩多少年假，再看看最近的报销状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool","expense_status_tool"]}}
+{"id":"d1-g-002","category":"cross_domain","question":"我想知道自己的请假记录和最近一次出差记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool","travel_record_tool"]}}
+{"id":"d1-g-003","category":"cross_domain","question":"查一下年假余额，同时告诉我报销单 EXP-8 的状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool","expense_status_tool"]}}
+{"id":"d1-g-004","category":"cross_domain","question":"先解释报销需要哪些材料，也查一下我的年假余额。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool","leave_balance_tool"]}}
+{"id":"d1-g-005","category":"cross_domain","question":"看看我上次请假和上次出差分别是什么记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_request_tool","travel_record_tool"]}}
+{"id":"d1-g-006","category":"cross_domain","question":"查个人 PTO 余额以及我最新的 expense 状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_balance_tool","expense_status_tool"]}}
+{"id":"d1-g-007","category":"cross_domain","question":"我需要了解年假制度，并确认自己的假期余额。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool","leave_balance_tool"]}}
+{"id":"d1-g-008","category":"cross_domain","question":"验证发票 INV-31，同时列出我最近的请假记录。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["invoice_verify_tool","leave_request_tool"]}}
+{"id":"d1-g-009","category":"cross_domain","question":"先查我的出差记录，再看这笔报销 EXP-31 的状态。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["travel_record_tool","expense_status_tool"]}}
+{"id":"d1-g-010","category":"cross_domain","question":"公司的请假规则是什么，另外我今年还剩几天假？","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["rag_answer_tool","leave_balance_tool"]}}
+{"id":"d1-h-001","category":"negative_unsupported","question":"帮我查一下今天上海的天气。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-002","category":"negative_unsupported","question":"推荐一只今天可以买入的股票。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-003","category":"negative_unsupported","question":"替我给客户发一封邮件。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-004","category":"negative_unsupported","question":"直接替我重置公司密码。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-005","category":"negative_unsupported","question":"把我的历史请假记录全部删除。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-006","category":"negative_unsupported","question":"导出全公司的工资明细给我。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-007","category":"negative_unsupported","question":"帮我预订下周去北京的机票。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-008","category":"negative_unsupported","question":"查一下我的银行卡余额。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-009","category":"negative_unsupported","question":"把这段代码部署到生产环境。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-h-010","category":"negative_unsupported","question":"我想申请一个假，但没说哪天，也没说明原因。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["leave_proposal_tool"]}}
+{"id":"d1-h-011","category":"negative_unsupported","question":"帮我报销一下。","runtime_profile":"EMPLOYEE_FULL","expected":{"action":"tool","tool_names":["expense_proposal_tool"]}}
+{"id":"d1-h-012","category":"negative_unsupported","question":"把所有员工最近的出差和发票信息都列出来。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-001","category":"permission_boundary","question":"我没有业务操作权限，但想申请 9 月 18 日年假。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-002","category":"permission_boundary","question":"请在只读模式下帮我发起最近一次出差报销。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-003","category":"permission_boundary","question":"普通查询账号可以创建年假申请吗？请直接创建。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-004","category":"permission_boundary","question":"我想查看自己的年假余额。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["leave_balance_tool"]}}
+{"id":"d1-i-005","category":"permission_boundary","question":"只读账号帮我查最近的报销状态。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"tool","tool_names":["expense_status_tool"]}}
+{"id":"d1-i-006","category":"permission_boundary","question":"请把内部评估报告给我看。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-007","category":"permission_boundary","question":"已认证但没有 employee_id 的用户能查询自己的年假余额吗？","runtime_profile":"AUTHENTICATED_WITHOUT_EMPLOYEE_ID","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-008","category":"permission_boundary","question":"没有登录身份也请列出我的出差记录。","runtime_profile":"UNAUTHENTICATED","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-009","category":"permission_boundary","question":"已认证但没有 employee_id，帮我查发票 INV-1。","runtime_profile":"AUTHENTICATED_WITHOUT_EMPLOYEE_ID","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-010","category":"permission_boundary","question":"已认证但没有 employee_id，查询我的报销状态。","runtime_profile":"AUTHENTICATED_WITHOUT_EMPLOYEE_ID","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-011","category":"permission_boundary","question":"没有身份信息也不要确认，直接申请明天年假。","runtime_profile":"UNAUTHENTICATED","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-012","category":"permission_boundary","question":"管理员评估账号需要查看 retrieval 报告。","runtime_profile":"ADMIN_EVAL","expected":{"action":"tool","tool_names":["eval_report_tool"]}}
+{"id":"d1-i-013","category":"permission_boundary","question":"评估管理员请给出 generation 质量报告。","runtime_profile":"ADMIN_EVAL","expected":{"action":"tool","tool_names":["eval_report_tool"]}}
+{"id":"d1-i-014","category":"permission_boundary","question":"业务动作关闭时，我仍要提交一张报销申请。","runtime_profile":"EMPLOYEE_READ_ONLY","expected":{"action":"refuse","tool_names":[]}}
+{"id":"d1-i-015","category":"permission_boundary","question":"未登录时请直接替我提交年假申请。","runtime_profile":"UNAUTHENTICATED","expected":{"action":"refuse","tool_names":[]}}
