@@ -2,7 +2,7 @@
   {
     "id": "leave_001",
     "question": "公司上班时间是什么？",
-    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_sources": ["hl_hr_attendance_policy.md"],
     "expected_keywords": ["9:30", "13:30", "18:30"],
     "expected_answer_keywords": ["9:30", "18:30"],
     "answerable": true
@@ -10,129 +10,81 @@
   {
     "id": "leave_002",
     "question": "请假三天需要提前多久申请？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["提前十个工作日"],
-    "expected_answer_keywords": ["提前十个工作日"],
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["10 个工作日"],
+    "expected_answer_keywords": ["10 个工作日"],
     "answerable": true
   },
   {
     "id": "leave_003",
     "question": "病假需要提供哪些材料？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["病历本", "挂号单", "缴费清单"],
-    "expected_answer_keywords": ["病历本", "挂号单", "缴费清单"],
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["就诊记录", "诊断证明"],
+    "expected_answer_keywords": ["就诊记录", "诊断证明"],
     "answerable": true
   },
   {
     "id": "leave_004",
     "question": "年假怎么计算？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["年休假", "5 天", "10 天", "15 天"],
-    "expected_answer_keywords": ["5天", "10天", "15天"],
-    "answerable": true
-  },
-  {
-    "id": "leave_005",
-    "question": "旷工几天会被解除劳动合同？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["旷工", "解除劳动合同"],
-    "expected_answer_keywords": ["旷工", "解除劳动合同"],
-    "answerable": true
-  },
-  {
-    "id": "leave_006",
-    "question": "迟到早退怎么处罚？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["罚款", "200 元"],
-    "expected_answer_keywords": ["罚款", "200"],
+    "expected_sources": ["hl_hr_annual_leave_policy.md"],
+    "expected_keywords": ["年假", "5 个工作日", "10 个工作日", "15 个工作日", "折算"],
+    "expected_answer_keywords": ["5 个工作日", "10 个工作日", "15 个工作日"],
     "answerable": true
   },
   {
     "id": "leave_007",
     "question": "婚假有多少天？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["婚假", "10 天"],
-    "expected_answer_keywords": ["婚假", "10 天"],
-    "answerable": true
-  },
-  {
-    "id": "leave_008",
-    "question": "产假有多少天？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["产假", "98 天", "30 天"],
-    "expected_answer_keywords": ["产假", "98", "30"],
+    "expected_sources": ["hl_hr_benefits_holidays_guide.md"],
+    "expected_keywords": ["10 个工作日"],
+    "expected_answer_keywords": ["10 个工作日"],
     "answerable": true
   },
   {
     "id": "leave_009",
     "question": "丧假有几天？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["丧假", "三天"],
-    "expected_answer_keywords": ["丧假", "3"],
-    "answerable": true
-  },
-  {
-    "id": "leave_010",
-    "question": "病假工资怎么算？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["病假工资", "70%"],
-    "expected_answer_keywords": ["70"],
-    "answerable": true
-  },
-  {
-    "id": "leave_011",
-    "question": "事假超过多少天会影响年度调薪？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["事假", "10 个工作日"],
-    "expected_answer_keywords": ["10"],
+    "expected_sources": ["hl_hr_benefits_holidays_guide.md"],
+    "expected_keywords": ["3 个工作日"],
+    "expected_answer_keywords": ["3 个工作日"],
     "answerable": true
   },
   {
     "id": "leave_012",
     "question": "加班到几点可以打车报销？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["22:00", "打车"],
-    "expected_answer_keywords": ["22"],
+    "expected_sources": ["hl_hr_overtime_comp_time_policy.md"],
+    "expected_keywords": ["22:00", "出租车"],
+    "expected_answer_keywords": ["22:00", "出租车"],
     "answerable": true
   },
   {
     "id": "leave_013",
     "question": "婚假需要提供什么材料？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["结婚证"],
-    "expected_answer_keywords": ["结婚证"],
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["结婚登记证明"],
+    "expected_answer_keywords": ["结婚登记证明"],
     "answerable": true
   },
   {
     "id": "leave_014",
     "question": "员工请假审批流程是怎样的？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["直接主管", "部门"],
-    "expected_answer_keywords": ["审批"],
-    "answerable": true
-  },
-  {
-    "id": "leave_015",
-    "question": "哺乳假每天有多长时间？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["哺乳假", "一小时"],
-    "expected_answer_keywords": ["一小时", "1小时"],
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["直属主管", "部门负责人"],
+    "expected_answer_keywords": ["直属主管", "部门负责人"],
     "answerable": true
   },
   {
     "id": "it_001",
     "question": "怎么申请公司VPN？",
-    "expected_sources": ["vpn_guide.md"],
-    "expected_keywords": ["VPN", "下载"],
-    "expected_answer_keywords": ["VPN", "下载"],
+    "expected_sources": ["hl_it_vpn_remote_work_guide.md"],
+    "expected_keywords": ["VPN 开通申请"],
+    "expected_answer_keywords": ["VPN 开通申请"],
     "answerable": true
   },
   {
     "id": "it_002",
     "question": "VPN客户端怎么使用？",
-    "expected_sources": ["vpn_guide.md"],
-    "expected_keywords": ["用户名", "密码"],
-    "expected_answer_keywords": ["用户名", "密码"],
+    "expected_sources": ["hl_it_vpn_remote_work_guide.md"],
+    "expected_keywords": ["企业账号", "一次性验证码"],
+    "expected_answer_keywords": ["企业账号", "一次性验证码"],
     "answerable": true
   },
   {
@@ -202,7 +154,7 @@
   {
     "id": "colloquial_001",
     "question": "几点上班？",
-    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_sources": ["hl_hr_attendance_policy.md"],
     "expected_keywords": ["9:30", "13:30", "18:30"],
     "expected_answer_keywords": ["9:30", "18:30"],
     "answerable": true
@@ -210,25 +162,25 @@
   {
     "id": "colloquial_002",
     "question": "请病假要啥？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["病历本", "缴费清单", "病假证明"],
-    "expected_answer_keywords": ["病历本", "缴费清单"],
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["就诊记录", "诊断证明"],
+    "expected_answer_keywords": ["就诊记录", "诊断证明"],
     "answerable": true
   },
   {
     "id": "colloquial_003",
     "question": "年假咋请？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["5 天", "10 天", "15 天"],
-    "expected_answer_keywords": ["5天", "10天", "15天"],
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["OA", "请假申请"],
+    "expected_answer_keywords": ["OA", "请假申请"],
     "answerable": true
   },
   {
     "id": "colloquial_004",
     "question": "VPN 怎么弄？",
-    "expected_sources": ["vpn_guide.md"],
-    "expected_keywords": ["VPN", "下载"],
-    "expected_answer_keywords": ["VPN", "下载"],
+    "expected_sources": ["hl_it_vpn_remote_work_guide.md"],
+    "expected_keywords": ["企业账号"],
+    "expected_answer_keywords": ["企业账号"],
     "answerable": true
   },
   {
@@ -242,42 +194,31 @@
   {
     "id": "colloquial_006",
     "question": "请假谁来批？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["直接主管", "部门"],
-    "expected_answer_keywords": ["直接主管"],
-    "expected_answer_keyword_groups": [
-      ["直接主管", "上级主管", "直属主管", "主管领导", "直属上级", "直属领导", "上级领导", "部门领导"]
-    ],
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["直属主管"],
+    "expected_answer_keywords": ["直属主管"],
     "answerable": true
   },
   {
     "id": "colloquial_007",
     "question": "病假要交哪些东西？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["病历本", "缴费清单", "病假证明"],
-    "expected_answer_keywords": ["病历本", "缴费清单"],
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["就诊记录", "诊断证明"],
+    "expected_answer_keywords": ["就诊记录", "诊断证明"],
     "answerable": true
   },
   {
     "id": "colloquial_008",
     "question": "下班几点？",
-    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_sources": ["hl_hr_attendance_policy.md"],
     "expected_keywords": ["18:30"],
     "expected_answer_keywords": ["18:30"],
     "answerable": true
   },
   {
-    "id": "colloquial_009",
-    "question": "迟到罚多少钱？",
-    "expected_sources": ["leave_policy_real_sample.md"],
-    "expected_keywords": ["罚款", "200"],
-    "expected_answer_keywords": ["罚款", "200"],
-    "answerable": true
-  },
-  {
     "id": "colloquial_010",
     "question": "上班几点到几点？",
-    "expected_sources": ["leave_policy_real_sample.md"],
+    "expected_sources": ["hl_hr_attendance_policy.md"],
     "expected_keywords": ["9:30", "13:30", "18:30"],
     "expected_answer_keywords": ["9:30", "18:30"],
     "answerable": true
@@ -305,5 +246,61 @@
     "expected_keywords": [],
     "expected_answer_keywords": [],
     "answerable": false
+  },
+  {
+    "id": "hr_v2_001",
+    "question": "未获批准的事假可以先休吗？",
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["未获批准", "不得自行开始"],
+    "expected_answer_keywords": ["未获批准", "不得自行开始"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_002",
+    "question": "漏打卡应该怎么更正？",
+    "expected_sources": ["hl_hr_attendance_policy.md"],
+    "expected_keywords": ["2 个工作日"],
+    "expected_answer_keywords": ["2 个工作日"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_003",
+    "question": "产假材料不完整怎么办？",
+    "expected_sources": ["hl_hr_leave_request_guide.md"],
+    "expected_keywords": ["生育相关证明", "退回"],
+    "expected_answer_keywords": ["生育相关证明", "退回"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_004",
+    "question": "病假材料无法核验怎么办？",
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["暂缓确认", "说明"],
+    "expected_answer_keywords": ["暂缓确认", "说明"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_005",
+    "question": "连续事假超过5个工作日需要确认什么？",
+    "expected_sources": ["hl_hr_sick_personal_leave_policy.md"],
+    "expected_keywords": ["交接计划", "部门负责人"],
+    "expected_answer_keywords": ["交接计划", "部门负责人"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_006",
+    "question": "福利假具体天数和材料由哪份制度决定？",
+    "expected_sources": ["hl_hr_benefits_holidays_guide.md"],
+    "expected_keywords": ["请休假操作指引"],
+    "expected_answer_keywords": ["请休假操作指引"],
+    "answerable": true
+  },
+  {
+    "id": "hr_v2_007",
+    "question": "迟到早退怎么记录和更正？",
+    "expected_sources": ["hl_hr_attendance_policy.md"],
+    "expected_keywords": ["考勤更正"],
+    "expected_answer_keywords": ["考勤更正"],
+    "answerable": true
   }
 ]

@@ -1,0 +1,298 @@
+[
+  {
+    "query": "累计工作满12年的员工今年有几天年假？",
+    "expected_source": "hl_hr_annual_leave_policy.md",
+    "expected_answer_fact": "累计工作已满10年不满20年，年度年假为10个工作日。",
+    "category": "numeric fact",
+    "difficulty": "medium",
+    "reason": "同时存在旧的综合休假文档和新的专门年假文档，需定位年假天数职责来源。"
+  },
+  {
+    "query": "入职当年的年假余额怎么折算？",
+    "expected_source": "hl_hr_annual_leave_policy.md",
+    "expected_answer_fact": "按全年应休天数除以365，再乘入职次日至12月31日的日历日数，不足1个完整工作日部分不计。",
+    "category": "numeric fact",
+    "difficulty": "hard",
+    "reason": "问题要求从核算制度提取公式，不应被请假操作文档的申请流程干扰。"
+  },
+  {
+    "query": "三天年假最晚提前多久提交？",
+    "expected_source": "hl_hr_leave_request_guide.md",
+    "expected_answer_fact": "连续3个工作日及以上至少提前10个工作日提交。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "hard",
+    "reason": "年假管理办法负责资格和余额，请休假指引才负责提前申请天数。"
+  },
+  {
+    "query": "年假已经批准但考勤里显示什么？",
+    "expected_source": "hl_hr_attendance_policy.md",
+    "expected_answer_fact": "已批准年假按OA起止时间标记为已批准休假，不应记为缺勤。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "medium",
+    "reason": "年假同时出现在余额制度和考勤制度，职责是考勤落账。"
+  },
+  {
+    "query": "年假余额和系统不一致应该找谁？",
+    "expected_source": "hl_hr_annual_leave_policy.md",
+    "expected_answer_fact": "提交工龄证明或审批记录，由人力资源部按假期台账核对。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "medium",
+    "reason": "需要区分员工申请入口与人力资源部维护的权威余额台账。"
+  },
+  {
+    "query": "漏打卡能不能直接补成年假？",
+    "expected_source": "hl_hr_attendance_policy.md",
+    "expected_answer_fact": "不能；只有已批准的OA休假单才能同步为休假，漏打卡应走考勤更正。",
+    "category": "misleading keyword",
+    "difficulty": "hard",
+    "reason": "共享年假、考勤、申请词汇，要求回答制度边界而非关键词拼接。"
+  },
+  {
+    "query": "病假超过一天要交什么材料？",
+    "expected_source": "hl_hr_sick_personal_leave_policy.md",
+    "expected_answer_fact": "应提供医疗机构的就诊记录、诊断证明或其他可核验材料。",
+    "category": "numeric fact",
+    "difficulty": "medium",
+    "reason": "病假材料在病假制度和请假操作指引均出现，但专门制度给出连续天数边界。"
+  },
+  {
+    "query": "突发疾病当天没法提前请假怎么办？",
+    "expected_source": "hl_hr_leave_request_guide.md",
+    "expected_answer_fact": "当日上班前通知直属主管，返岗后1个工作日内补录并选择紧急补录。",
+    "category": "semantic synonym",
+    "difficulty": "medium",
+    "reason": "突发、紧急、补录是同义表达，最优来源是操作指引。"
+  },
+  {
+    "query": "普通上下班打车能报销吗？",
+    "expected_source": "hl_finance_daily_expense_policy.md",
+    "expected_answer_fact": "不能；日常上下班出租车、网约车和打车费用不予报销。",
+    "category": "misleading keyword",
+    "difficulty": "hard",
+    "reason": "差旅交通和加班制度也出现出租车，但本问题是日常通勤的反例。"
+  },
+  {
+    "query": "出差在客户现场之间打网约车可以报销吗？",
+    "expected_source": "hl_finance_transport_reimbursement.md",
+    "expected_answer_fact": "可以，在已批准公务行程内提交电子行程单、支付记录和业务说明。",
+    "category": "semantic synonym",
+    "difficulty": "medium",
+    "reason": "网约车、打车、出租车需要归并为差旅交通同义表达。"
+  },
+  {
+    "query": "A类城市普通员工出差住酒店一晚最多多少钱？",
+    "expected_source": "hl_finance_lodging_standard.md",
+    "expected_answer_fact": "每间每晚450元。",
+    "category": "numeric fact",
+    "difficulty": "easy",
+    "reason": "数字事实只应来自住宿标准，不应被差旅总则的泛化住宿描述替代。"
+  },
+  {
+    "query": "没有列入名单的城市住宿按哪个级别？",
+    "expected_source": "hl_finance_lodging_standard.md",
+    "expected_answer_fact": "默认按B类城市处理。",
+    "category": "numeric fact",
+    "difficulty": "medium",
+    "reason": "需要检索住宿标准中的例外规则，而不是只命中城市级别表。"
+  },
+  {
+    "query": "差旅结束后多久必须提交报销？",
+    "expected_source": "hl_finance_travel_policy.md",
+    "expected_answer_fact": "差旅结束后30个自然日内提交。",
+    "category": "numeric fact",
+    "difficulty": "medium",
+    "reason": "30日规则同时在差旅总则和发票制度出现，需要判断问题的差旅语境。"
+  },
+  {
+    "query": "日常办公用品发票多久内报销？",
+    "expected_source": "hl_finance_invoice_voucher_policy.md",
+    "expected_answer_fact": "非差旅日常费用在费用发生后20个自然日内提交。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "hard",
+    "reason": "与差旅30日时限相似，要求识别日常费用语境。"
+  },
+  {
+    "query": "电子发票只发截图可以吗？",
+    "expected_source": "hl_finance_invoice_voucher_policy.md",
+    "expected_answer_fact": "不可以，应上传原始电子发票文件或可验证的文件链接。",
+    "category": "policy boundary",
+    "difficulty": "easy",
+    "reason": "答案依赖凭证格式细节，不能从一般报销规范推断。"
+  },
+  {
+    "query": "加班到22点后打车回家属于差旅吗？",
+    "expected_source": "hl_hr_overtime_comp_time_policy.md",
+    "expected_answer_fact": "这是经批准加班的返程交通例外，不属于普通差旅，但按加班办法并满足凭证要求可报销。",
+    "category": "cross-document",
+    "difficulty": "hard",
+    "reason": "需要结合加班制度的22点条件与差旅交通凭证边界，不能简单回答属于或不属于。"
+  },
+  {
+    "query": "业务招待餐每个人的普通标准是多少？",
+    "expected_source": "hl_finance_entertainment_policy.md",
+    "expected_answer_fact": "普通工作餐标准为每位180元，客户专项接待经确认最高每位250元。",
+    "category": "numeric fact",
+    "difficulty": "easy",
+    "reason": "金额只在业务招待制度中定义，且存在普通与专项两档。"
+  },
+  {
+    "query": "一笔费用超过一万元需要谁审批？",
+    "expected_source": "hl_finance_approval_authority.md",
+    "expected_answer_fact": "超过2000至10000元增加财务复核，超过10000元增加分管副总确认，超过50000元还需总经理最终批准。",
+    "category": "numeric fact",
+    "difficulty": "hard",
+    "reason": "问题落在审批权限表，且边界含区间端点，适合测试数字精度。"
+  },
+  {
+    "query": "出租车发票和差旅申请都有了就一定能报销吗？",
+    "expected_source": "hl_finance_transport_reimbursement.md",
+    "expected_answer_fact": "不一定，还要确认是已批准公务行程并提供出发地、到达地、业务目的和实际乘车时间。",
+    "category": "policy boundary",
+    "difficulty": "hard",
+    "reason": "测试从凭证存在到业务合规之间的条件边界。"
+  },
+  {
+    "query": "账号权限申请一般多久处理？",
+    "expected_source": "hl_it_account_access_policy.md",
+    "expected_answer_fact": "普通权限目标处理时间为2个工作日，高敏感数据权限需双重确认。",
+    "category": "numeric fact",
+    "difficulty": "easy",
+    "reason": "账号、VPN、软件申请都有处理时限，要求选择账号权限文档。"
+  },
+  {
+    "query": "申请了系统权限是不是就自动有VPN？",
+    "expected_source": "hl_it_vpn_remote_work_guide.md",
+    "expected_answer_fact": "不是，VPN账号与普通系统权限独立管理，需要单独提交VPN申请。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "hard",
+    "reason": "同为账号和权限主题，但职责边界在VPN指南中明确。"
+  },
+  {
+    "query": "VPN一次最多连接多长时间？",
+    "expected_source": "hl_it_vpn_remote_work_guide.md",
+    "expected_answer_fact": "单次连接超过8小时会要求重新认证。",
+    "category": "numeric fact",
+    "difficulty": "easy",
+    "reason": "数字事实与账号、密码、远程办公词汇高度相似。"
+  },
+  {
+    "query": "VPN能连上是不是就说明可以远程办公？",
+    "expected_source": "hl_it_vpn_remote_work_guide.md",
+    "expected_answer_fact": "不是，本指南不规定远程办公天数或地点，远程办公须另行取得确认。",
+    "category": "misleading keyword",
+    "difficulty": "hard",
+    "reason": "VPN能力与人事远程办公资格是不同权限边界。"
+  },
+  {
+    "query": "公司密码至少要多少位？",
+    "expected_source": "hl_it_password_security_policy.md",
+    "expected_answer_fact": "不少于12位，并满足至少三类字符要求。",
+    "category": "numeric fact",
+    "difficulty": "easy",
+    "reason": "直接测试密码规范的硬性数字与组合条件。"
+  },
+  {
+    "query": "密码泄露后可以等IT通知再改吗？",
+    "expected_source": "hl_it_password_security_policy.md",
+    "expected_answer_fact": "不可以，应立即修改密码并报告安全事件。",
+    "category": "policy boundary",
+    "difficulty": "medium",
+    "reason": "密码规范和安全事件指南均有处置内容，需要优先回答即时动作。"
+  },
+  {
+    "query": "电脑丢了最晚多久要报告？",
+    "expected_source": "hl_it_security_incident_response.md",
+    "expected_answer_fact": "先电话报告，再在2小时内补充工单。",
+    "category": "numeric fact",
+    "difficulty": "medium",
+    "reason": "设备管理办法有设备安全规则，但事件报告时限在安全事件指南。"
+  },
+  {
+    "query": "忘记密码和发现钓鱼邮件应该走同一个流程吗？",
+    "expected_source": "hl_it_security_incident_response.md",
+    "expected_answer_fact": "普通忘记密码走服务台；如果伴随异常登录或验证码被索取，应升级为安全事件。",
+    "category": "cross-document",
+    "difficulty": "hard",
+    "reason": "需要结合密码规范、VPN支持和安全事件升级边界。"
+  },
+  {
+    "query": "安装一个免费的代码插件还需要申请吗？",
+    "expected_source": "hl_it_software_license_request.md",
+    "expected_answer_fact": "需要；免费软件也要经过安全检查和安装申请。",
+    "category": "misleading keyword",
+    "difficulty": "medium",
+    "reason": "免费、授权、软件安装容易诱导出无需审批的错误结论。"
+  },
+  {
+    "query": "软件安装申请和数据库权限申请是一个工单吗？",
+    "expected_source": "hl_it_software_license_request.md",
+    "expected_answer_fact": "不是，软件安装申请不等于系统权限申请，数据库权限需单独走账号权限流程。",
+    "category": "same-keyword ambiguity",
+    "difficulty": "hard",
+    "reason": "测试软件、账号、权限三个相邻 IT 主题的职责分离。"
+  },
+  {
+    "query": "内网系统的单点登录怎么配置？",
+    "expected_source": "",
+    "expected_answer_fact": "当前 Synthetic Demo Corpus 未提供具体单点登录配置步骤，应明确说明知识库没有该信息。",
+    "category": "no-answer",
+    "difficulty": "hard",
+    "reason": "语料出现企业账号、SSO和VPN，但没有具体SSO配置步骤，测试无答案边界。"
+  },
+  {
+    "query": "华岭科技的股票期权授予比例是多少？",
+    "expected_source": "",
+    "expected_answer_fact": "当前 Synthetic Demo Corpus 未收录股票期权授予比例。",
+    "category": "no-answer",
+    "difficulty": "easy",
+    "reason": "延续现有无答案主题，验证扩容没有把相似福利词误当成股权制度。"
+  },
+  {
+    "query": "员工购房补贴每年有多少？",
+    "expected_source": "",
+    "expected_answer_fact": "当前 Synthetic Demo Corpus 未收录购房补贴标准。",
+    "category": "no-answer",
+    "difficulty": "easy",
+    "reason": "新福利说明只涵盖健康检查、生日福利等，不应编造购房补贴。"
+  },
+  {
+    "query": "出差住宿标准和住宿发票要求分别看哪两篇文档？",
+    "expected_source": "hl_finance_lodging_standard.md;hl_finance_invoice_voucher_policy.md",
+    "expected_answer_fact": "金额和城市级别看国内出差住宿费用标准，凭证和电子发票要求看发票与报销凭证管理办法。",
+    "category": "cross-document",
+    "difficulty": "hard",
+    "reason": "必须把同一住宿问题拆成标准与凭证两个职责来源。"
+  },
+  {
+    "query": "年假天数、请假提前时间、考勤落账分别由谁负责？",
+    "expected_source": "hl_hr_annual_leave_policy.md;hl_hr_leave_request_guide.md;hl_hr_attendance_policy.md",
+    "expected_answer_fact": "年假管理办法负责资格和余额，请休假指引负责申请时间，考勤制度负责已批准休假的考勤记录。",
+    "category": "cross-document",
+    "difficulty": "hard",
+    "reason": "这是同主题不同职责的三文档综合题，检验来源归因和答案边界。"
+  },
+  {
+    "query": "加班打车和日常上下班打车为什么结论不同？",
+    "expected_source": "hl_hr_overtime_comp_time_policy.md;hl_finance_daily_expense_policy.md",
+    "expected_answer_fact": "经批准加班至22点后的返程属于特定例外，普通上下班通勤不予报销。",
+    "category": "cross-document",
+    "difficulty": "hard",
+    "reason": "同义关键词出租车/打车跨 HR 和财务文档，必须解释场景条件。"
+  },
+  {
+    "query": "账号、密码、VPN、终端和软件的问题分别应该找哪类制度？",
+    "expected_source": "hl_it_account_access_policy.md;hl_it_password_security_policy.md;hl_it_vpn_remote_work_guide.md;hl_it_endpoint_device_policy.md;hl_it_software_license_request.md",
+    "expected_answer_fact": "账号权限看账号规范，密码看密码规范，VPN看VPN指南，设备看设备管理，软件看安装授权流程。",
+    "category": "semantic synonym",
+    "difficulty": "hard",
+    "reason": "用主题簇做多来源归因，避免一个泛化IT文档吞掉所有问题。"
+  },
+  {
+    "query": "公司是否保证所有员工都能长期在家办公？",
+    "expected_source": "",
+    "expected_answer_fact": "当前语料没有长期远程办公承诺；VPN指南明确不规定远程办公天数或地点。",
+    "category": "no-answer",
+    "difficulty": "hard",
+    "reason": "测试把VPN技术能力误判为远程办公政策的风险。"
+  }
+]

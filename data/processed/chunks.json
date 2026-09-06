@@ -7,6 +7,559 @@
     "content": "# 银行业务制度样例文档"
   },
   {
+    "id": "bank_hl_finance_approval_authority_001",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 1,
+    "content": "# 费用审批权限说明\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-007  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：差旅、日常费用、招待和其他经营性费用的内部审批。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_002",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 2,
+    "content": "## 1. 金额分级\n\n单笔含税金额按同一业务、同一供应商和同一发生日合并判断，不得通过拆单规避权限。2,000 元（含）以内，由直属主管和部门负责人完成审批；超过 2,000 元至 10,000 元（含），增加财务部复核；超过 10,000 元，增加分管副总确认；超过 50,000 元，须由总经理最终批准。财务复核不替代业务负责人对真实性的确认。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_003",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 3,
+    "content": "## 2. 特殊项目\n\n国内出差申请由部门负责人确认，预计总费用超过 10,000 元时须提前提交财务部预算复核。住宿超出《国内出差住宿费用标准》的，除金额权限外还需要财务部书面例外确认。业务招待超过每人标准的，需在活动前取得财务部与部门负责人共同确认，不能在报销时用一般金额权限补齐理由。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_004",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 4,
+    "content": "## 3. 付款与报销\n\n审批完成后，财务部按照发票、收款信息和合同或订单安排付款。报销单被退回补正时，原审批链仍然有效，但金额、供应商或业务目的发生实质变化的，应重新提交。费用批准不代表发票合规，票据仍按《发票与报销凭证管理办法》单独审核。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_005",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 5,
+    "content": "## 4. 紧急与例外\n\n影响客户交付的紧急采购或现场支出可以由分管副总先确认，但申请人应在 2 个工作日内补齐系统记录和凭证。个人先行支付不自动构成紧急事项。任何例外都要写明业务原因、金额、责任人和补正期限，口头同意不能作为永久授权。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_006",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 6,
+    "content": "## 5. 查询方式\n\n员工判断审批人时，先确定费用类型和同一业务的合并金额，再查看本说明。差旅住宿标准、出租车条件、日常通勤边界和发票时限分别由各专项制度规定；本说明不改变这些业务规则。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_007",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 7,
+    "content": "## 6. 合并金额口径\n\n“同一业务”包括同一客户活动、同一出差行程、同一采购需求或同一供应商的连续订单。员工不能把一趟出差的交通、住宿和餐饮拆成多个低于 2,000 元的单据来降低审批级别；财务部会按业务事实合并判断。不同项目、不同日期且没有共同业务目的的费用，可以分别按各自金额审批，但报销说明必须能解释区分依据。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_008",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 8,
+    "content": "## 7. 费用类型的追加审批\n\n金额权限只决定谁需要在系统中确认，不替代专项制度的条件。住宿超标需要财务部书面例外，招待超过每人标准需要活动前共同确认，飞机和跨城特殊交通需要在差旅申请中说明，日常通勤仍然不得报销。即使单笔金额低于 2,000 元，违反专项边界的支出也不能仅因直属主管批准而付款。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_009",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 9,
+    "content": "## 8. 审批顺序与代理\n\n员工先提交业务申请，再由直属主管确认必要性，随后按金额和费用类型追加部门负责人、财务部、分管副总或总经理。审批人临时休假时，只有系统中已登记的代理人可以处理；聊天消息、口头同意和事后转发的截图不构成权限代理。任何退回补正都应保留原审批意见和操作时间。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_010",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 10,
+    "content": "## 9. 例外审批材料\n\n例外申请至少包括业务影响、标准内方案为何不可行、预计金额、供应商或路线、责任人和补正期限。紧急支出先行确认后，申请人应在 2 个工作日内补齐系统申请、发票和业务证据；未补齐的，财务部可以暂停付款或退回报销。例外只对写明的业务和时间范围有效，不自动适用于后续同类支出。"
+  },
+  {
+    "id": "bank_hl_finance_approval_authority_011",
+    "domain": "bank",
+    "source_file": "hl_finance_approval_authority.md",
+    "chunk_index": 11,
+    "content": "## 10. 复核责任\n\n直属主管负责业务真实性和人员必要性，部门负责人负责部门预算和交接，财务部负责金额、凭证、标准和重复报销，分管副总及总经理负责其权限范围内的重大例外。审批完成不代表报销必然通过，财务仍可因发票不合规、重复支付或业务事实不足退回。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_001",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 1,
+    "content": "# 日常费用报销管理规范\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-006  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：不属于差旅、招待和固定资产采购的日常工作支出。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_002",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 费用范围\n\n日常费用包括办公用品、小额打印、邮寄、经批准的员工工作通讯和办公场地临时支出。费用必须用于公司业务，能够说明发生日期、用途、使用部门和申请人。个人消费、家庭用品、上下班通勤和私人社交支出不属于日常费用。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_003",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 交通边界\n\n员工日常上下班打车、出租车、网约车或顺风车费用不予报销；办公地点与住所之间的固定通勤不因天气、堵车或加班前的个人安排而改变性质。因临时外出办理公司事务产生的交通，需有外出申请、客户或业务地点记录，按实际业务情况判断。已批准加班至 22:00 后的返程交通，按《加班与调休管理办法》处理，不在本条通勤范围内。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_004",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 小额支出与发票\n\n单笔 200 元以内的办公小额支出，员工可先行垫付后报销；仍须提供发票或合规电子凭证、付款记录和用途说明。电子发票不能只上传截图，发票抬头错误或已经用于其他报销单的，财务部将退回。日常费用应在发生后 20 个自然日内提交。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_005",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 采购与重复申请\n\n单项预计超过 500 元的办公用品，应优先通过采购申请，不得连续拆分同一订单。电脑、显示器等预计使用超过一年的设备不适用本规范，应按设备管理流程采购。员工不能同时提交采购付款和个人垫付报销。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_006",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 审批和核查\n\n日常费用先由直属主管确认业务必要性，再按金额提交部门负责人或财务部审批。财务部可以要求补充合同、工单、快递单或收货记录。费用审批金额分级见《费用审批权限说明》，发票和凭证格式见《发票与报销凭证管理办法》。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_007",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 费用分类示例\n\n员工购买打印纸、项目邮寄和经批准的小额办公用品，通常属于日常费用；出差期间产生的酒店、城市间交通和客户现场打车，属于差旅费用；客户工作餐属于业务招待费；电脑、显示器和长期使用设备属于采购或资产流程。分类以业务事实为准，不能为了适用更宽松的限额把差旅或资产支出写成办公用品。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_008",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 临时外出交通\n\n员工从办公地点到银行、客户、供应商或政府服务点办理公司事务，属于可能报销的临时公务交通；应有外出申请、业务地点、任务单或主管确认。办公地点到住所的上下班路线不因中途顺路办理私事而转为公务。多人共同外出时，应由实际付款人提交订单和同行说明，其他人不得重复报销。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_009",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 采购与个人垫付边界\n\n预计超过 500 元、需要持续供货或涉及固定资产的支出，应先走采购申请。员工先行购买后才发现属于采购流程的，应停止重复下单并联系采购部门，不能通过拆单把总额压到小额标准内。供应商直接向公司开票和员工个人垫付不能在同一业务中同时报销。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_010",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 异常和退回\n\n发票日期与实际购买日期不一致、收货地点与部门不符、同一订单出现多个报销人或路线与业务记录不符时，财务部可以退回核查。员工应在 5 个工作日内补充收货记录、工单、外出确认或情况说明；无法说明业务目的的，不能仅凭支付记录获得报销。逾期提交的费用仍须说明发生原因。"
+  },
+  {
+    "id": "bank_hl_finance_daily_expense_policy_011",
+    "domain": "bank",
+    "source_file": "hl_finance_daily_expense_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 跨制度判断\n\n加班至 22:00 后的返程交通按《加班与调休管理办法》处理，不能套用日常通勤禁报规则；出差期间的出租车和网约车按《差旅交通费用报销规范》处理；发票格式和电子文件要求按《发票与报销凭证管理办法》处理。审批人和合并金额按《费用审批权限说明》确定。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_001",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 1,
+    "content": "# 业务招待费管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-005  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：因客户、合作伙伴或项目协作产生的公务招待活动。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_002",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 定义与原则\n\n业务招待费是员工为推进公司业务，经批准邀请外部客户或合作伙伴参加工作餐、工作交流或必要的接待活动发生的合理支出。纯员工聚餐、个人庆祝、家庭消费和与业务无关的礼品不属于业务招待费。活动应遵循事前说明、适度必要、凭证完整和一事一报原则。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_003",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 事前申请\n\n预计超过 3 人参加或单次预计超过 1,000 元的，应在活动前提交招待申请，填写外部单位、参加人员、业务目的、地点和预算。临时客户到访可以由部门负责人即时确认，但应在下一个工作日补录。未经批准的高额消费不得通过拆分餐桌、拆分发票或多人分别报销规避审批。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_004",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 费用标准\n\n工作餐标准为每位参加人 180 元（含税），客户专项接待经部门负责人和财务部共同确认后最高为每位 250 元。标准按实际参加人数计算，酒水、娱乐和私人消费不计入可报销额度。实际发生额低于标准时按实际金额报销，超过标准的部分原则上由申请人承担，除非已有书面例外审批。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_005",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 票据与报销\n\n报销应附发票、菜单或订单、实际参加人员、业务目的和审批编号。发票上只有餐饮总额而没有参加人数的，应在报销说明中补充。餐饮发票不得与同一活动的礼品、交通或日常费用重复提交；凭证时限按照《发票与报销凭证管理办法》执行。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_006",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 与差旅的关系\n\n出差期间因客户拜访产生的工作餐，可以在差旅申请和招待申请均完整的前提下按本办法判断；员工个人餐补不等同于业务招待费。日常上下班打车即使发生在招待日，也应按交通费用规范判断，不能因为存在客户餐饮就自动转为招待支出。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_007",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 参加人员与业务目的\n\n招待申请应列出外部单位、客户或合作伙伴的姓名或岗位、公司内部参加人员、活动地点、业务目的和预计人数。实际参加人数与申请不一致时，员工应在报销说明中说明增减原因；客户临时增加人员不应通过虚构其他参加人补齐标准。只有内部员工参加的生日、团建或部门聚餐，不适用本办法。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_008",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 费用组成与禁止项目\n\n可报销的工作餐应能与业务交流对应，酒水、娱乐项目、私人礼品、现金红包和家庭成员消费不纳入每人标准。包间服务费、平台服务费等是否可报销，以发票和实际业务必要性为准，不能把个人消费并入餐费。费用不得拆成多张发票或由不同员工分别提交以规避 1,000 元申请门槛。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_009",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 临时客户活动\n\n客户临时到访时，员工可以先请部门负责人确认必要性和预计金额，并在下一个工作日补录招待申请。确认人、确认时间和参加人员必须留在系统记录中。只有口头说“客户来了”而没有金额、地点和参加人员的信息，财务部可以退回补充。活动取消后产生的不可退订费用，也要提交取消原因和供应商规则。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_010",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 报销审核重点\n\n财务部重点核对参加人数、每人金额、发票日期、活动地点、业务目的、审批编号和是否与差旅或日常费用重复。出差期间的个人餐补不能与同一餐招待费重复；客户或合作方已经支付的餐费不能再次报销。招待费超过 250 元每人的例外，需要在活动前取得书面确认，事后说明不能自动追认。"
+  },
+  {
+    "id": "bank_hl_finance_entertainment_policy_011",
+    "domain": "bank",
+    "source_file": "hl_finance_entertainment_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 制度关系\n\n招待活动产生的市内公务交通，按《差旅交通费用报销规范》判断；员工上下班打车按《日常费用报销管理规范》判断；发票和电子凭证按《发票与报销凭证管理办法》判断；金额权限和例外确认按《费用审批权限说明》执行。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_001",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 1,
+    "content": "# 发票与报销凭证管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-004  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技员工提交的差旅、招待和日常费用报销。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_002",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 凭证基本要求\n\n报销应提交与真实业务对应的合法有效发票或合规电子凭证，并填写费用日期、金额、用途、参与人或出发到达地、对应申请编号。发票抬头和税务信息应与公司财务资料一致；抬头错误、金额与订单不一致或无法说明业务用途的发票，财务部可以退回更正。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_003",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 电子发票与平台订单\n\n电子发票应上传原始文件或可验证的文件链接，不得只提交截图。网约车、酒店和机票平台订单，应同时提交电子发票与行程单、订单明细或支付记录。员工应确认同一张发票未被其他人或其他报销单使用，系统发现重复票据时会暂缓付款并要求说明。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_004",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 提交期限\n\n差旅类费用原则上在行程结束后 30 个自然日内提交；非差旅日常费用在费用发生后 20 个自然日内提交。因客观原因逾期的，应在报销单中填写逾期原因并由部门负责人确认；逾期本身不自动改变费用是否真实、是否合规的判断。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_005",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 遗失与替代材料\n\n发票遗失时，员工应先联系开票方尝试取得发票或可验证的电子凭证，不得自行制作替代票据。确实无法补开且金额不超过 200 元的，可提交付款记录、业务说明和部门负责人确认，财务部决定是否受理；超过 200 元或涉及住宿、机票的，原则上必须取得原始发票或合规电子凭证。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_006",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 审核与归档\n\n财务审核顺序为：业务真实性、审批完整性、发票有效性、金额标准和是否重复报销。退回的报销单应在 5 个工作日内补正；补正不改变原始发生日期。财务部归档报销单及凭证，员工不得在公共群组传播含有身份证号、银行卡号或完整票据二维码的文件。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_007",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 制度边界\n\n本办法规定凭证管理，不决定住宿上限、出租车是否属于差旅或招待费人均标准。相关判断分别见住宿标准、差旅交通规范和业务招待费办法；审批金额见费用审批权限说明。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_008",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 常见费用的材料组合\n\n住宿费用通常需要发票、订单或结算单、入住人、入住日期和差旅申请编号；飞机或铁路费用需要票据、行程单以及改签或退票记录（如有）；网约车需要电子发票、行程单和支付记录；业务招待需要餐饮发票、参加人员、业务目的和招待申请。材料组合应能相互证明同一笔业务，不是上传越多截图越合规。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_009",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 发票信息与业务信息\n\n发票上的日期、金额、购买方信息应与报销单一致，业务用途、出发到达地或参加人员应在报销单中单独填写。发票没有路线、参加人等业务字段时，员工应通过说明补充，不得修改发票文件。金额相同但业务不同的票据不能合并成一条摘要，多个业务合并付款时应按订单或明细拆分说明。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_010",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 退回、补正与重提\n\n财务退回报销单时，应标记缺失材料、金额异常或业务说明不足的原因。员工在 5 个工作日内补正，原申请编号和发生日期保持不变；如果供应商、金额、业务目的发生实质变化，必须撤回原单并重新走审批。补交材料不得用新的发票替代原始事实，也不得在补正过程中重复提交同一费用。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_011",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 逾期和不可取得凭证\n\n差旅费用超过 30 个自然日、非差旅费用超过 20 个自然日，员工仍应先提交真实费用和逾期原因，由部门负责人确认是否受理。发票遗失应联系开票方补开或取得可验证电子凭证；付款截图、聊天承诺和自行制作的收据不能替代合规凭证。超过 200 元的住宿、机票等费用，原则上必须取得原始发票或合规电子凭证。"
+  },
+  {
+    "id": "bank_hl_finance_invoice_voucher_policy_012",
+    "domain": "bank",
+    "source_file": "hl_finance_invoice_voucher_policy.md",
+    "chunk_index": 12,
+    "content": "## 11. 信息安全与归档\n\n员工上传电子发票和行程单前，应遮挡与审核无关的个人敏感信息，但不得遮挡验证二维码、金额、日期等必要字段。公共群组不得传播完整银行卡号、身份证号或票据二维码。财务部将报销单、审批记录和凭证按业务编号归档，重复票据或疑似伪造材料进入异常核查流程。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_001",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 1,
+    "content": "# 国内出差住宿费用标准\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-002  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：经批准的中国境内出差住宿支出。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_002",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 2,
+    "content": "## 1. 标准适用方式\n\n住宿标准按目的地城市级别和员工职级确定，按每间每晚计算。员工应优先选择协议酒店；没有协议酒店时，可在不超过上限的范围内选择普通商务酒店。住宿发票上的城市、入住日期和金额应与差旅申请一致，超出上限的部分原则上由个人承担。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_003",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 3,
+    "content": "## 2. 金额表\n\n| 目的地级别 | 普通员工每晚上限 | 部门负责人及以上每晚上限 |\n|---|---:|---:|\n| A 类城市 | 450 元 | 550 元 |\n| B 类城市 | 350 元 | 450 元 |\n| C 类及其他城市 | 280 元 | 380 元 |\n\nA 类城市包括出差申请中列明的超大城市和财务部年度名单中的重点城市；未列入名单的城市默认按 B 类处理，财务部可在年度名单中调整。员工不得将同一晚拆成多张订单以规避上限。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_004",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 4,
+    "content": "## 3. 特殊情形\n\n因大型展会、自然灾害或协议酒店全部满房导致标准内无法预订的，应在预订前取得部门负责人和财务部的书面例外确认。仅因个人偏好选择高价酒店不属于特殊情形。多人出差时，原则上两名同性员工合住；因安全、健康或客户接待需要单住的，应在申请中写明原因。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_005",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 5,
+    "content": "## 4. 报销材料\n\n住宿报销至少应提供合法有效发票、订单或结算单、入住人姓名、入住和退房日期，以及对应的差旅申请编号。平台订单取消产生的个人手续费不纳入住宿费用。住宿由客户或合作方承担的，员工不得再次提交同一晚住宿报销。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_006",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 6,
+    "content": "## 5. 与其他制度的边界\n\n本标准只回答“国内出差住宿上限”。住宿是否属于可报销差旅，先按《员工差旅管理办法》确认；发票形式和 30 个自然日的报销期限，按《发票与报销凭证管理办法》执行；超标例外审批路径，按《费用审批权限说明》执行。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_007",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 7,
+    "content": "## 6. 城市级别与入住日期\n\n城市级别以入住地为准，不以员工常驻地、客户总部所在地或酒店集团所在地为准。跨城市出差时，每一晚按实际入住城市分别套用标准；同一城市连续住宿不得通过更换酒店、拆分订单或让同行人员分别开票规避上限。入住和退房日期必须与差旅申请覆盖日期一致，提前入住或延迟退房应说明业务原因。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_008",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 8,
+    "content": "## 7. 预订、取消与改期\n\n员工应优先使用协议酒店或公司预订平台。因客户时间变化需要改期时，应保留原订单取消记录和新订单；符合平台规则的必要取消费可以提交说明。因个人提前到达、延长旅游、选择景观房或升级套房产生的费用，不因酒店提供发票而自动可报销。酒店免费早餐包含在房价内的，不另行拆报餐费。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_009",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 9,
+    "content": "## 8. 合住与单住例外\n\n两名同性员工在同一地点同时出差时，原则上合住一间标准房；不同日期、不同客户现场或作息明显冲突的，可以分别入住，但应在申请中说明。因健康、安全、岗位保密或客户接待需要单住的，由部门负责人在差旅申请中确认。单住确认只解决合住要求，不会提高每晚金额上限。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_010",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 10,
+    "content": "## 9. 超标审核示例\n\n例如，B 类城市普通员工每晚标准为 350 元，实际房费 390 元且没有书面例外确认时，原则上只能按 350 元进入公司报销，差额由个人承担；如果因大型展会无标准内房源，员工在预订前取得财务部例外确认，报销单需同时关联该确认记录。例外确认不能追溯覆盖完全私人原因的超标。"
+  },
+  {
+    "id": "bank_hl_finance_lodging_standard_011",
+    "domain": "bank",
+    "source_file": "hl_finance_lodging_standard.md",
+    "chunk_index": 11,
+    "content": "## 10. 共同审核要素\n\n财务审核住宿时同时核对城市级别、员工职级、入住晚数、发票金额、订单入住人和差旅申请编号。客户或合作方代付的住宿不应再次报销；员工只提交支付截图而没有发票或可验证电子凭证的，应按凭证制度退回。住宿标准不包含餐费、洗衣、娱乐和私人消费。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_001",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 1,
+    "content": "# 差旅交通费用报销规范\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-003  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：经批准国内出差期间发生的公务交通。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_002",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 2,
+    "content": "## 1. 可报销交通\n\n城市间交通优先选择高铁或其他经济舱位；因行程确需乘坐飞机的，应在差旅申请中说明并取得审批。出差目的地的市内公务交通可以使用公共交通、出租车、网约车或平台打车，但必须填写出发地、到达地、业务目的和实际乘车时间。交通方式的选择不以“出租车”或“打车”名称自动决定是否可报销，关键是是否发生在已批准的公务行程中。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_003",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 3,
+    "content": "## 2. 出租车与网约车条件\n\n以下情形可以纳入差旅交通报销：从机场、车站到客户现场；多个客户现场之间移动；携带不便于公共交通运输的项目设备；公共交通停运或存在安全风险且经直属主管确认。网约车电子行程单与支付记录应一并提交；出租车应提供发票或合规电子凭证。单次超过 300 元的市内打车，需要在报销说明中列出业务原因。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_004",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 4,
+    "content": "## 3. 不予报销情形\n\n常驻办公地与住所之间的日常上下班打车、个人购物、私人聚餐、因个人提前或延后行程产生的绕行，以及没有差旅申请编号的交通支出，不适用本规范。即使票据上写有“出租车”“快车”或“网约车”，也不能将日常通勤转化为差旅费用。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_005",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 5,
+    "content": "## 4. 加班返程例外\n\n员工在常驻办公地因已批准的加班于 22:00 或更晚结束，可以按《加班与调休管理办法》申请返程交通；这类费用不占用差旅交通额度，但仍需提交发票、行程单和加班申请编号。未批准加班或普通晚间聚餐产生的打车费用不适用本例外。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_006",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 6,
+    "content": "## 5. 报销时限与边界\n\n差旅结束后 30 个自然日内提交交通费用，发票要求见《发票与报销凭证管理办法》。金额较大或路线异常的，财务部可以要求补充客户会议记录、项目工单等业务证明。费用审批金额分级见《费用审批权限说明》。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_007",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 7,
+    "content": "## 6. 城市间交通方式\n\n铁路是城市间交通的首选；短途且无合适铁路班次时可以使用长途客运。飞机仅适用于铁路耗时明显影响业务、目的地无合理铁路覆盖或经审批的紧急任务，原则上经济舱。因个人偏好购买高等级座位、增加私人经停或选择明显绕行路线的差额不予报销。公司不支持将员工私家车里程、油费和停车费直接套用本规范；项目若确需私车公用，应取得财务部专项批准。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_008",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 8,
+    "content": "## 7. 市内交通路线\n\n机场或高铁站到酒店、酒店到客户现场、客户现场之间的移动属于典型公务路线；酒店到私人餐厅、娱乐场所、住所或旅游点的移动不属于公务路线。多人同行时可以合并一张网约车订单，但报销说明应列出同行人员和业务目的。跨城市叫车、跨城顺风车或司机等待费，除非在申请中提前说明并获批准，否则按异常费用处理。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_009",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 9,
+    "content": "## 8. 夜间与停运例外\n\n公共交通停运、携带设备、存在安全风险或经批准的夜间客户现场，可以使用出租车或网约车。夜间例外应记录结束时间、上车地点和安全原因；只有“感觉方便”不构成例外。常驻办公地加班至 22:00 或更晚的返程，按《加班与调休管理办法》处理，不与出差交通重复报销。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_010",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 10,
+    "content": "## 9. 变更、取消与证明\n\n航班取消、铁路停运、客户临时更换现场时，员工应保留取消通知、改签记录、平台行程单和新路线说明。必要的改签费或退票费可以随原差旅申请提交；因个人提前返程、延长旅游或私人绕路产生的费用不予报销。路线与申请不一致时，财务部可以要求客户会议记录、工单或部门负责人确认。"
+  },
+  {
+    "id": "bank_hl_finance_transport_reimbursement_011",
+    "domain": "bank",
+    "source_file": "hl_finance_transport_reimbursement.md",
+    "chunk_index": 11,
+    "content": "## 10. 凭证与重复报销检查\n\n出租车应提供发票或合规电子凭证，网约车应提供电子行程单、支付记录和订单号，公共交通应提供票据或平台记录。不能只提交手机截图，也不能将同一订单拆分给多个员工报销。财务部会核对出行日期、付款人、申请编号和同行信息；缺少业务目的、时间明显与出差不符或无法解释的支出会被退回。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_001",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 1,
+    "content": "# 员工差旅管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-FIN-001  \n归口部门：财务部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：因公司业务需要到常驻办公地以外地点出差的员工。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_002",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 差旅定义与原则\n\n出差是员工因客户拜访、项目实施、培训或经批准的其他业务，离开常驻办公地并产生交通或住宿支出的活动。出差应遵循事前审批、标准内支出、真实凭证和及时报销原则。日常上下班、个人通勤、私人行程不属于差旅，即使使用了出租车或网约车，也不能据此适用差旅标准。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_003",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 申请流程\n\n员工应在出发前至少 2 个工作日提交差旅申请，填写目的地、出发和返回日期、业务目的、同行人员及预计费用。紧急客户现场问题可由部门负责人先行确认，但员工应在出发后 1 个工作日内补齐申请。未经批准的出差费用原则上不予报销，确因紧急任务发生的，由总经理在报销时做例外审批。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_004",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 费用范围\n\n可报销项目通常包括往返交通、出差期间的城市内公务交通、住宿和符合规定的餐补。住宿上限见《国内出差住宿费用标准》，交通方式与出租车、打车、网约车的使用条件见《差旅交通费用报销规范》，发票和报销时限见《发票与报销凭证管理办法》。本办法只确定差旅场景，不重复各项金额。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_005",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 行程变化\n\n员工因业务延长行程，应在原返回日期前更新申请；因个人原因绕行、延长或改变目的地的额外支出不纳入公司报销。出差结束后，员工应在 30 个自然日内提交报销，超过期限须说明原因并由财务部确认是否受理。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_006",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 跨文档判断\n\n“出差期间住宿多少钱”需要结合本办法确认是否属于差旅，再查住宿标准中的城市级别和员工级别；“日常上下班打车能否报销”不应引用差旅交通规则，而应按日常费用规范判断。财务审批权限另见《费用审批权限说明》。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_007",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 附则\n\n差旅活动不得通过拆分订单、虚构同行人员或重复提交凭证规避审批。涉及外币、境外出差或客户代付的事项，须等待财务部发布专项通知。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_008",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 交通方式选择\n\n城市间出行原则上优先选择普通铁路或高铁；预计铁路总耗时明显影响客户交付、无合适班次或携带经批准设备时，可以在申请中说明原因后选择飞机。飞机原则上购买经济舱，改签、退票和行李费用需保留承运方记录。长途客运只在没有合理铁路班次或目的地无铁路覆盖时使用，并应提交购票凭证和行程说明。公司不支持员工使用私家车开展跨城市差旅，确有项目需要时须由财务部另行书面批准。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_009",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 市内公务交通场景\n\n机场或高铁站到酒店、酒店到客户现场、多个客户现场之间移动，属于可能报销的市内公务交通；酒店到私人餐厅、住宿地点到住所、个人购物或旅游景点之间移动，属于个人活动。客户现场临时变更时，员工应在行程结束后补充新的地点、客户名称或项目工单，不能只凭一张支付记录说明路线。差旅期间的普通步行或公共交通无需逐笔说明，但仍要留存可核验支付记录。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_010",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 行程变化与异常\n\n航班取消、铁路停运或客户临时改期时，员工应优先选择合理替代方案并保留取消通知、改签记录和新行程。因天气等不可控原因产生的必要退票费，可以随原差旅单一并报销；因个人提前返程、延长旅游或选择更高等级交通产生的差额不予报销。紧急现场任务可以先由部门负责人确认，事后在 1 个工作日内补齐差旅申请。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_011",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 报销信息清单\n\n每张交通费用至少写明出差申请编号、日期、出发地、到达地、业务目的和同行或客户信息。出租车、打车和网约车还需提交行程单或发票、支付记录及异常说明；高铁和飞机需提交票据、行程单或改签凭证。报销单中的路线与差旅申请不一致时，财务部可以要求客户会议记录、项目工单或部门负责人确认。"
+  },
+  {
+    "id": "bank_hl_finance_travel_policy_012",
+    "domain": "bank",
+    "source_file": "hl_finance_travel_policy.md",
+    "chunk_index": 12,
+    "content": "## 11. 制度关系与责任\n\n住宿金额按《国内出差住宿费用标准》执行，票据、电子发票和超期处理按《发票与报销凭证管理办法》执行，招待活动按《业务招待费管理办法》判断，金额审批按《费用审批权限说明》执行。员工负责业务事实和材料完整，直属主管负责行程必要性，财务部负责标准、凭证和重复报销审核。"
+  },
+  {
     "id": "bank_leave_policy_001",
     "domain": "bank",
     "source_file": "leave_policy.md",
@@ -21,193 +574,466 @@
     "content": "# 企业 HR / 行政制度样例文档"
   },
   {
-    "id": "hr_leave_policy_real_sample_001",
+    "id": "hr_hl_hr_annual_leave_policy_001",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 1,
-    "content": "# 员工休假管理制度（模拟样例）"
+    "content": "# 员工年假管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-001  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技有限公司与公司建立劳动关系的全职员工。"
   },
   {
-    "id": "hr_leave_policy_real_sample_002",
+    "id": "hr_hl_hr_annual_leave_policy_002",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 2,
-    "content": "## 一、目的\n\n为加强公司员工出勤及休假管理，规范员工请休假作业，加强劳动纪律，确保工作之绩效，提高工作效率，根据国家有关政策法规，结合公司实际情况，制定本办法。"
+    "content": "## 1. 目的\n\n本办法用于说明年假资格、年度天数、入职当年折算、余额结转和不享受年假的情形。年假天数的核算由人力资源部统一完成；员工如何提交申请，另见《员工请休假操作指引》。"
   },
   {
-    "id": "hr_leave_policy_real_sample_003",
+    "id": "hr_hl_hr_annual_leave_policy_003",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 3,
-    "content": "## 二、适用范围\n\n本办法适用于示例公司全体员工。"
+    "content": "## 2. 年假资格与天数\n\n员工累计工作年限以员工提交并经人力资源部核验的工作证明为依据。累计工作已满 1 年不满 10 年的，年度年假为 5 个工作日；已满 10 年不满 20 年的，年度年假为 10 个工作日；已满 20 年的，年度年假为 15 个工作日。入职时未提供可核验工作年限材料的，暂按在华岭科技工作满 1 年后开始享受年假。\n\n年度年假不因部门不同而改变。员工调岗、跨部门协作或短期出差，不影响已经核定的年假资格。兼职、实习和外部顾问不纳入本办法，相关休息安排由合作协议约定。"
   },
   {
-    "id": "hr_leave_policy_real_sample_004",
+    "id": "hr_hl_hr_annual_leave_policy_004",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 4,
-    "content": "## 三、工作时间及考勤管理\n\n公司根据员工在公司的工作岗位、工作性质以及自身经营需要，实行标准工时工作制度。\n\n### (一) 标准工时工作制\n\n每周一至周五，上午 9:30~12:30，下午 13:30~18:30。"
+    "content": "## 3. 入职当年折算\n\n员工在自然年度中途入职的，当年年假按“全年应休天数 ÷ 365 × 入职次日至 12 月 31 日的日历日数”折算。折算结果不足 1 个完整工作日的部分不计入年假余额；折算后按完整工作日记入系统。人力资源部在收到有效工龄证明后重新核定当年余额，并在 5 个工作日内更新假期台账。"
   },
   {
-    "id": "hr_leave_policy_real_sample_005",
+    "id": "hr_hl_hr_annual_leave_policy_005",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 5,
-    "content": "### (二) 考勤管理\n\n1、公司实行全员打卡考勤管理\n\n(1) 员工上下班必须本人打卡。未打卡的同事，每月有一次补卡机会，需要在 OA 上提交补卡申请，并附上监控画面的截图（可至人事部调取），如未提供上述材料，审批将不予通过，并扣除半天工资。超过一次以上的漏打卡，均按扣除半天工资处理。补卡的审批流程为：补卡员工 → 上级主管 → 部门负责人 → 总经理 → 人事部负责人。\n\n(2) 考勤机未能识别指纹，需于当日发邮件给直属主管确认，情况属实的并抄送人事行政部报备，及时重新录入考勤。\n\n(3) 工作日外出办公、出差而无法准时至公司打卡者，需提前一天提出公出或出差申请。人事行政部考勤管理负责人有权对员工的异常情况进行询问并记录。"
+    "content": "## 4. 结转与失效\n\n当年度已核定而未休的年假，原则上应在次年 3 月 31 日前休完。公司因业务安排书面通知员工无法在期限内休假的，由人力资源部在台账中标记延期状态并另行通知截止日期。员工已获安排但因个人原因未休的，逾期余额在系统中自动失效，不折现、不转入福利积分。\n\n年假余额以人力资源部假期台账为准。个人在系统中看到的余额与台账不一致时，应在 5 个工作日内提交工龄证明或审批记录，不能仅凭口头说明调整余额。"
   },
   {
-    "id": "hr_leave_policy_real_sample_006",
+    "id": "hr_hl_hr_annual_leave_policy_006",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 6,
-    "content": "### (三) 加班规定\n\n1、公司提倡和鼓励每个员工在工作时间内有效地完成工作，尽量避免超时工作。员工如因未能及时完成工作任务而自行延长工作时间，员工不得要求公司对其所延长的工作时间支付任何报酬或安排调休。\n\n2、因工作需要，公司安排相关部门加班，工作日于 20 点后离开办公室可申请加班晚餐，加班至 22:00 可打车回家，公司给予报销。加班起计时间为 20 点，以整小时为单位申请，需要上级领导审批通过后，方可生效计入加班。"
+    "content": "## 5. 不享受当年年假的情形\n\n员工在当年度累计事假达到 15 个工作日以上，或者在适用法律允许的范围内因累计病假达到公司核定阈值的，当年法定年假资格需由人力资源部重新核验。已经休用的年假不自动冲回，是否影响下一年度资格由人力资源部依据完整台账书面确认。"
   },
   {
-    "id": "hr_leave_policy_real_sample_007",
+    "id": "hr_hl_hr_annual_leave_policy_007",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 7,
-    "content": "### (四) 迟到、早退\n\n1、迟到，指非因公在规定的上班时间之后到达公司；\n\n2、早退，指非因公在规定的下班时间之前离开公司；\n\n3、上班时间外出分为因公外出和私自外出，因公外出时需事先向直接主管说明事由及去向，并在 OA 上填写《外出申请》，得到批准后方可外出。工作时间未经领导批准离开工作岗位者，为私自外出、擅离职守，一经核实，给予旷工处理。\n\n4、迟到早退处理方法：迟到/早退罚款 200 元/次，迟到/早退 1 小时（含）当月可有 1 次不做惩罚（包含堵车等因素），如地铁故障需提交地铁致歉信。迟到/早退 1 小时以上 3 小时（含）以内者，按照旷工半天处理，迟到 3 小时以上者，按照按旷工一天处理。"
+    "content": "## 6. 附则\n\n本办法只规定年假核算与余额管理。审批路径、提前申请时间和证明材料以《员工请休假操作指引》为准；考勤系统如何记录已批准年假，以《员工考勤管理制度》为准。涉及适用法律法规的事项，具体执行不得低于适用法律法规要求。"
   },
   {
-    "id": "hr_leave_policy_real_sample_008",
+    "id": "hr_hl_hr_annual_leave_policy_008",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 8,
-    "content": "### (五) 旷工\n\n1、旷工，指无故不上班或请示未获批准擅自不到岗、离开岗位的行为。\n\n2、以下情况将被视为旷工，给予相应的处理并扣除未出勤工资：\n\n(1) 员工未经批准而擅自休假；\n\n(2) 拒不接受领导分配的工作或擅自离开工作岗位者；\n\n(3) 因迟到或早退一小时以上为半天旷工，三小时以上为一天旷工者；\n\n(4) 提供虚假证明或伪造、变造、涂改休假证明后骗取批准休假者；\n\n(5) 外出归来 2 个工作日内仍然未填写相应表单者；\n\n(6) 员工休病假 2 周以上，若经三甲级以上医院鉴定可复岗上班，公司有权要求员工到指定医院复诊，复诊的时间按公假处理。若员工不能去指定医院检查，则公司有权以书面形式告之员工须在公司指定时间上班，否则按旷工处理。\n\n3、当月累计旷工 3 日（含）或全年累计旷工 5 日（含），该情况属于严重违反公司规章制度，公司将依据《劳动合同法》第 39 条对该员工无条件解除劳动合同，并不支付任何补偿金及赔偿金。"
+    "content": "## 7. 核算口径\n\n“累计工作年限”与“在华岭科技服务年限”是两个不同口径。前者用于确定 5 天、10 天或 15 天的年度标准，后者用于系统识别入职时间和入职当年折算。员工从其他单位转入时，应提交可验证的工作年限证明；只有劳动合同首页、个人口头说明或未经核验的截图，不能直接改变年度标准。人力资源部完成核验后，在假期台账中记录核验日期和依据类型。"
   },
   {
-    "id": "hr_leave_policy_real_sample_009",
+    "id": "hr_hl_hr_annual_leave_policy_009",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 9,
-    "content": "## 四、假期规定\n\n### (一) 法定节假日、休息日\n\n法定节假日、休息日按照国家相关规定执行，无须履行请假手续。具体放假日期以公司发布的休假公告为准。"
+    "content": "## 8. 年度核算流程\n\n每年 1 月，人力资源部先导入在职名单，再按工龄证明核定年度天数，最后将已批准但尚未抵扣的年假申请与余额进行对账。员工在核算完成后发现错误，应通过人事工单提交员工编号、入职日期、工龄证明和相关申请编号。人力资源部原则上在 5 个工作日内给出核对结果；不得由直属主管直接修改年假余额。"
   },
   {
-    "id": "hr_leave_policy_real_sample_010",
+    "id": "hr_hl_hr_annual_leave_policy_010",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 10,
-    "content": "### (二) 病假及医疗期\n\n病假是指员工患病或非因工负伤经医疗保险指定医院诊断需要治疗或休息，经单位批准的病休时间。\n\n1、门诊病假\n\n(1) 每个员工每月享有 1 天的无医院证明的病假，按病假扣除工资，超过 1 天的病假需提供医院就诊单据包括挂号单、处方、缴费清单、诊断证明、病历本复印件等有效证明，否则将按事假处理。\n\n(2) 两周以上的病假，如公司认为需要有权要求请假人到公司另行的医院复诊，复诊的时间按公假处理。若员工不能去指定医院检查，则公司有权以书面形式告之员工须在公司指定时间上班，否则按旷工处理。\n\n(3) 任何虚报、伪造病假证明等行为，一经查实，将依据公司规定解除劳动关系的处理，并不支付任何补偿金及赔偿金。\n\n(4) 凡一年累计休病假在 15 个工作日以上者，将影响年度调薪。\n\n2、医疗期\n\n医疗期是指企业职工因患病或非因工负伤停止工作治病休息不得解除劳动合同的时期。医疗期内员工应按病假程序申请休假。员工医疗期可根据其工龄及在本公司的服务年限，享受三至二十四个月的医疗期。"
+    "content": "## 9. 申请冲突与余额冻结\n\n年假申请提交后，系统会暂时冻结对应日期的预计余额；申请被退回、撤回或拒绝时，冻结自动解除。已经批准的申请在开始前撤回，需由员工在 OA 完成撤回并经直属主管确认；开始后更正不得通过重新申请同一日期的方式处理。余额不足时，系统不应允许员工把超出部分默认为事假，员工需要重新选择假期类型并完成审批。"
   },
   {
-    "id": "hr_leave_policy_real_sample_011",
+    "id": "hr_hl_hr_annual_leave_policy_011",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_annual_leave_policy.md",
     "chunk_index": 11,
-    "content": "医疗期：实际工作年限十年以下的，在本单位工作年限五年以下的为 3 个月；五年以上的为 6 个月。实际工作年限十年以上的，在本单位工作年限五年以下的为 6 个月，五年以上十年以下的为 9 个月；十年以上十五年以下为 12 个月；十五年以上二十年以下的为 18 个月；二十年以上的为 24 个月。\n\n自员工病休之日开始计算，在规定的时间内累计病休时间达到规定医疗期时限的视为医疗期满。连续病休的，其节假日按病休日计算。医疗期满，员工与公司的劳动关系按《劳动法》相关规定实施。"
+    "content": "## 10. 结转示例与审计\n\n例如，员工累计工作 12 年，年度标准为 10 个工作日；员工 6 月入职且没有完整年度资格时，按入职当年的日历日数折算，系统只记入完整工作日。示例用于说明核算顺序，不替代人力资源部按实际日期计算。每年 4 月，人力资源部导出上一年度结转、失效和延期记录，检查是否存在重复扣减、未审批抵扣或员工离职后仍可使用的余额。"
   },
   {
-    "id": "hr_leave_policy_real_sample_012",
+    "id": "hr_hl_hr_attendance_policy_001",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 1,
+    "content": "# 员工考勤管理制度\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-004  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技有限公司实行标准工时的员工。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_002",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 工作时间与打卡\n\n标准工作日为周一至周五，工作时间为 9:30—12:30、13:30—18:30。员工应在规定时间完成上班和下班打卡，午休期间不要求打卡。因出差、外出办公或经批准的休假无法打卡的，系统应存在对应的出差单或休假单；只有在业务记录和考勤记录能够对应时，才按正常出勤处理。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_003",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 年假等休假如何记账\n\n已批准的年假、病假、事假等以 OA 休假单的起止时间为准，由考勤系统按工作日扣减或标记。年假属于已批准的休假，不应被记录为缺勤；但员工只提交申请、尚未完成审批时，考勤系统不会自动消除缺卡或缺勤。年假余额的核算规则见《员工年假管理办法》，本制度只说明考勤落账。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_004",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 漏打卡与更正\n\n员工发现漏打卡，应在发现后的 2 个工作日内发起“考勤更正”，填写日期、原因和实际工作地点，并由直属主管确认。系统每月允许 2 次普通更正；超过次数的更正需由部门负责人说明原因，人力资源部复核。设备故障、系统中断等公共原因由人力资源部统一发布处理通知，不要求每名员工重复提交同一证明。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_005",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 迟到、早退与外出\n\n迟到是晚于 9:30 到岗，早退是早于 18:30 离岗。因公外出应先取得直属主管确认并在 OA 登记；未经批准离岗的，不能用事后补写外出说明替代审批。交通延误等个人原因应在备注中如实说明，是否构成异常由人力资源部结合记录判断，不以单一打卡时间自动推导纪律结论。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_006",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 月度核对\n\n每月最后一个工作日，员工应在系统核对打卡、出差和休假记录。员工在工资核算日前提交更正的，原则上纳入当月处理；逾期提交的，转入下月核对。直属主管负责确认实际出勤，人力资源部负责维护归档记录并保留变更痕迹。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_007",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 附则\n\n本制度关注出勤记录，不决定年假可休天数，也不替代加班审批。加班起算、调休期限和加班交通安排以《加班与调休管理办法》为准。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_008",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 出差、公出与远程场景\n\n员工因客户现场、培训或项目实施离开办公地点，应有已批准的出差单或公出申请；考勤系统根据单据覆盖的日期和地点标记公务出勤。出差单只说明公务行程，不会自动批准年假或调休。远程办公是否获批由人力资源部和直属主管另行确认，VPN 连接记录也不能单独作为出勤证明。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_009",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 异常分类\n\n考勤异常分为漏打卡、迟到、早退、未经批准离岗和单据覆盖不足五类。漏打卡走考勤更正；迟到或早退需要员工说明实际到离岗时间；未经批准离岗由直属主管核实；出差或休假单覆盖不足的，应补充或更正原业务单据。人力资源部不把所有异常都直接归为旷工，而是先核对系统、业务和审批记录。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_010",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 月度结算与证据\n\n每月最后一个工作日，系统生成员工考勤预览。员工应核对上下班打卡、休假、出差、公出和加班记录，并在工资核算日前提交更正。考勤更正至少附实际工作地点、业务单号或主管确认；聊天记录可以作为辅助说明，但不能替代正式审批单。超过核算日提交的更正转入下月，历史记录保留原始值和修改人。"
+  },
+  {
+    "id": "hr_hl_hr_attendance_policy_011",
+    "domain": "hr",
+    "source_file": "hl_hr_attendance_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 请假后的记录边界\n\n已批准的半天年假应按申请时段标记，不能因为上午有打卡就把下午休假冲销；休假期间临时处理工作，也不应自行将休假改成加班。员工提前返岗或延长休假时，必须更新 OA 单据后再由人力资源部同步考勤。年假余额属于《员工年假管理办法》的职责，本制度只负责把批准结果准确记入出勤记录。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_001",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 1,
+    "content": "# 员工福利与假期说明\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-006  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技有限公司正式员工及符合条件的试用期员工。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_002",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 2,
+    "content": "## 1. 说明\n\n本说明汇总常见福利与假期类型，便于员工了解适用范围。它不替代《员工年假管理办法》《员工病假与事假管理办法》以及 OA 中的审批规则；具体天数、余额和审批结果以对应制度与系统记录为准。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_003",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 3,
+    "content": "## 2. 常见带薪假期\n\n婚假为 10 个工作日，应在登记完成后 12 个月内使用，并附可核验的登记证明。直系亲属去世时可申请 3 个工作日的丧假，非直系近亲可申请 1 个工作日；丧假原则上应在事实发生后 10 个工作日内连续使用。产假、护理假和哺乳安排按适用法律法规及人力资源部确认的材料执行，不在本说明中重复列出全部特殊情形。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_004",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 4,
+    "content": "## 3. 员工福利\n\n公司每年为正式员工安排一次健康检查，具体批次由人力资源部发布；员工可在福利平台查看预约时间。员工生日当月可领取一次生日礼品或等值福利积分，未在当月领取的原则上不跨月补发。办公区提供基础饮水和节日慰问品，具体发放对象以当次通知为准。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_005",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 5,
+    "content": "## 4. 申请与查询\n\n婚假、丧假等假期仍需在 OA 发起申请，审批完成前不得直接按带薪假离岗。年假余额、病假材料和考勤记录分别按对应制度处理。员工如对福利资格有疑问，应向人力资源部提交员工编号和事项类型，不要在公开群组发送证件照片。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_006",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 6,
+    "content": "## 5. 变更与边界\n\n福利项目可能因年度预算和适用人群调整，变更以人力资源部正式公告为准。本说明不承诺固定现金金额，也不构成对适用法律法规之外福利的永久承诺。具体执行不得低于适用法律法规要求。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_007",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 7,
+    "content": "## 6. 福利登记与领取\n\n员工入职或转正后，人力资源部根据员工状态生成福利资格清单；员工应在福利平台核对姓名、部门和可领取项目。生日礼品、健康检查和节日慰问品分别由不同批次发放，未出现在某一批次名单中时，应提交人事工单核对，不应在公共群组上传身份证明。福利平台显示“待领取”不等于已经完成领取，员工需要保留领取确认。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_008",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 8,
+    "content": "## 7. 假期证明与福利说明的边界\n\n婚假、丧假、产假和护理假虽然属于假期福利，但天数、证明材料和审批路径不由本说明单独决定。员工申请婚假时，应按《员工请休假操作指引》发起申请，并由人力资源部核验登记证明；年假资格和余额按《员工年假管理办法》执行。福利说明只提供类型和查询入口，不应被用来推导尚未公布的现金金额。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_009",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 9,
+    "content": "## 8. 离职、转岗和年度变更\n\n员工离职前未领取的生日礼品或当批次福利，原则上不折现；已经预约的健康检查由人力资源部根据服务状态决定是否保留。转岗不自动取消已获得的年度福利，但部门专属活动以新部门的正式通知为准。年度预算、供应商或发放批次变化时，人力资源部应在福利平台更新有效日期和适用人群。"
+  },
+  {
+    "id": "hr_hl_hr_benefits_holidays_guide_010",
+    "domain": "hr",
+    "source_file": "hl_hr_benefits_holidays_guide.md",
+    "chunk_index": 10,
+    "content": "## 9. 咨询与信息保护\n\n福利咨询应说明项目名称、发生月份和员工编号后四位，便于人力资源部定位记录。员工不得要求同事公开他人的健康检查、婚姻、亲属或领取信息。发现福利平台账号被他人使用，应同时通知人力资源部和信息技术部，不要继续使用他人账号查询。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_001",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 1,
+    "content": "# 员工请休假操作指引\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-003  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技有限公司员工在 OA 假勤模块发起休假申请的操作。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_002",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 2,
+    "content": "## 1. 操作入口\n\n员工进入 OA 的“假勤管理—请假申请”，选择假期类型、开始和结束时间、联系人、工作交接人及必要的证明材料。系统提交前会显示预计占用的工作日数和当前可用年假余额；余额展示仅供申请校验，年假资格与最终余额以人力资源部台账为准。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_003",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 3,
+    "content": "## 2. 提前申请要求\n\n连续请假 3 个工作日及以上的，应至少提前 10 个工作日提交申请；不足 3 个工作日的，原则上应在休假开始前 1 个工作日提交。年假申请还应避开已公布的关键交付窗口，确需在关键窗口休假的，应在备注中说明替代安排。提前提交不代表已经批准，员工必须等待审批完成后再休假。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_004",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 4,
+    "content": "## 3. 审批路径\n\n普通员工的申请先到直属主管；连续请假超过 2 个工作日或涉及关键岗位交接的，再由部门负责人确认。病假、婚假等需要证明的类型由人力资源部做材料核验。部门负责人可在系统中退回补充信息，但不得通过聊天消息代替系统审批。审批完成后，OA 自动生成假勤记录并同步考勤系统。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_005",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 5,
+    "content": "## 4. 紧急申请与撤回\n\n遇到突发疾病或紧急事件无法提前提交时，员工应在当日上班前通知直属主管，并在返岗后 1 个工作日内补录申请。补录时须选择“紧急补录”并填写实际通知时间。尚未开始的申请可以由员工撤回；已经开始或已经同步考勤的申请，应由直属主管发起更正，人力资源部复核后处理。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_006",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 6,
+    "content": "## 5. 材料清单\n\n病假连续超过 1 个工作日，通常附诊断证明或就诊记录；婚假附结婚登记证明；产假或护理假附人力资源部列明的生育相关证明；丧假附能够说明亲属关系或事实的材料。材料不完整时，审批人应退回并写明缺项，不应在备注中复制敏感证件号码。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_007",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 7,
+    "content": "## 6. 查询与责任\n\n员工可以在“我的假勤”查看申请状态、已批准天数和年假余额。发现余额或考勤记录不一致，应提交工单并附申请编号。未经批准自行休假、重复提交同一日期或隐瞒交接风险，按考勤和员工行为规范处理。具体年假天数见《员工年假管理办法》，考勤落账见《员工考勤管理制度》。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_008",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 8,
+    "content": "## 7. 表单字段与选择规则\n\n开始、结束时间应填写实际离岗和预计返岗时间，半天假应选择上午或下午时段，不能用全天申请再在备注中说明半天。系统按工作日扣减年假，法定节假日和休息日不计入工作日余额。员工同时申请年假和病假时，应先撤回重复日期的申请，再按实际情况保留一种假期类型。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_009",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 9,
+    "content": "## 8. 审批层级示例\n\n连续请假 2 个工作日以内，直属主管完成业务交接确认后进入部门记录；超过 2 个工作日，增加部门负责人审批；病假、婚假、产假等需要证明的类型，审批完成后由人力资源部核验材料。部门负责人本人请假不走自己的审批链，应提交至其上级负责人。审批人出差或休假时，系统指定代理人可以处理，但代理授权必须在系统中可查。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_010",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 10,
+    "content": "## 9. 审批结果与通知\n\n审批人可以批准、退回补充或拒绝。退回时应说明缺少的字段或材料，员工补正后重新提交，原提交时间保留在审计记录中。拒绝后员工若仍需休假，应以新的日期或新的事由重新发起申请，不得把被拒单据截图当作批准凭证。OA 审批完成后会通知员工、直属主管和人力资源部，员工应以系统状态为准。"
+  },
+  {
+    "id": "hr_hl_hr_leave_request_guide_011",
+    "domain": "hr",
+    "source_file": "hl_hr_leave_request_guide.md",
+    "chunk_index": 11,
+    "content": "## 10. 返岗、撤回与跨文档关系\n\n员工提前返岗，应在当天更新实际返岗时间并通知直属主管；需要延长休假，应在原结束日期前提交变更。年假天数和结转规则见《员工年假管理办法》，已批准的休假如何反映在考勤中见《员工考勤管理制度》，病假材料边界见《员工病假与事假管理办法》。本指引不改变这些专项制度的金额、资格和劳动关系规则。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_001",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 1,
+    "content": "# 加班与调休管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-005  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：因业务需要经批准延长工作时间的员工。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_002",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 加班定义\n\n加班是员工因公司安排或经授权的业务需要，在标准工作时间之外完成工作。员工自行延长工作时间、未形成工作成果或未履行审批的，不自动认定为加班。法定节假日和休息日的安排，除遵守本办法外，还应遵守适用法律法规要求。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_003",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 申请与审批\n\n预计需要加班的，员工应在加班开始前通过 OA 提交申请，说明项目、预计时段、工作内容和交付结果。紧急生产故障可以先由值班负责人通过电话确认，但应在下一个工作日 12:00 前补录。部门负责人确认业务必要性，人力资源部按月核对加班记录；审批通过前的申请状态不等于可使用调休。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_004",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 调休规则\n\n工作日加班按系统记录的完整小时累计，累计满 4 小时可申请半天调休，累计满 8 小时可申请 1 天调休。调休应在加班发生后 60 个自然日内使用，逾期需由部门负责人说明原因并由人力资源部重新确认。调休申请仍须走 OA 审批，不能直接从考勤中扣除。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_005",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 晚餐与返程交通\n\n工作日加班超过 20:00 的员工，可按公司餐补标准申请晚餐；加班结束时间达到 22:00 或更晚，且员工从办公地点直接返程的，可以使用出租车或网约车并按实际发生额报销。该安排仅针对经批准的加班返程，不适用于普通上下班、私人聚餐或未经批准的加班。交通报销还应符合《差旅交通费用报销规范》的凭证要求。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_006",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 记录与争议处理\n\n员工应保留任务单、代码提交或值班记录等工作证据。系统记录与实际工作时间不一致时，在月度核对期内提交更正。人力资源部只根据批准记录、考勤数据和业务证据综合确认，不以聊天截图单独认定加班。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_007",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 附则\n\n本办法只定义公司内部申请、调休和加班返程交通的管理方式。薪资支付、法定节假日工作等事项按照适用法律法规和公司另行通知执行。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_008",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 加班时段与有效工时\n\n加班申请应分别填写开始时间、结束时间和实际完成工作。用餐、个人休息、通勤和等待私人事务的时间不计入有效加班时长；跨越 20:00 的申请不能自动把 20:00 前的正常工作延长段认定为加班。系统按完整小时累计，未满 1 小时的零散时间由人力资源部在月度核对时按公司规则处理。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_009",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 休息日和法定节假日\n\n休息日加班应说明是否可以安排调休以及预计使用期限；法定节假日加班需由部门负责人和人力资源部确认安排方式。员工不能把休息日个人自愿处理邮件、参加非强制活动或通勤时间提交为加班。涉及法定节假日的薪资和补休事项，具体执行不得低于适用法律法规要求。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_010",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 任务证据与补录\n\n加班申请至少关联一个项目任务、故障单、值班表或客户交付记录。紧急生产故障先由值班负责人确认后，员工在下一个工作日 12:00 前补录；补录时应写明开始和结束时间、确认人及未能事前申请的原因。只有聊天中一句“今晚辛苦了”而没有具体时段和任务的，不足以完成补录。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_011",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 调休使用与变更\n\n调休申请应引用原加班单编号，系统校验可用小时和是否超过 60 个自然日。员工申请半天调休时，日期、时段和交接人必须明确；部门负责人可以因交付窗口退回并建议新日期，但不能直接删除已确认的加班记录。加班单被撤回后，关联调休和加班返程交通也应一并重新核对。"
+  },
+  {
+    "id": "hr_hl_hr_overtime_comp_time_policy_012",
+    "domain": "hr",
+    "source_file": "hl_hr_overtime_comp_time_policy.md",
     "chunk_index": 12,
-    "content": "### (三) 婚假\n\n1、按国家规定，满足国家婚姻法规定标准年龄的，可享有婚假 10 天（含周末）遇法定节假日续延。\n\n2、婚假应在结婚登记日起一年内一次性休完，进入公司时已办理结婚登记者，不再享有婚假。\n\n3、员工离职时，未休的婚假视为本人自愿放弃。\n\n4、员工转正后可享受婚假。"
+    "content": "## 11. 交通边界\n\n加班至 22:00 或更晚的返程交通，只限从办公地点直接回住所或登记的安全下车点；先去聚餐、娱乐场所或私人地点后产生的费用不适用例外。员工应提交出租车发票或网约车电子行程单、加班单编号和结束时间。差旅期间的市内公务交通不适用本条，应按《差旅交通费用报销规范》处理。"
   },
   {
-    "id": "hr_leave_policy_real_sample_013",
+    "id": "hr_hl_hr_sick_personal_leave_policy_001",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 13,
-    "content": "### (四) 生育假\n\n1、产检假\n\n符合国家计划生育规定怀孕的女员工，可享有孕期产检假。申请产检假时需提供医院相关证明复印件。怀孕期间上班的女员工按医疗机构的要求进行孕期检查的，自怀孕起至 28 周每个月 1 天；28 周至 36 周每月 2 天，从第 36 周起，每月 4 天，视为出勤。女员工在怀孕期间因身体不适，不能坚持工作的，凭医院检查及医疗证明，经本部门负责人和人力资源部批准，方可休假，休假期间按病假处理；产检假按月休假，不可累计使用，未休的视为自动放弃，不给予补偿。\n\n2、产假\n\n符合国家计划生育规定的女员工可享有在原产假 98 天（日历日）基础上增加 30 天，其中产前休息十五天（日历日）；多胞胎生育的，每增加一胎增加产假十五天（日历日）；难产者，增加产假十五天（日历日）。怀孕 28 周以上终止妊娠的，享受正常生育产假 90 天（日历日）。申请产假需提供医院的相关证明，且不能分开使用。产假期间工资根据当地生育保险规定发放。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 1,
+    "content": "# 员工病假与事假管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-HR-002  \n归口部门：人力资源部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：华岭科技有限公司全职员工的病假、事假申请与记录。"
   },
   {
-    "id": "hr_leave_policy_real_sample_014",
+    "id": "hr_hl_hr_sick_personal_leave_policy_002",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 14,
-    "content": "天（日历日）；难产者，增加产假十五天（日历日）。怀孕 28 周以上终止妊娠的，享受正常生育产假 90 天（日历日）。申请产假需提供医院的相关证明，且不能分开使用。产假期间工资根据当地生育保险规定发放。社保公积金个人承担部分根据当地生育津贴发放情况从员工工资中扣除或由员工交费至公司，如因个人原因未及时缴费至公司而影响社保公积金的缴纳、生育津贴的申报，由员工本人承担全部责任。因个人原因需要提前休假，依据情况可申请病假或事假。产假期满后如因个人原因申请延长休假，需在产假结束前 7 天提出申请，经部门负责人、总经理、人力资源部批准后，方可休假，延期休假按事假计算，最多不超过 1 个月。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 目的与定义\n\n病假是员工因疾病或非因工负伤，需要停止工作休息并经公司批准的休假；事假是员工因个人事务申请、经批准后暂时离岗的休假。两类假期都必须在系统中形成申请记录，未获批准而不到岗的，不得以补录假期替代考勤异常处理。"
   },
   {
-    "id": "hr_leave_policy_real_sample_015",
+    "id": "hr_hl_hr_sick_personal_leave_policy_003",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 15,
-    "content": "3、哺乳假\n\n女员工从生育当日起，直至婴儿一周岁，称为哺乳期。女员工产假后恢复工作，每天享有一小时的哺乳假，直至孩子满一周岁。多胞胎生育的，每多哺乳一个婴儿，每次哺乳时间增加三十分钟。当日不休，自行作废。原则上不允许集中休哺乳假。\n\n4、计划生育假\n\n符合计划生育条例规定的女员工自然流产或做节育手术，可依据医院诊断证明申请相应的计划生育假。已婚女员工怀孕不满 4 个月流产时，根据医生的意见，给予 15 天至 30 天的计划生育假；怀孕满 4 个月以上流产时，给予 45 天计划生育假；进行计划生育手术的，根据医生的诊断证明，给予以日历计 7 天至 14 天的计划生育假。具体事宜以现行国家法律法规为准。\n\n5、护理假\n\n男员工在婴儿出生后可申请护理假，男员工护理假为 10 天（含周末）遇到法定节假日续延。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 病假材料与时限\n\n员工申请 1 个工作日以内的病假，应在上班前向直属主管报备，并在恢复工作后 1 个工作日内补交系统申请。连续病假超过 1 个工作日的，应提供医疗机构出具的就诊记录、诊断证明或其他能够说明休息必要性的材料；材料可以是合规电子凭证，但必须清晰可核验。人力资源部可对材料进行形式核验，不要求员工提交与休假无关的完整病历内容。\n\n连续病假超过 10 个工作日的，员工应在系统中更新预计返岗日期；预计日期变化时，在原预计返岗日前更新。员工不能按要求提供有效材料的，相关日期可能按事假处理；伪造材料或重复使用同一凭证的，进入纪律调查流程。"
   },
   {
-    "id": "hr_leave_policy_real_sample_016",
+    "id": "hr_hl_hr_sick_personal_leave_policy_004",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 16,
-    "content": "### (五) 丧假\n\n员工的直系亲属（配偶、子女、父母、配偶的父母）不幸去世，可申请带薪丧假三天（工作日）；非直系亲属（本人及配偶的嫡亲兄弟姐妹、祖父母、外祖父母），带薪丧假为一天（工作日），丧假需亲属去世一周内连续休完。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 事假规则\n\n事假原则上应说明事由、起止日期和工作交接人。事假期间不计为出勤，薪资按公司薪资规则和适用法律法规处理。连续事假超过 5 个工作日的，直属主管应确认交接计划，部门负责人完成审批后方可生效。未获批准的事假不得自行开始。"
   },
   {
-    "id": "hr_leave_policy_real_sample_017",
+    "id": "hr_hl_hr_sick_personal_leave_policy_005",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 17,
-    "content": "### (六) 事假\n\n1、任何原因申请的事假，如未被批准而实行则视为旷工。\n\n2、凡一年累计休事假在 10 个工作日以上或连续事假 5 天者，将影响年度调薪和晋升资格。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 突发情况\n\n突发疾病或紧急家庭事务导致无法提前发起申请时，员工应在当日上班时间前通过公司通讯工具通知直属主管，并在返回工作后的 1 个工作日内完成补申请。通知不等于批准；主管应在系统中确认实际休假日期，必要时要求补充证明。"
   },
   {
-    "id": "hr_leave_policy_real_sample_018",
+    "id": "hr_hl_hr_sick_personal_leave_policy_006",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 18,
-    "content": "### (七) 工伤假\n\n员工因工负伤，对工伤申报必须在遭受伤害的 24 小时内向人事行政部提出申请，否则因此造成无法申报的损失由员工承担。经劳动行政部门认定属工伤范围的，凭工伤认定书及医疗证明，可休工伤假。工伤期医疗报销待遇和工伤假薪资待遇，按当地工伤保险条例的规定执行。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 与年假、考勤的关系\n\n病假、事假不能自动转换为年假。员工希望改用年假时，必须在未结束的申请上重新选择假期类型并获得原审批链确认。考勤系统只接收已批准的休假单，具体打卡异常、迟到和返岗记录按照《员工考勤管理制度》处理。"
   },
   {
-    "id": "hr_leave_policy_real_sample_019",
+    "id": "hr_hl_hr_sick_personal_leave_policy_007",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 19,
-    "content": "### (八) 公假\n\n凡符合下述规定的，凭有效证明给予带薪公假：\n\n1、兵役报名需要；\n\n2、司法作证需要；\n\n3、选举需要；\n\n4、公司要求的复诊需要；\n\n5、用于调档、办理社保手续 1 天；\n\n6、其他依政府法令应给予公假的。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 附则\n\n人力资源部按月汇总病假与事假天数，用于假期台账和必要的管理分析；未经授权的人员不得查看证明材料正文。涉及医疗期、薪资和劳动关系的事项，具体执行不得低于适用法律法规要求。"
   },
   {
-    "id": "hr_leave_policy_real_sample_020",
+    "id": "hr_hl_hr_sick_personal_leave_policy_008",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 20,
-    "content": "### (九) 年休假\n\n公司根据经营的具体情况及员工整体休假安排，并考虑员工本人意愿，统筹安排员工休年休假。员工也可根据公司规定申请休年休假。员工应当向公司提交加入本公司之前的工作年限证明并服从公司的年休假安排。\n\n1、员工根据国家规定，职工累计工作已满 1 年不满 10 年的，年休假 5 天；已满 10 年不满 20 年的，年休假 10 天；已满 20 年的，年休假 15 天。员工申请年假时，需提供社保缴费记录单或可验证的工作证明等相关材料。如未提供有效的工龄证明，则在本公司工作满 1 年开始享受年假。\n\n2、人事行政部于每年年初根据员工的服务时间和年假标准核算员工当年度应休的年假天数。员工入职时，当年的年假天数=当年年假应休天数/365 天×员工入职后日期到 12 月 31 日的日历日数，折算后不足 1 整天的部分不享受年休假。\n\n3、当年年假可延长至次年三月底前休完，公司安排但届时因本人原因未休完的假期视为自动放弃处理。\n\n4、员工休年假需配合部门的工作和业务安排，并提起休假申请，经部门负责人相应权限审批后方可休假。\n\n5、年假的享受方式有下列两种："
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 材料核验层级\n\n病假 1 个工作日以内，重点核对员工是否按时通知和补录；连续 2 至 10 个工作日，重点核对就诊记录、诊断证明或其他可验证材料与休假日期是否一致；连续超过 10 个工作日，除上述材料外还应更新预计返岗日期。材料可以遮挡与休假判断无关的隐私字段，但不能遮挡姓名、日期、医疗机构或能够判断休息必要性的核心内容。"
   },
   {
-    "id": "hr_leave_policy_real_sample_021",
+    "id": "hr_hl_hr_sick_personal_leave_policy_009",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 21,
-    "content": "底前休完，公司安排但届时因本人原因未休完的假期视为自动放弃处理。\n\n4、员工休年假需配合部门的工作和业务安排，并提起休假申请，经部门负责人相应权限审批后方可休假。\n\n5、年假的享受方式有下列两种：\n\n(1) 由员工申请，公司批准；"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 返岗与延长\n\n员工提前返岗时，应在 OA 中结束原申请并由直属主管确认实际返岗日期；员工需要延长病假时，应在原结束日期前更新申请并补充新的预计返岗日期。没有完成系统更正的，考勤系统可能仍按原申请日期记账，员工应在月度考勤核对期内提出修正。病假结束后继续缺勤而没有新申请的，不会自动延长原病假。"
   },
   {
-    "id": "hr_leave_policy_real_sample_022",
+    "id": "hr_hl_hr_sick_personal_leave_policy_010",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 22,
-    "content": "(2) 公司和部门负责人可根据业务情况安排员工休年假。\n\n6、不享受年休假的情形\n\n员工有下列情形之一的，不享受当年的法定年休假：\n\n(1) 员工请事假累计 15 天以上且公司按照规定不扣工资的；\n\n(2) 累计工作满 1 年不满 10 年的员工，请病假累计 2 个月以上的；\n\n(3) 累计工作满 10 年不满 20 年的员工，请病假累计 3 个月以上的；\n\n(4) 累计工作满 20 年以上的员工，请病假累计 4 个月以上的。\n\n员工已享受当年的年休假，年度内又出现上述规定情形之一的，不享受下一年度法定年休假。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 事假交接与撤回\n\n事假申请应列明工作交接人、待办事项和可联系范围，但不得要求员工在休假期间持续工作。尚未审批的事假可以补充说明或撤回；已批准的事假需要改期时，应先撤回原申请，再提交新的日期，不得在原单据上直接覆盖历史记录。连续超过 5 个工作日的事假，部门负责人应确认交接风险后再审批。"
   },
   {
-    "id": "hr_leave_policy_real_sample_023",
+    "id": "hr_hl_hr_sick_personal_leave_policy_011",
     "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 23,
-    "content": "## 五、假期工资计算\n\n| 假期类型 | 工资计算方式 |\n|---------|-------------|\n| 年假工资 | 按正常出勤结算工资 |\n| 公假工资 | 按正常出勤结算工资 |\n| 婚丧假工资 | 按正常出勤结算工资 |\n| 护理假 | 按正常出勤结算工资 |\n| 事假工资 | 员工事假期间不发放工资 |\n| 产假工资 | 根据当地社保政策，发放生育津贴或者发放基本工资（产假后报销生育津贴多退少补） |\n| 孕期检查假、哺乳假、计划生育假工资 | 按国家相关规定执行 |\n| 旷工 | 扣除三日工资 |\n| 工伤停工留薪期间工资 | 在规定的假期内享受工伤鉴定日期前十二个月的平均工资 |\n| 病假工资 | 一年内连续或累计休病假 1~30 天，按员工本人劳动合同约定工资标准的 70% 支付；31~90 天，按 20% 支付；低于当地最低工资标准 80% 的，按最低工资标准 80% 支付；超过 90 天的，按当地当年最低工资的 80% 支付 |\n| 产假、孕期检查假、哺乳假、计划生育假、护理假、公假 | 逾期未休者视为本人放弃，无任何经济补偿 |"
-  },
-  {
-    "id": "hr_leave_policy_real_sample_024",
-    "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 24,
-    "content": "## 六、请假规定\n\n员工休假（法定节假日、休息日除外）应提交请假申请，并在需要时提交有资质的机构提供的相关证明（如病假），经上级领导批准并报人力资源部备案后方可休假，未履行请假程序的按旷工处理。\n\n### (一) 请假申请\n\n不论何种假期，员工请假必须按要求提前申报请假流程并附上相关证明，经直接主管核准予以生效。如遇突发情况确需请假但又无法事先提出申请的，应在当天上班前短信通知直接主管并在休假结束后当天补办请假手续。如需连续请假三天（含三天）以上，应提前十个工作日申请。"
-  },
-  {
-    "id": "hr_leave_policy_real_sample_025",
-    "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 25,
-    "content": "### (二) 请假审批权限\n\n公司各部门负责人请假均需总裁批准，其它员工请假均需经直接上级或部门经理批准后，并按请假天数及请假类别审批如下：\n\n| 请假类别 | 部门负责人 | CEO | 人力资源 |\n|---------|-----------|-----|---------|\n| 病假 | 1 天（含）以内 | 2 天（含）以上 | 报备、核实、处理意见 |\n| 事假 | 1 天（含）以内 | 2 天（含）以上 | 报备、核实、处理意见 |\n| 年假（含特别休假） | 1 天（含）以内 | 2 天（含）以上 | 报备、核实、处理意见 |\n| 其它假 | 1 天（含）以内 | 2 天（含）以上 | 报备、核实、处理意见 |"
-  },
-  {
-    "id": "hr_leave_policy_real_sample_026",
-    "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 26,
-    "content": "### (三) 请假资料提供对照表\n\n| 请假类别 | 资料 1 | 资料 2 | 资料 3 |\n|---------|--------|--------|--------|\n| 病假 | 病历本复印件 | 缴费清单 | 病假证明 |\n| 婚假 | 结婚证复印件 | | |\n| 产假 | 结婚证复印件 | 出生证明复印件 | 医院出院证明 |\n| 产检假 | 产检证明复印件 | | |\n| 哺乳假 | 出生证明复印件 | | |\n| 陪产假 | 结婚证复印件 | 出生证明复印件 | |\n| 计划生育假 | 医院诊断证明复印件 | | |\n| 丧假 | 死亡证明或销户户口本复印件 | | |\n| 公假 | 结合申请理由，由人力资源部门判断 | | |"
-  },
-  {
-    "id": "hr_leave_policy_real_sample_027",
-    "domain": "hr",
-    "source_file": "leave_policy_real_sample.md",
-    "chunk_index": 27,
-    "content": "## 七、附则\n\n(一) 本管理办法所有规定自 2020 年 12 月 1 日起生效执行，公司之前颁布的、公告的有关规定与本管理办法规定不一致之处，以本法为准；\n\n(二) 如遇战争、恶劣自然灾害或其它突发事件，造成不能上班或打卡延误或漏打卡等情况，可根据当地政府或公司临时规定和通知执行。\n\n(三) 如果实施本办法的外部或内部条件出现重大变化，公司保留根据情况变化修订或调整本办法的权利。"
+    "source_file": "hl_hr_sick_personal_leave_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 异常与纪律边界\n\n病假证明无法核验、同一凭证被重复使用或材料日期明显晚于休假日期时，人力资源部可以暂缓确认并要求员工说明。员工在核验完成前不得把异常日期自行改为年假或补休；是否按事假处理、是否进入纪律流程，由人力资源部依据完整事实书面确认。"
   },
   {
     "id": "hr_onboarding_001",
@@ -222,6 +1048,468 @@
     "source_file": "README.md",
     "chunk_index": 1,
     "content": "\\# IT 运维知识库样例文档"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_001",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 1,
+    "content": "# 企业账号与权限申请规范\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-001  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：需要访问华岭科技内部信息系统的员工、实习生和经批准的外部协作人员。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_002",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 账号生命周期\n\n员工账号由人力资源入职信息触发创建，离职和长期停职信息触发停用。账号必须绑定唯一员工身份，不得共用个人账号。外部协作人员使用有期限的访客账号，期限由业务负责人提出，信息技术部批准；项目结束后应立即停用。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_003",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 权限申请\n\n员工进入 IT 服务台的“账号与权限”目录，选择系统、角色、所需期限和业务理由，填写直属主管和系统负责人。普通权限目标处理时间为 2 个工作日，高敏感数据权限需要系统负责人和信息安全岗双重确认。申请人不能只写“工作需要”，应说明需要查看或操作的具体业务范围。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_004",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 最小权限与复核\n\n系统负责人按最小权限原则授予只读、编辑或管理员角色。管理员权限应设置结束日期，原则上不超过 30 天；到期需要继续使用时重新申请。每季度由系统负责人复核成员列表，发现转岗、离职或长期不用的权限应在 1 个工作日内提交回收。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_005",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 账号异常\n\n发现账号被他人使用、权限异常增加或登录地点异常时，员工应立即停止操作并通过安全事件渠道报告。不得自行删除日志或借用同事账号继续工作。信息技术部可以临时冻结账号，完成身份核验后再恢复。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_006",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 边界说明\n\n账号申请不等于 VPN 开通，VPN 访问还需遵守《VPN 与远程办公使用指南》；密码保管和泄露处理遵守《员工密码安全规范》。权限审批记录是审计依据，聊天记录不能代替服务台工单。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_007",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 角色与权限等级\n\n系统权限至少分为只读、业务编辑和管理员三类。只读权限用于查询已经授权的数据范围；编辑权限允许在业务系统中新增或修改记录；管理员权限可以配置角色、导出数据或改变系统设置。申请人应选择能够完成任务的最低等级，不能因为“以后可能用到”一次申请全部权限。敏感数据系统还应填写数据字段和使用期限。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_008",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 入职、转岗与离职\n\n入职账号由人力资源信息触发创建，但具体系统权限仍由直属主管和系统负责人确认。员工转岗时，原部门应在 1 个工作日内提交原权限回收，新部门再提交新角色申请；系统不得仅凭部门变更自动保留全部旧权限。离职或合同结束时，账号先停用，再由 IT 处理共享资料、设备和令牌，业务负责人负责确认未完成任务的交接。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_009",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 临时和紧急权限\n\n生产故障、客户现场或安全处置需要临时管理员权限时，申请人应填写任务编号、开始和结束时间、具体操作范围和回收责任人。临时权限原则上不超过 30 天，到期自动失效；需要延长必须重新申请。紧急授权可以先由值班负责人和系统负责人双人确认，但应在下一个工作日补齐服务台记录和操作日志。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_010",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 权限复核与撤销\n\n每季度系统负责人导出成员、角色、最后使用时间和到期日期，逐项确认是否仍有业务必要。连续 60 天未使用的高风险权限应优先回收；员工主动提出不再需要时，IT 在 1 个工作日内处理。账号冻结、密码重置和 VPN 断开不等于所有系统权限已回收，撤销结果应在工单中分别记录。"
+  },
+  {
+    "id": "it_hl_it_account_access_policy_011",
+    "domain": "it",
+    "source_file": "hl_it_account_access_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 审计边界\n\n权限审批单、授权变更记录、操作日志和回收记录组成审计链。员工不得通过共享账号绕过审批，也不得要求 IT 直接在后台修改角色而不生成工单。密码要求见《员工密码安全规范》，终端条件见《办公电脑与设备管理办法》，软件安装仍需走《软件安装与授权申请流程》。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_001",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 1,
+    "content": "# 办公电脑与设备管理办法\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-004  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：公司配发的电脑、移动设备、显示器和可移动存储介质。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_002",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 领用与登记\n\n新员工在入职时领取设备，IT 服务台记录资产编号、型号、序列号、领用人和交付日期。员工应在 2 个工作日内检查屏幕、键盘、电源和系统账号，发现问题通过工单反馈。设备只能由登记人员使用，临时借用须在资产系统中登记归还日期。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_003",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 安全配置\n\n公司电脑必须启用磁盘加密、屏幕自动锁定和终端防护软件，员工不得关闭安全策略或安装来历不明的驱动。离开座位超过 10 分钟应锁定屏幕，办公电脑不得交给家人或访客使用。移动设备丢失时，应在 30 分钟内向 IT 和安全事件渠道报告。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_004",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 数据与外设\n\n业务文件应保存在批准的企业存储中，不得长期只保存在本地桌面。未经批准不得使用个人 U 盘、个人网盘或私人邮箱传输公司数据；确需使用移动存储时，应申请加密介质并记录文件范围。打印含敏感信息的材料应立即取走并按保密要求销毁。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_005",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 维修与更换\n\n设备故障先提交 IT 工单，不得自行拆机或安装破解工具。IT 判断为硬件故障后安排维修或更换，员工在交付前应按指引备份工作文件并退出个人账号。未经 IT 确认的第三方维修费用不纳入公司报销。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_006",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 离职与调岗\n\n离职或长期外派前，员工应归还设备、配件和介质，IT 检查资产状态并回收本地缓存。转岗时是否更换设备由 IT 根据新岗位需求决定，不以员工自行安装软件或修改权限作为依据。账号停用和权限回收遵守账号与权限规范。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_007",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 外带和远程使用\n\n员工携带电脑出差或在批准的远程地点使用时，应使用公司包和防盗锁，避免在公共场所打开含敏感数据的文件。设备离开办公区超过 24 小时，应在资产系统中登记外带地点和预计归还日期。VPN 只能从已登记设备连接，不能把公司电脑借给家人或访客，也不能以个人设备替代资产登记。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_008",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 丢失、损坏与现场处置\n\n设备丢失、被盗或怀疑被他人解锁时，员工应在 30 分钟内先电话报告 IT 和安全事件渠道，并提供最后使用时间、地点、资产编号和是否已连接 VPN。不要自行远程删除日志、联系陌生人取回设备或继续使用关联账号。IT 根据风险冻结会话、远程锁定或安排数据保护，安全事件结论另行记录。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_009",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 维修、借用与数据清理\n\n设备送修前，员工应按 IT 指引备份企业文件、退出个人账号并确认本地缓存范围。借用设备由 IT 设定归还日期和临时账号，借用到期未归还时系统提醒资产负责人。报废、转交或长期维修的设备，IT 应完成数据清理并记录方式；员工不得自行格式化带走公司硬盘或移动介质。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_010",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 外设和打印材料\n\n未经批准的 U 盘、移动硬盘和手机数据线不得接入办公电脑。确需使用移动介质时，应使用 IT 发放的加密设备，登记资产编号、文件范围和归还时间。打印敏感文件应在打印机旁领取，废页放入指定回收箱，不得把含客户或员工信息的纸张当普通垃圾处理。"
+  },
+  {
+    "id": "it_hl_it_endpoint_device_policy_011",
+    "domain": "it",
+    "source_file": "hl_it_endpoint_device_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 设备与软件、权限的关系\n\n设备领用不代表自动获得数据库或代码仓库权限，账号与角色仍按权限规范审批；设备上安装软件需按软件授权流程处理；密码和 VPN 配置不得写在设备标签或便签上。IT 资产记录、权限工单、软件授权和安全事件记录应能互相引用，但不能用一份记录替代其他控制。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_001",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 1,
+    "content": "# 员工密码安全规范\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-003  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：所有企业账号、VPN 账号和系统服务账号的使用者。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_002",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 2,
+    "content": "## 1. 创建要求\n\n企业密码长度不少于 12 位，至少包含大写字母、小写字母、数字和特殊字符中的 3 类，不得使用姓名、员工编号、手机号、连续键盘字符或常见词组。不同系统必须使用不同密码；密码管理器生成的随机密码可以作为合规密码。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_003",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 3,
+    "content": "## 2. 保存与共享\n\n密码只能保存在公司批准的密码管理器或系统提供的安全凭据库中，不得写在便签、聊天记录、代码仓库或未加密文档里。任何人都不得向 IT 支持人员口头或文字提供密码；需要协助时，使用一次性重置链接或临时授权流程。共享账号如因系统限制而存在，必须由系统负责人登记，不得使用个人密码轮换。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_004",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 4,
+    "content": "## 3. 修改与锁定\n\n员工怀疑密码泄露、设备丢失或收到异常登录提醒时，应立即修改密码并报告安全事件，不必等待月度检查。连续 5 次输入错误会触发账号锁定，员工应使用自助重置或联系服务台完成身份核验，不得让同事代为登录。高权限账号每 90 天至少复核一次密码状态。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_005",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 5,
+    "content": "## 4. 钓鱼与验证码\n\n收到要求输入密码、验证码或下载未知附件的邮件和消息时，应通过官方门户核验来源。信息技术部不会通过私聊索取现有密码。若已经输入密码或验证码，应立即断开可疑会话、修改密码并在 30 分钟内报告。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_006",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 6,
+    "content": "## 5. 与其他制度的关系\n\n密码安全不等于权限审批；新增系统权限仍需提交账号与权限申请。VPN 连接需要密码和一次性验证码，但 VPN 的开通、连接时长和故障处理以《VPN 与远程办公使用指南》为准。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_007",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 7,
+    "content": "## 6. 重置流程\n\n员工忘记密码时，应从企业门户进入自助重置，使用已登记的二次认证方式完成身份核验。无法自助重置时，向 IT 服务台提交账号标识、设备资产编号和可联系信息，IT 通过回拨或现场核验确认身份后发放一次性重置链接。服务台不会要求员工把当前密码、验证码或完整密钥写在工单中。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_008",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 8,
+    "content": "## 7. 高权限和服务账号\n\n管理员账号应与日常办公账号分离，不能用管理员账号收发普通邮件或浏览未知链接。服务账号由系统负责人登记用途、负责人、密码保管位置和轮换周期，员工不得把服务账号当作个人账号使用。高权限账号每 90 天至少复核一次，负责人变更或项目结束时应立即轮换并回收旧凭据。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_009",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 9,
+    "content": "## 8. 公共设备与远程场景\n\n公共电脑、共享会议室设备和未经 IT 登记的终端不得输入企业密码。员工在家或出差使用公司电脑时，应锁定屏幕、避免浏览器保存密码，并确认 VPN 客户端和终端防护处于正常状态。连接 VPN 不会降低密码要求，也不能把密码复制到私人密码管理器或个人云盘。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_010",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 10,
+    "content": "## 9. 泄露处置\n\n怀疑密码泄露时，第一步是停止可疑操作并立即修改密码，第二步是注销其他会话，第三步是在 30 分钟内报告安全事件。若同时收到验证码索取、异常登录或文件外传提示，应按《信息安全事件报告与处理指南》升级。修改密码后不能删除可疑邮件或清理终端日志，证据应交给 IT 分析。"
+  },
+  {
+    "id": "it_hl_it_password_security_policy_011",
+    "domain": "it",
+    "source_file": "hl_it_password_security_policy.md",
+    "chunk_index": 11,
+    "content": "## 10. 密码与权限的边界\n\n密码正确只证明身份验证通过，不代表员工拥有某个系统的访问权限；权限增加、回收和临时管理员角色都必须有单独审批。员工转岗时应更新旧系统密码和新系统权限，离职时由 IT 统一停用账号。账号申请、VPN、设备和安全事件分别按对应制度处理。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_001",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 1,
+    "content": "# 信息安全事件报告与处理指南\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-006  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：员工发现疑似账号、密码、终端、数据或网络安全异常时的报告与处置。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_002",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 2,
+    "content": "## 1. 事件范围\n\n疑似密码泄露、钓鱼页面、异常登录、电脑丢失、恶意软件、未经授权的数据下载、误发敏感文件和 VPN 异常连接，均属于需要报告的信息安全事件。员工不需要先判断事件是否真实；只要存在合理怀疑，就应保留现象并报告。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_003",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 3,
+    "content": "## 2. 报告时限与渠道\n\n涉及密码、验证码、账号被他人使用或敏感数据外泄的事件，应在发现后 30 分钟内通过安全事件工单或值班电话报告。设备丢失应先电话报告，再在 2 小时内补充工单。普通可疑邮件可以在当日下班前提交。报告内容包括发现时间、设备或账号、现象、已采取动作和可联系人员，不要在工单中粘贴密码或完整密钥。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_004",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 4,
+    "content": "## 3. 员工现场处置\n\n怀疑密码泄露时立即修改密码并退出其他会话；怀疑恶意软件时断开网络但不要关机或删除文件；设备丢失时不要尝试定位后自行取回，应等待 IT 和安全人员指引。收到钓鱼邮件不要点击更多链接，可保留原邮件头供分析。任何处置都不得删除日志、篡改时间或把事件转发到外部群组。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_005",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 5,
+    "content": "## 4. IT 处理流程\n\nIT 服务台先登记事件并判断等级，高风险事件通知信息安全负责人和业务负责人。必要时冻结账号、吊销 VPN 会话、隔离终端或回收软件授权。调查完成后输出影响范围、根因、修复动作和复盘事项；员工应配合身份核验和日志保全，不得私自恢复被隔离设备。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_006",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 6,
+    "content": "## 5. 与日常支持的边界\n\n忘记密码、普通 VPN 连接失败和软件安装问题，优先使用对应服务台流程；但如果同时出现异常登录、验证码被索取或设备感染迹象，应升级为安全事件。账号、密码、VPN、终端和软件属于不同控制对象，不能因为一个对象恢复正常就关闭全部事件。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_007",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 7,
+    "content": "## 6. 事件分级\n\n高风险事件包括生产凭据泄露、敏感数据外传、管理员账号异常使用、公司电脑被盗以及恶意软件可能扩散；中风险事件包括普通账号异常登录、可疑附件已打开或 VPN 连接地点明显异常；低风险事件包括未点击的可疑邮件和单次密码输错。分级用于安排响应优先级，不代表员工可以延迟报告，高风险事件仍要求发现后 30 分钟内报告。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_008",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 8,
+    "content": "## 7. 报告字段与证据保全\n\n工单应包含发现时间、账号或资产编号、设备地点、网络环境、可疑消息原文或邮件头、已经采取的动作和可能影响的系统。截图应遮挡密码、验证码、私钥和无关个人信息，但不能裁掉时间、来源和错误码。员工不要重装系统、删除邮件、清空浏览器历史或反复登录测试，这些动作可能破坏调查证据。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_009",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 9,
+    "content": "## 8. 联动处置\n\n账号或密码事件由 IT 先冻结会话、触发密码重置和检查登录记录；VPN 异常由 IT 回收会话并核对连接地点；终端事件由 IT 隔离设备并检查资产、软件和日志；数据误发由业务负责人确认收件范围后通知安全负责人。不同对象可以同时处置，但每项动作都应记录操作者、时间和结果。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_010",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 10,
+    "content": "## 9. 员工沟通与外部联络\n\n事件调查期间，员工不得把可疑文件、客户数据或内部分析转发到外部邮箱、私人网盘或公开群组。对外通知由信息安全负责人和业务负责人统一决定，员工不能自行向客户承诺调查结论。需要客户配合时，业务负责人提供最小必要信息，IT 负责技术问题清单。"
+  },
+  {
+    "id": "it_hl_it_security_incident_response_011",
+    "domain": "it",
+    "source_file": "hl_it_security_incident_response.md",
+    "chunk_index": 11,
+    "content": "## 10. 关闭与复盘\n\n事件只有在账号和会话已处理、受影响设备或数据范围已确认、必要补救完成、证据已归档并由责任人确认后才能关闭。普通密码重置完成不代表包含异常登录的事件可以立即关闭。高风险事件应在关闭后 5 个工作日内形成根因、影响、修复动作和预防措施，相关制度或权限模型需要调整时，由制度负责人发起变更。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_001",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 1,
+    "content": "# 软件安装与授权申请流程\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-005  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：公司电脑和企业账号上使用的软件、插件、开发工具。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_002",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 2,
+    "content": "## 1. 软件目录\n\n员工应优先从公司软件门户安装已备案的软件。目录中的软件由 IT 维护版本和授权数量，员工不得下载来历不明的安装包、破解补丁或绕过许可证。免费软件也要经过安全检查，不能因为没有购买费用就跳过审批。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_003",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 3,
+    "content": "## 2. 申请步骤\n\n未在软件目录中的软件，员工在 IT 服务台选择“软件安装与授权”，填写软件名称、版本、业务用途、使用期限、处理的数据类型和官网地址。直属主管确认业务需要，IT 评估安全风险；涉及付费授权的，由采购或财务根据预算完成购买。一般申请处理时间为 3 个工作日，紧急项目须说明交付影响。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_004",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 4,
+    "content": "## 3. 授权与账号\n\n许可证按个人、设备或部门分配，员工不得把个人授权转借他人。需要访问软件云端账号时，使用企业账号和批准的 SSO，不得用私人邮箱创建项目工作空间。离职、转岗或项目结束后，员工应在 2 个工作日内归还或释放授权。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_005",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 5,
+    "content": "## 4. 开源与插件\n\n开发人员引入开源组件或 IDE 插件，应记录名称、版本、许可证和来源。可能收集代码、日志或客户数据的插件必须经过信息安全复核。安全复核通过前，不得把公司源代码上传到第三方在线工具。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_006",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 6,
+    "content": "## 5. 违规与边界\n\nIT 发现未授权软件时可以隔离、卸载或冻结相关账号，并通知员工补办申请。软件安装申请不等于系统权限申请；需要访问数据库、代码仓库或生产环境时，仍按企业账号与权限申请规范单独提交。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_007",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 7,
+    "content": "## 6. 授权类型和成本\n\n申请时应区分免费软件、按用户授权、按设备授权、按并发数授权和试用授权。免费不代表无需安全审核，试用授权也必须填写到期日期。付费软件由采购或财务确认预算和供应商合同，员工不得使用私人信用卡购买工作授权后再要求公司补付，也不得把个人授权转给同事。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_008",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 8,
+    "content": "## 7. 安装权限与管理员操作\n\n普通员工不能自行获取本机管理员权限来绕过安装流程。IT 在审批通过后使用受控安装账号部署软件，记录设备资产编号、软件版本、授权编号和安装人。需要插件、命令行工具或开发依赖时，也要说明来源、版本和可能接触的数据；与生产系统相关的软件还需系统负责人确认。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_009",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 9,
+    "content": "## 8. 开源组件与在线服务\n\n引入开源组件应登记许可证、版本、来源和分发方式，可能要求法务或信息安全复核。在线代码助手、文件转换器和协作插件如果会读取源代码、日志、客户数据或员工信息，应在申请中明确数据流向；审批完成前不得上传真实业务内容。临时试用结束后，员工应删除工作空间中的数据并释放授权。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_010",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 10,
+    "content": "## 9. 版本升级与到期\n\n软件出现重大版本升级、授权主体变化或供应商改变数据处理方式时，原审批不自动覆盖新版本，应重新提交评估。授权到期前 10 个工作日，IT 通知申请人确认续用、释放或迁移数据；项目结束或员工离职后 2 个工作日内回收授权。未登记的共享许可证会进入清点和风险处置。"
+  },
+  {
+    "id": "it_hl_it_software_license_request_011",
+    "domain": "it",
+    "source_file": "hl_it_software_license_request.md",
+    "chunk_index": 11,
+    "content": "## 10. 记录与审计\n\n软件工单应关联员工、设备、业务项目、版本、授权类型、批准人和结束日期。IT 定期检查已安装软件与授权台账，发现版本不符、重复授权或破解补丁时，可以隔离设备并通知安全事件渠道。软件授权不等于账号权限，数据库、代码仓库和生产环境访问必须另行提交权限申请。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_001",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 1,
+    "content": "# VPN 与远程办公使用指南\n\n> 本文档为 Enterprise-AI-Copilot 项目的 Synthetic Demo Corpus，仅用于 RAG 测试与演示，不代表任何真实企业制度。\n\n数据性质：Synthetic Demo Corpus  \n文档编号：HL-IT-002  \n归口部门：信息技术部  \n版本：V1.0  \n生效日期：2026-01-01（虚构日期）  \n适用范围：经批准需要从公司办公网络以外访问内部资源的员工。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_002",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 2,
+    "content": "## 1. 开通条件\n\n员工先确认已有有效企业账号，再在 IT 服务台提交 VPN 开通申请，填写设备类型、访问的系统和预计使用期限。直属主管确认业务需要后，信息技术部配置权限并发送安装指引。VPN 账号与普通系统权限独立管理，申请了系统权限不代表自动获得 VPN 权限。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_003",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 3,
+    "content": "## 2. 客户端与登录\n\n员工只能从公司软件门户下载指定 VPN 客户端，首次登录需要企业账号、密码和一次性验证码。连接成功后，客户端显示分配的网络区域和连接时间。不得保存验证码、把配置文件发给他人或在公共电脑上勾选自动登录。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_004",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 4,
+    "content": "## 3. 使用规则\n\nVPN 仅用于访问获批的内部资源，连接期间仍须遵守数据分级和终端设备管理要求。长时间不操作时应主动断开，单次连接超过 8 小时会被系统要求重新认证。公共 Wi-Fi 下使用 VPN 前应确认设备已开启系统防火墙和磁盘加密。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_005",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 5,
+    "content": "## 4. 故障排查\n\n无法连接时，先确认账号未锁定、客户端版本符合要求、系统时间准确，并重新进行一次验证码认证。连续 3 次失败后不要继续尝试，应在 IT 服务台提交错误时间、客户端版本和脱敏截图。不要在工单中粘贴密码、验证码或完整内部地址。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_006",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 6,
+    "content": "## 5. 远程办公边界\n\n本指南只说明 VPN 技术访问，不规定员工可以远程办公的天数、地点或考勤方式。远程办公安排须取得直属主管和人力资源部的单独确认；是否可远程不应仅凭 VPN 能连接来判断。账号与权限变更按照《企业账号与权限申请规范》处理。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_007",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 7,
+    "content": "## 6. 设备和网络条件\n\nVPN 只允许从公司配发且已登记的电脑或经 IT 批准的移动设备连接，设备必须启用磁盘加密、屏幕锁定和终端防护。公共网吧、酒店公用电脑和他人个人电脑不得用于登录 VPN。家庭网络应使用个人独立密码，公共 Wi-Fi 下连接前应确认设备防火墙开启；不得把 VPN 配置文件复制给家人、外包人员或同事。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_008",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 8,
+    "content": "## 7. 海外与临时访问\n\n从境外或异常网络区域访问内部资源前，员工应在申请中填写国家或地区、访问时间、系统范围和业务原因，由信息安全岗进行风险确认。短期项目的 VPN 权限应设置结束日期，原则上不超过 14 天；到期后系统自动失效，需要继续使用时重新申请。临时权限不能通过共享账号延长。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_009",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 9,
+    "content": "## 8. 断开、失联与异常\n\n员工结束工作后应主动断开 VPN，连续 30 分钟无业务活动时建议断开并锁定设备。发现密码被索取、验证码异常、连接地点不符或设备丢失时，应立即断开网络并按《信息安全事件报告与处理指南》报告，不要反复输入密码或删除客户端日志。普通连接失败才走服务台故障流程。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_010",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 10,
+    "content": "## 9. 离职与权限回收\n\n员工离职、转岗或项目结束时，IT 根据人力资源和系统负责人通知回收 VPN 权限；员工不得在最后工作日自行保留配置文件或导出内部地址。账号停用、VPN 断开、系统权限回收和设备归还是四个独立动作，工单应分别记录完成时间。需要继续交接时，使用新的临时账号，不得恢复已停用的个人账号。"
+  },
+  {
+    "id": "it_hl_it_vpn_remote_work_guide_011",
+    "domain": "it",
+    "source_file": "hl_it_vpn_remote_work_guide.md",
+    "chunk_index": 11,
+    "content": "## 10. 支持材料\n\nVPN 工单应包含账号标识、设备资产编号、客户端版本、连接时间、错误码和脱敏截图；不能提交密码、验证码、私钥或完整内部地址。IT 处理完成后会记录原因和建议，员工应按指定版本更新客户端。软件安装问题由《软件安装与授权申请流程》处理，账号角色问题由《企业账号与权限申请规范》处理。"
   },
   {
     "id": "it_vpn_guide_001",
