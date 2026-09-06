@@ -74,6 +74,8 @@ npm ci
 npm run dev
 ```
 
+Windows PowerShell 的 Java wrapper 可使用 `.\mvnw.cmd spring-boot:run`。本地地址为 React `http://localhost:5173`、Java `http://localhost:8080`、Python `http://localhost:8000` 和 Mock OA `http://localhost:8010`；普通用户和浏览器只访问 Java。
+
 先检查：
 
 ```bash
@@ -213,6 +215,17 @@ curl -X POST http://localhost:8080/api/chat `
 | webhook 被拒绝 | raw body 签名、timestamp、精确 path 和共享 secret |
 | external resume 没有立即收口 | Java 终态是否已提交、retry markers；不要回滚 ExpenseClaim |
 | 两次请求互相 busy | 同一 runtime thread 的 process-local guard 正在保护完整 lifecycle |
+
+### 恢复 zhangsan 演示状态
+
+脚本固定只针对 `U10001/zhangsan/E10001` 清理 Task Runtime、PendingAction、LeaveRequest、ExpenseClaim、Conversation Memory、LangGraph checkpoint 和 Mock OA approval，并把年假余额恢复为固定基线 `10.0`。执行前会先采集目标 ID，检查身份与关联一致性；任一异常都会 fail-closed，不会部分清理。执行前建议先停止 Java/Python 写入流量。
+
+```bash
+bash deploy/reset-demo-state.sh --dry-run
+bash deploy/reset-demo-state.sh --yes
+```
+
+不带 `--yes` 时，脚本会要求交互输入 `RESET`；`--dry-run` 只执行 PostgreSQL `SELECT` 和严格只读 SQLite 查询。Mock OA 通过 `ExpenseClaim.external_request_id -> expense_approval.request_id` 精确关联；Enterprise OA fixture 由后续 Smoke 验证可用性。脚本不访问或修改 Flyway migration 和 sequence。
 
 ## 8. Demo 边界
 

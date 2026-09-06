@@ -34,6 +34,10 @@ docs/面试总结.md
 docs/daily-log/
 docs/interview/ai-backend-interview-summary.md
 
+# 私人学习与面试资料
+/docs/study/
+/docs/interview/
+
 # eval reports (auto-generated)
 data/eval/reports/
 agent-python/data/eval/reports/

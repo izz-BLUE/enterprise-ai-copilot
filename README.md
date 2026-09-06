@@ -8,7 +8,7 @@ Enterprise AI Copilot 是一个面向企业知识库问答和受控业务流程�
 
 项目的核心演示是“差旅报销”：Agent 可以读取企业 OA 的差旅和发票事实，生成确定性的报销 Proposal，经过用户确认、Java 业务写入和外部审批后，再以可恢复的 LangGraph Checkpoint 收口。差旅报销与年假申请验证了不同业务事实如何复用同一 Java authority、PendingAction 和 HITL 边界。
 
-- 在线演示：<https://copilot.jintianchi.cn>
+- 演示地址（如部署仍在运行）：<https://copilot.jintianchi.cn>；仓库不据此承诺公网当前在线状态或运行版本。
 - 最新 tagged release：[v1.1.2](https://github.com/izz-BLUE/enterprise-ai-copilot/releases/tag/v1.1.2)。当前 `main` 包含该 release 之后的维护与收敛修改，尚未为这些 post-release 改动重新打 tag。
 - 项目定位：小规格单机部署与受控演示验证；不承诺生产 SLA。
 
@@ -247,17 +247,17 @@ Repository automation 包含 CI（Java Backend、Mock OA Webhook、Python RAG Ev
 
 ## 文档导航
 
+- [文档索引](docs/README.md)：当前系统、发布历史和文档维护入口
 - [架构](docs/architecture.md)：当前端到端架构、权威边界、恢复和接受限制
 - [受控业务动作](docs/controlled-business-actions.md)：年假/报销 Proposal、HITL、confirm-time revalidation、外部审批
 - [API](docs/api.md)：公开、内部、Python 和 Mock OA 接口审计
 - [记忆架构](docs/memory-architecture.md)：Memory、history、Checkpoint 分层
 - [记忆安全](docs/memory-security.md)：身份、终态写入和数据边界
-- [记忆验收](docs/memory-p0-acceptance.md)：Memory 验收清单
 - [部署](docs/deployment.md)：Compose、配置和网络边界
 - [Demo 指南](docs/demo-guide.md)：报销主 Demo 与年假次 Demo
 - [质量保证](docs/quality-assurance.md)：测试、CI、评估与限制
 - [路线图](docs/roadmap.md)：已完成能力与真正未来项
-- [面试材料](docs/interview/project-introduction.md)：项目介绍、架构走读、Demo 脚本、FAQ
+- [发布记录](docs/releases/)：历史版本事实，不按当前 HEAD 改写
 
 ## 许可证
 

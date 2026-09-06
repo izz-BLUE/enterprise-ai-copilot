@@ -1,6 +1,6 @@
-# Phase D1 Semantic Routing Eval
+# Planner Routing Eval
 
-本目录评估 Phase C Planner-first 生产路由的首个语义决策。评估器每条 case 只执行以下步骤：
+本目录评估 Planner-first 生产路由的首个语义决策。评估器每条 case 只执行以下步骤：
 
 1. 根据运行画像调用正式 `authorized_tools()` Capability Gate。
 2. 使用当前 Tool Catalog 和 `build_planner_system_prompt()` / `build_planner_prompt()` 生成 Planner 输入。

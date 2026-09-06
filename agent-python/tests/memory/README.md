@@ -1,8 +1,8 @@
-# Memory 测试索引（Phase 6 Freeze）
+# Memory 测试索引
 
 > 本目录是**索引**，不是容器。
 > 由于现有 `tests/test_memory_*.py` 文件已被 CI / IDE / 文档外部引用，
-> 移动文件可能影响外部路径。本 Phase 不做物理移动，仅生成语义索引。
+> 本索引只说明当前测试职责，不移动测试文件。
 
 ## 分类
 
@@ -45,7 +45,7 @@
 | --- | --- |
 | `tests/test_memory_rollout_policy.py` | 灰度策略确定性 |
 | `tests/test_memory_quota_policy.py` | 写入状态机白名单 |
-| `tests/test_memory_dependency_boundary.py` | 模块依赖审计（Phase 6 新增） |
+| `tests/test_memory_dependency_boundary.py` | 模块依赖审计 |
 
 ## 路径稳定性
 
@@ -53,7 +53,7 @@
 - pytest 收集路径与 CI 命令（`uv run pytest`）保持不变；
 - 本索引是只读文档，不影响任何测试运行。
 
-## Phase 6 验收路径
+## 推荐验证路径
 
 ```bash
 uv run pytest tests/test_memory_*.py

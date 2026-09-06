@@ -86,7 +86,7 @@ START → safety_node → router_node → rag_node → END
 START → safety_node → planner_node ⇄ tool_executor_node → finalize_node → END
 ```
 
-Planner-first 最多支持 5 个 Tool，实际可见集合由程序层按权限动态收缩，**模型不能自行扩大 Tool 权限**：
+Planner-first 的 Tool Catalog 注册 RAG、评估、Java 只读、Enterprise OA 只读和受控 Proposal 能力；实际可见集合由程序层按权限与配置动态收缩，**模型不能自行扩大 Tool 权限**：
 
 - 始终可见：`rag_answer_tool`
 - 受信任 `employee_id`、`JAVA_BASE_URL`、`JAVA_INTERNAL_TOKEN` 均非空时追加：`leave_balance_tool` / `leave_request_tool`
@@ -105,8 +105,8 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 
 - **safety_node**: Safety Guard Lite —— 启发式纵深防御过滤器（非授权/信任/权限边界）；NFKC+零宽字符+控制字符规范化，五族高置信规则（prompt_override / prompt_extraction / credential_extraction / tool_abuse / business_policy_bypass），明确攻击拦截、咨询放行，原始输入原样传给下游
 - **router_node**（legacy Router-first）: 规则路由（eval 关键词 → eval，年假意图 → action，其他 → rag）
-- **planner_node**（Planner-first）: 输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；`MAX_PLANNER_STEPS=5`；最终决策可触发 `task_complete` / `refused` / `not_allowed` / `provider_error` / `invalid_decision` / `step_budget_exhausted`
-- **tool_executor_node**（Planner-first）: 执行 Planner `action=tool` 决策；`MAX_TOOL_CALLS=3`；按结构 / 权限 / Tool 预算 / 成功签名去重顺序校验；任何执行前拦截不计数
+- **planner_node**（Planner-first）: 输出严格结构化的 PlannerDecision（Pydantic 严格白名单）；`MAX_PLANNER_STEPS=6`；最终决策可触发 `task_complete` / `refused` / `not_allowed` / `provider_error` / `invalid_decision` / `step_budget_exhausted`
+- **tool_executor_node**（Planner-first）: 执行 Planner `action=tool` 决策；`MAX_TOOL_CALLS=5`；按结构 / 身份 / 权限 / WorkflowGuard / Tool 预算 / 成功签名去重顺序校验；任何执行前拦截不计数
 - **rag_node**: Hybrid Retrieval (Faiss + BM25 + RRF) + LLM 生成
 - **action_node**（legacy Router-first）: 年假申请受控业务动作确定性 Proposal 流程（不依赖 `JAVA_INTERNAL_TOKEN`）
 - **eval_node**: 读取评估报告

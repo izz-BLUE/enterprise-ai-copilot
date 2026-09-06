@@ -39,7 +39,7 @@
 
 ## 3. RAG 评估
 
-固定评估集包含 38 个 case，区分：
+固定评估集包含 38 个 case（28 个 answerable、10 个 no-answer），区分：
 
 - Retrieval（检索）：source hit、keyword hit、final case outcome，不调用 LLM；
 - Generation（生成）：expected answer keywords、no-answer refusal、flaky retry；
@@ -55,7 +55,20 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 
 评估集规模有限；通过率不能外推到所有企业文档、所有模型版本或生产 QPS。
 
-## 4. Runtime 与工作流验证
+## 4. Eval 分层与 CI 关系
+
+当前评估素材按职责分为四层：
+
+| Eval | 当前规模 | 运行形态 | 是否为专门的 CI 门禁 |
+| --- | ---: | --- | --- |
+| 离线 Agent Eval | 18 case | mock Planner/Tool，验证 loop、预算、去重和权限反应 | 作为 Python full pytest 的测试覆盖；没有单独 CLI job |
+| 路由 Eval | 130 case、9 类别、5 runtime profile | 只评 Planner 首次决策；完整语料运行需手工执行 `evals/routing/run_routing_eval.py` | 否；CI 覆盖其契约/评估器测试，不运行完整路由报告 |
+| 真 LLM Agent Eval | 24 case、8 类别 | 真模型 + 确定性 Tool stub；执行 `scripts/eval/run_agent_real_eval.py` | 否，属于手工或发布前验证 |
+| RAG Eval | 38 case | Retrieval/Generation；CI 执行 retrieval 基线 | 是：`python-eval` job 的 baseline retrieval 和 rule rewrite 命令以退出码门禁 |
+
+CI 主工作流当前有 5 个 job：Java Backend、Mock OA Webhook、Python RAG Evaluation、Frontend Build、Frontend Browser Tests。Gitleaks 和 CodeQL 在独立 workflow 中运行，Dependabot 是依赖自动化，不计入 CI job。评估 case 数、测试通过数和压测结果会随代码与语料演进；需要新鲜结果时运行对应命令或查看具体 CI/release 记录。
+
+## 5. Runtime 与工作流验证
 
 重点验证范围：
 
@@ -67,7 +80,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - Memory：ACTIVE 读取、trigger policy（触发策略）、`UPSERT + ACTIVE` proposal、Java 终态生命周期；
 - Frontend：聊天、Markdown、Safety、错误、确认卡和滚动回归。
 
-## 5. 运维安全
+## 6. 运维安全
 
 - Java/Python 都有有界并发和超时；busy/overload 以稳定 429 和 `Retry-After` 反馈；
 - Java 生成服务端 traceId，错误响应不暴露 exception message、secret、nonce digest 或 webhook raw body；
@@ -75,7 +88,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - `PHOENIX_TRACING` 默认关闭，启用时旁路导出失败不阻断业务；
 - `BUSINESS_ACTIONS_ENABLED`、Memory 写入和 Mock OA provider 默认关闭；reconciliation 与 external resume retry worker 始终低频调度并由 provider gateway fail-closed。
 
-## 6. 已接受限制
+## 7. 已接受限制
 
 - 当前验证是小规格、单机、短时受控验证，没有生产 SLA；
 - Rule-based Safety Guard 不是完整的 prompt-injection/content-safety 方案；
@@ -85,7 +98,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 - confirm-time revalidation 与本地 commit 之间存在小型 TOCTOU 窗口；
 - 浏览器、评估集、容量和集中式 metrics/alerting 覆盖有限。
 
-## 7. 可复现命令
+## 8. 可复现命令
 
 ```bash
 cd backend-java

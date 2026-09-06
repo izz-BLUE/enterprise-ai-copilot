@@ -87,4 +87,4 @@ Memory proposal pipeline 不在 HITL resume、external resume 或普通 `WAITING
 - terminal Memory transition 和业务 action result 在 Java 控制下保持可重试、幂等和可审计；
 - Python Memory/Extractor/Writer 失败不阻断主 Agent response，但 Java 不会据此伪造成功。
 
-相关安全清单见 [memory-security.md](memory-security.md)，验收记录见 [memory-p0-acceptance.md](memory-p0-acceptance.md)。
+相关安全边界见 [memory-security.md](memory-security.md)；运行时、Checkpoint、HITL 和 external resume 的验证范围见 [quality-assurance.md](quality-assurance.md)。
