@@ -164,7 +164,9 @@ data/hr|bank|it/*.md
   → bounded context → DeepSeek prompt → answer + sources
 ```
 
-`hybrid` 是默认检索模式；`vector` 和 `hybrid_rerank` 可用于比较。生产 RAG 固定不做 Query Rewrite，原始问题直接进入检索和最终 Prompt；`rule` 仅用于离线对照评估。无证据时明确拒答，不把检索结果当作业务授权。38 个固定用例覆盖来源/关键词命中和生成回归，并区分 answerable 与 no-answer。
+当前知识库是覆盖 HR、Finance、IT 的小型多文档 Synthetic Demo Corpus，用于验证多文档竞争、来源引用和拒答边界，不代表真实企业知识库或真实 OA 数据。`hybrid` 是默认检索模式；`vector` 和 `hybrid_rerank` 可用于比较。
+
+生产 RAG 在进入 Retriever 前对少量口语表达做确定性的语义等价规范化，例如 `年假咋请？` → `年假如何申请？`。该规范化只作用于 retrieval query，原始用户问题仍用于最终 Prompt；它不是 Intent Router 或 Planner 规则，也不补充用户未表达的新意图。旧 `rewrite-mode=rule` 仅保留为 Legacy Experimental Rewrite 离线对照，不进入生产链路或 CI 门禁。固定 RAG Eval 区分 answerable 与 no-answer，并由 CI 验证生产 Retrieval 行为。
 
 ## 快速开始
 

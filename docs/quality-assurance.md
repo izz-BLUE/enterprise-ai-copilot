@@ -24,7 +24,7 @@
 
 - **Java Backend**：JDK 17，Maven compile 和 `./mvnw test`；
 - **Mock OA Webhook**：Mock OA pytest、Ruff、本地 Compose 配置校验；
-- **Python RAG Evaluation**：Python 完整套件、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成、基线检索门禁、规则重写检索评估；
+- **Python RAG Evaluation**：Python 完整套件、PostgreSQL Checkpoint/Crash/HITL/External Resume 集成，以及复用生产 query normalization 的 Retrieval quality gate；Legacy `rule` rewrite 不作为 CI blocking gate；
 - **Frontend Build**：`npm ci`、生产构建、lint；
 - **Frontend Browser Tests**：Chromium 安装和 Playwright E2E；
 
@@ -44,6 +44,20 @@
 - Retrieval（检索）：source hit、keyword hit、final case outcome，不调用 LLM；
 - Generation（生成）：expected answer keywords、no-answer refusal、flaky retry；
 - Regression（回归）：对比 baseline/current report，检测退化。
+
+当前固定 Retrieval Eval V2 的门禁结果为 28/28 answerable 与 10/10 no-answer 均通过。这是固定评估集上的检索结果，不是可外推到所有生产问题的 RAG 准确率。
+
+CI 复现生产 Retrieval gate：
+
+```bash
+cd agent-python
+uv run python scripts/eval/eval_retrieval.py --rewrite-mode production \
+  --min-source-hit-rate 100 \
+  --min-keyword-hit-rate 100 \
+  --min-final-pass-rate 100
+```
+
+Generation Eval 中若出现 HTTP 200 但模型空响应，分类为 `LLM_API_INSTABILITY`；它不计为 Corpus Regression 或 Retrieval Regression。
 
 命令：
 

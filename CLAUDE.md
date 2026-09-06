@@ -116,6 +116,7 @@ Capability Gate 只决定 Planner 当前应该看见哪些 Tool，不是最终�
 - **hybrid**（默认）: Faiss 语义检索 + BM25 + RRF 融合排序
 - **vector**: Faiss + keyword 合并去重
 - **hybrid_rerank**: Hybrid + Cross Encoder 精排（实验模式）
+- 生产 Retrieval query 在进入上述检索器前使用 `normalize_retrieval_query()` 做窄范围语义等价规范化；`rewrite-mode=rule` 仅为 Legacy Experimental Rewrite 离线能力。
 
 ### 并发控制
 
@@ -186,7 +187,7 @@ Java 和 Python 都有并发限制：
 - **检索评估**: source_hit_rate + keyword_hit_rate → final_pass_rate
 - **生成评估**: keyword_groups 同义词组（组内 OR、组间 AND）
 - **负样本**: 10 个 no-answer 用例验证拒答能力
-- **RAG Gate**: 固定关闭；相关性实验仅保留在离线评估材料中
+- **RAG quality gate**: CI `python-eval` job 运行生产 Retrieval gate；运行时证据门控实验仍不作为生产运行时机制
 
 ## 注意事项
 

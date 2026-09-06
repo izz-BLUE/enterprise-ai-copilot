@@ -157,7 +157,7 @@ L4 验证的公网 429 契约包括 `Content-Type: application/json`、`Retry-Af
 
 ## 结论边界
 
-- 测试数据规模较小（当前知识库约 33 chunks）
+- 测试数据规模较小（当前知识库为 HR、Finance、IT 的小型 Synthetic Demo Corpus）
 - 结果不代表大规模生产负载
 - 结果证明的是当前数据和部署环境下的兼容性及资源可行性
 - 已加入有界并发保护和 k6 分层压测脚本，并完成目标服务器 L1-L4 受控验收

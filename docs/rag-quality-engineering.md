@@ -112,6 +112,52 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 
 **技术决策：** 100% 不代表 RAG 完全可靠，只代表当前 38 个 eval cases 下的闭环可跑通。后续需要扩大评估集。
 
+上面的 Generation 表格与 `failure_type` 是 D40 的历史/离线快照，不代表当前 CI 使用 `rule` 作为生产路径。模型或接口出现 HTTP 200 但空响应时，当前诊断分类为 `LLM_API_INSTABILITY`，不归因于 Corpus 或 Retrieval Regression。
+
+## Corpus V2 与 Eval V2 收口
+
+当前正式 Corpus 是覆盖 HR、Finance、IT 的小型多文档 Synthetic Demo Corpus，用于测试真实的多文档竞争和跨文档引用关系，不代表真实企业知识库或真实 OA 数据。当前正式统计为 22 篇文档、217 chunks；Chunking、Embedding、BM25、RRF、candidate_k 和 final top_k 均未因本轮扩容调整。
+
+HR 文档已经按职责收口：
+
+| 文档 | 权威职责 |
+| --- | --- |
+| `hl_hr_annual_leave_policy.md` | 年假资格、额度、折算、结转、余额 |
+| `hl_hr_leave_request_guide.md` | 请假申请、材料、审批、补件、撤回 |
+| `hl_hr_attendance_policy.md` | 工作时间、打卡、迟到早退、考勤落账 |
+| `hl_hr_sick_personal_leave_policy.md` | 病假、事假、证明及异常处理 |
+| `hl_hr_overtime_comp_time_policy.md` | 加班、调休、晚间返程交通 |
+| `hl_hr_benefits_holidays_guide.md` | 福利假概览及边界 |
+
+旧 `leave_policy_real_sample.md` 已退出 Loader 扫描范围并归档，不再是当前 HR 权威知识源。Eval Baseline Migration 对旧 Oracle 做了重新审计：15 条 KEEP、16 条 REMAP、7 条 RETIRE_AND_REPLACE。其工程含义是 Corpus 权威关系变化后同步校准测试 Oracle，而不是为了把红 Case 改绿。
+
+## Production Query Normalization
+
+生产链路与 CI production Eval 共用唯一的 `normalize_retrieval_query()`：
+
+```text
+Original user query
+  → normalize_retrieval_query()
+  → BM25 + Vector + RRF
+  → Top-K context
+```
+
+它只在已经进入 RAG 后作用于 retrieval query，不是新的 Intent Router、Planner 规则或业务动作路由。原始用户问题仍用于最终 Prompt；规范化不得增加用户没有表达的新意图。例如：
+
+```text
+年假咋请？ → 年假如何申请？
+```
+
+当前生产规则仅覆盖 `咋请`、`怎么请`、`咋申请` 这类明确的短口语申请表达，并要求短语边界成立；未命中时原样保留，不扩展为年假天数、余额或审批等额外意图。
+
+完整的 `colloquial_003` 诊断记录如下，其他文档不重复硬编码这些排名：扩容后原 Query 的 BM25 rank 为 9，Vector Top-10 未命中正确 Chunk，RRF rank 为 13，Final Top-3 FAIL；窄规范化后 BM25 rank 为 6、Vector rank 为 4、RRF rank 为 2，Final Top-3 PASS。固定 Retrieval Eval 从 27/28 提升到 28/28，10/10 no-answer 保持不变。
+
+`rewrite-mode=rule` 仍可用于离线 Query Rewrite 对照，但无生产调用方，不参与 Agent/Tool 主链路，也不作为 CI blocking gate。CI 使用 `--rewrite-mode production`，直接复用生产规范化实现，阈值没有因为 legacy 规则失败而放宽。
+
+## Chunk Representation 实验
+
+曾对检索表示做过临时实验：将 `Document Title + Section Title + Chunk Text` 拼接后建立实验索引。该方案没有解决 `年假咋请？` 的失败，反而强化了相似年假文档之间的竞争，因此没有进入生产，也没有覆盖正式索引或源 Markdown。
+
 ---
 
 ## 当前检索配置
@@ -119,8 +165,8 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `retrieval_mode` | `hybrid` | Faiss + BM25 + RRF |
-| 生产 Retrieval normalization | `normalize_retrieval_query` | 仅做窄范围语义等价规范化 |
-| `rewrite_mode` | `none` | 不启用 Legacy Experimental Rewrite；生产窄规范化由生产入口固定执行 |
+| 生产检索规范化 | `normalize_retrieval_query` | 生产入口固定执行的窄范围语义等价规范化 |
+| Eval `--rewrite-mode` | `production` | 直接复用生产规范化实现；`none` 仅作离线对照 |
 | `top_k` | 3 | 进入 Prompt 的文档片段数 |
 | `rerank_model` | `BAAI/bge-reranker-base` | 仅 `hybrid_rerank` 模式使用 |
 
@@ -144,7 +190,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 | none | 100% | 96.4% | 96.4% |
 | rule | 100% | 100% | 100% |
 
-**生成评估**（调用 LLM）：
+**生成评估历史快照**（调用 LLM）：
 
 | 模式 | answerable | no-answer | overall |
 |------|-----------|-----------|---------|
@@ -163,7 +209,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 | Flaky 检测 | retry 机制区分 LLM 随机波动和稳定失败 |
 | Baseline 回归 | 手动更新 baseline，新增 case 时可回归检测 |
 | TopK 对比 | 对比不同 TopK 下的 retrieval 和 generation 质量 |
-| Query Rewrite 对比 | 对比 none 和 rule 两种模式 |
+| Query Rewrite 对比 | 对比 production normalization 与 Legacy `rule` 离线模式 |
 | 中文数字归一化 | "三天" ↔ "3天" 兼容 |
 | failure_type 分类 | 区分 5 种失败原因，辅助定位问题 |
 | keyword_groups | 组内 OR、组间 AND，支持同义表达 |
@@ -177,7 +223,7 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 5. **无多轮对话**：当前仅支持单轮问答
 6. **无文档上传**：知识库文档手动管理
 7. **hybrid_rerank 提升不显著**：当前评估集上 Cross Encoder 精排未带来明显收益
-8. **Query Rewrite 规则有限**：rule 模式仅覆盖部分口语化表达
+8. **生产规范化有意保持窄范围**：Legacy `rule` 仅覆盖部分实验性口语化表达，生产规范化不补充用户未表达的事实或意图
 
 ## 后续计划
 

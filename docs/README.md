@@ -19,6 +19,6 @@
 
 - [发布记录](releases/)：按发布时点保存，不用当前 HEAD 的事实改写历史数字或结论。
 - [文档维护规则](documentation-maintenance.md)：文档类别、准入和防漂移规则。
-- [RAG Gate 实验记录](rag-retrieval-gate-experiment.md)：失败实验与“生产固定关闭 Gate”的决策依据。
+- [RAG Gate 实验记录](rag-retrieval-gate-experiment.md)：运行时证据门控失败实验；它与当前 CI 的生产 Retrieval quality gate 是两类不同机制。
 
 `AGENTS.md`、`CLAUDE.md`、`CONTRIBUTING.md`、`SECURITY.md` 和各子目录 README 属于仓库协作或运行入口，不在本索引中重复展开；需要修改时仍按其自身职责维护。

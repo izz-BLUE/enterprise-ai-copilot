@@ -85,7 +85,9 @@ data/hr|bank|it/*.md
   → DeepSeek answer + sources
 ```
 
-`hybrid` 是默认模式；`vector` 和 `hybrid_rerank` 用于比较。规则 Query Rewrite 只改变检索 query，原始用户问题仍用于最终 Prompt。RAG 的知识证据不能转化为业务授权；缺少证据时必须明确拒答。
+用户问题进入 RAG 后，生产入口先调用 `normalize_retrieval_query()`，再把 retrieval query 送入 BM25 + Vector + RRF。它只做少量口语表达的确定性语义等价规范化，不是 Intent Router 或 Planner，也不增加用户未表达的业务意图。原始用户问题仍保留给最终 Prompt、AgentState 和后续业务边界使用。
+
+`hybrid` 是默认模式；`vector` 和 `hybrid_rerank` 用于比较。`rewrite-mode=rule` 是 Legacy Experimental Rewrite，仅供离线对照，不属于生产调用链或 CI blocking gate。RAG 的知识证据不能转化为业务授权；缺少证据时必须明确拒答。
 
 ## 5. Java 权威与动作状态
 

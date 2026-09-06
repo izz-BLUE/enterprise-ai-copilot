@@ -29,7 +29,7 @@
 - 五类高置信规则使用预编译正则：`prompt_override`、`prompt_extraction`、`credential_extraction`、`tool_abuse`、`business_policy_bypass`。
 - 只拦截清晰、无歧义的攻击；不确定、讨论式或咨询式输入默认放行（优先保证 precision，而不是 recall）。
 - 紧凑的仅用于安全检查的视图（移除空白和有限分隔符）可以抵抗 `忽 略 之 前 所 有 指 令` 这类简单拆分攻击。
-- RAG、query rewrite 和业务动作使用保持不变的原始用户输入；安全检查只使用规范化形式。
+- 原始用户问题仍用于最终 RAG Prompt、AgentState 和业务动作；检索阶段可以额外使用 `normalize_retrieval_query()` 做少量语义等价规范化。安全检查使用自己的安全规范化视图，三者职责互不替代。
 - 未经校验，不要把用户输入视为安全内容。
 
 ### RAG 上下文
