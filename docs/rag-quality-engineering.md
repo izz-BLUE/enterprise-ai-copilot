@@ -52,11 +52,11 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 - 只改写检索用 query，最终 prompt 中的用户问题不变
 - 无匹配规则时返回原问题，不影响检索
 
-**结果：** 作为 `rewrite_mode=rule` 实验模式可用。
+**结果：** 仅作为历史离线 `rewrite_mode=rule` 实验模式保留。
 
 **技术决策：** 规则版不消耗 token、延迟低、可预测，适合企业制度这类表达相对固定的场景。
 
-**当前状态：** `rewrite_mode=rule` 是实验模式，不建议默认启用。
+**当前状态：** `rewrite_mode=rule` 已归类为 Legacy Experimental Rewrite，不进入生产链路或 CI 门禁。
 
 ---
 
@@ -70,6 +70,8 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 - 对比 `rewrite_mode=none` 和 `rewrite_mode=rule` 两种模式
 
 **结果：**
+
+以下是 Legacy Sample 阶段的历史对比快照，不代表当前 Corpus V2 的生产门禁结果。
 
 | 模式 | Retrieval | Generation |
 |------|-----------|------------|
@@ -117,7 +119,8 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `retrieval_mode` | `hybrid` | Faiss + BM25 + RRF |
-| `rewrite_mode` | `none` | 不做查询重写 |
+| 生产 Retrieval normalization | `normalize_retrieval_query` | 仅做窄范围语义等价规范化 |
+| `rewrite_mode` | `none` | 不启用 Legacy Experimental Rewrite；生产窄规范化由生产入口固定执行 |
 | `top_k` | 3 | 进入 Prompt 的文档片段数 |
 | `rerank_model` | `BAAI/bge-reranker-base` | 仅 `hybrid_rerank` 模式使用 |
 
@@ -126,14 +129,18 @@ Enterprise AI Copilot 的 RAG 质量优化不是一次性完成的，而是通�
 | 模式 | 说明 |
 |------|------|
 | `hybrid_rerank` | Faiss + BM25 → RRF → Top10 候选 → Cross Encoder 精排 → TopK |
-| `rewrite_mode=rule` | 规则匹配重写，不调用 LLM |
+| `rewrite_mode=rule` | Legacy Experimental Rewrite；规则匹配重写，不调用 LLM，不进入生产或 CI |
 
 ## 当前评估结果
 
 **检索评估**（不调用 LLM，零 token 消耗）：
 
+当前生产门禁使用生产窄规范化模式：28/28 answerable、10/10 no-answer。
+下表中的 `none` 与 `rule` 仅为历史/离线对照结果；`rule` 不再是当前门禁。
+
 | 模式 | source_hit | keyword_hit | final_pass_rate |
 |------|-----------|-------------|-----------------|
+| production normalization | 100% | 100% | 100% |
 | none | 100% | 96.4% | 96.4% |
 | rule | 100% | 100% | 100% |
 

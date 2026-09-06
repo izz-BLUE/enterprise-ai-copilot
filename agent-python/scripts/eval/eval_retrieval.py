@@ -66,6 +66,24 @@ def _check_keywords(content: str, expected_keywords: list[str]) -> tuple[bool, l
     return len(missing) == 0, missing
 
 
+def _build_rewrite_result(question: str, rewrite_mode: str,
+                          normalize_fn, rewrite_fn,
+                          normalization_reason: str) -> dict:
+    """构造评估用查询，production 模式复用生产传入的规范化函数。"""
+    if rewrite_mode == 'production':
+        retrieval_query = normalize_fn(question)
+        return {
+            'original_query': question,
+            'rewritten_query': retrieval_query,
+            'rewrite_applied': retrieval_query != question,
+            'rewrite_reason': (
+                normalization_reason if retrieval_query != question else ''
+            ),
+        }
+
+    return rewrite_fn(question, mode=rewrite_mode)
+
+
 def main():
     # ── 解析命令行参数 ──
     parser = argparse.ArgumentParser(description='RAG 检索评估')
@@ -75,8 +93,8 @@ def main():
                         choices=['vector', 'hybrid', 'hybrid_rerank'],
                         help='检索模式：vector / hybrid / hybrid_rerank')
     parser.add_argument('--rewrite-mode', type=str, default='none',
-                        choices=['none', 'rule'],
-                        help='查询重写模式：none / rule')
+                        choices=['production', 'none', 'rule'],
+                        help='查询重写模式：production / none / rule')
     parser.add_argument('--min-source-hit-rate', type=float, default=100.0,
                         help='source_hit_rate 最低阈值（百分比，默认 100.0）')
     parser.add_argument('--min-keyword-hit-rate', type=float, default=100.0,
@@ -115,7 +133,11 @@ def main():
 
     # ── 导入检索器（延迟导入，避免前置检查失败时因缺少依赖而崩溃） ──
     from app.retrieval.hybrid_retriever import retrieve
-    from app.retrieval.query_rewriter import rewrite_query
+    from app.retrieval.query_rewriter import (
+        NORMALIZATION_REASON,
+        normalize_retrieval_query,
+        rewrite_query,
+    )
 
     # ── 表头 ──
     HEADER_FMT = '  {:<5}  {:>6}  {:>5}  {:>5}  {:>4}  {:38}  {}'
@@ -131,8 +153,14 @@ def main():
         expected_keywords: list[str] = case.get('expected_keywords', [])
         answerable = case.get('answerable', True)
 
-        # 调用检索器（可选 query rewrite）
-        rewrite_result = rewrite_query(question, mode=rewrite_mode)
+        # production 只复用生产窄规范化；rule 保留给离线实验。
+        rewrite_result = _build_rewrite_result(
+            question,
+            rewrite_mode,
+            normalize_fn=normalize_retrieval_query,
+            rewrite_fn=rewrite_query,
+            normalization_reason=NORMALIZATION_REASON,
+        )
         retrieval_query = rewrite_result['rewritten_query']
         topk = retrieve(retrieval_query, top_k=top_k, mode=retrieval_mode)
 
@@ -251,9 +279,18 @@ def main():
     print('=' * 60)
     print('  门禁判定结果')
     print('=' * 60)
-    print(f'    source_hit_rate:       {"PASS" if source_pass else "FAIL"} ({source_hit_rate:.1f}% >= {min_source_hit_rate:.1f}%)')
-    print(f'    keyword_hit_rate:      {"PASS" if keyword_pass else "FAIL"} ({keyword_hit_rate:.1f}% >= {min_keyword_hit_rate:.1f}%)')
-    print(f'    final_pass_rate:       {"PASS" if final_pass else "FAIL"} ({final_pass_rate:.1f}% >= {min_final_pass_rate:.1f}%)')
+    print(
+        f'    source_hit_rate:       {"PASS" if source_pass else "FAIL"} '
+        f'({source_hit_rate:.1f}% >= {min_source_hit_rate:.1f}%)'
+    )
+    print(
+        f'    keyword_hit_rate:      {"PASS" if keyword_pass else "FAIL"} '
+        f'({keyword_hit_rate:.1f}% >= {min_keyword_hit_rate:.1f}%)'
+    )
+    print(
+        f'    final_pass_rate:       {"PASS" if final_pass else "FAIL"} '
+        f'({final_pass_rate:.1f}% >= {min_final_pass_rate:.1f}%)'
+    )
     print(f'    threshold_passed:      {"PASS" if threshold_passed else "FAIL"}')
 
     # ── 失败用例详情 ──

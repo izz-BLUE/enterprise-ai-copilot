@@ -1,10 +1,11 @@
 """
-Query Rewriter — 规则版查询重写。
+Query Rewriter — 生产窄规范化与 Legacy Experimental Rewrite。
 
-在检索前对用户口语化问题做轻量改写，提升检索召回率。
-仅改写检索用 query，不影响最终 prompt 中的 original_query。
+生产路径只使用 normalize_retrieval_query() 做语义等价的窄范围规范化，
+不补充用户没有表达的业务事实。_RULES 与 rewrite_query(mode='rule')
+仅为历史离线实验保留，不属于生产机制。
 
-当前只实现 rule 模式（规则匹配），不调用 LLM。
+所有改写只作用于检索用 query，不影响最终 prompt 中的 original_query。
 """
 
 import logging
@@ -12,7 +13,8 @@ import re
 
 logger = logging.getLogger('agent')
 
-# ── 规则定义 ──────────────────────────────────────────────────────
+# ── Legacy Experimental 规则定义 ────────────────────────────────
+# 仅由显式离线 rule 模式调用；生产路径不选择这些宽规则。
 # 每条规则: (compiled_pattern, replacement, reason)
 # 按优先级从高到低排列，命中第一条即返回。
 

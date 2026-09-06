@@ -125,16 +125,10 @@ jobs:
           LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_eval:checkpoint_eval@localhost:5432/enterprise_ai_checkpoint_ci
         run: >
           uv run python scripts/eval/eval_retrieval.py
-          --rewrite-mode none
+          --rewrite-mode production
           --min-source-hit-rate 100
-          --min-keyword-hit-rate 95
-          --min-final-pass-rate 95
-
-      - name: Run rule rewrite retrieval evaluation
-        working-directory: agent-python
-        env:
-          LANGGRAPH_CHECKPOINT_DSN: postgresql://checkpoint_eval:checkpoint_eval@localhost:5432/enterprise_ai_checkpoint_ci
-        run: uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule
+          --min-keyword-hit-rate 100
+          --min-final-pass-rate 100
 
   frontend-check:
     name: Frontend Build

@@ -64,7 +64,7 @@ uv run python scripts/eval/run_rag_eval.py --with-baseline
 | 离线 Agent Eval | 18 case | mock Planner/Tool，验证 loop、预算、去重和权限反应 | 作为 Python full pytest 的测试覆盖；没有单独 CLI job |
 | 路由 Eval | 130 case、9 类别、5 runtime profile | 只评 Planner 首次决策；完整语料运行需手工执行 `evals/routing/run_routing_eval.py` | 否；CI 覆盖其契约/评估器测试，不运行完整路由报告 |
 | 真 LLM Agent Eval | 24 case、8 类别 | 真模型 + 确定性 Tool stub；执行 `scripts/eval/run_agent_real_eval.py` | 否，属于手工或发布前验证 |
-| RAG Eval | 38 case | Retrieval/Generation；CI 执行 retrieval 基线 | 是：`python-eval` job 的 baseline retrieval 和 rule rewrite 命令以退出码门禁 |
+| RAG Eval | 38 case | Retrieval/Generation；CI 执行生产窄规范化 Retrieval gate | 是：`python-eval` job 仅对生产 Retrieval gate 以退出码门禁 |
 
 CI 主工作流当前有 5 个 job：Java Backend、Mock OA Webhook、Python RAG Evaluation、Frontend Build、Frontend Browser Tests。Gitleaks 和 CodeQL 在独立 workflow 中运行，Dependabot 是依赖自动化，不计入 CI job。评估 case 数、测试通过数和压测结果会随代码与语料演进；需要新鲜结果时运行对应命令或查看具体 CI/release 记录。
 

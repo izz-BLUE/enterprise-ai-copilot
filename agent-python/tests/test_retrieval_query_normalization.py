@@ -1,9 +1,13 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
-from app.retrieval.query_rewriter import normalize_retrieval_query
+from app.retrieval.query_rewriter import (
+    NORMALIZATION_REASON,
+    normalize_retrieval_query,
+)
 from app.services.rag_answer_service import answer_rag
+from scripts.eval.eval_retrieval import _build_rewrite_result
 
 
 @pytest.mark.parametrize(
@@ -38,6 +42,33 @@ def test_normalize_does_not_expand_unmatched_or_broader_queries(query):
     assert normalize_retrieval_query(query) == query
 
 
+@pytest.mark.parametrize(
+    ('original', 'expected'),
+    [
+        ('年假咋请？', '年假如何申请？'),
+        ('年假怎么请？', '年假如何申请？'),
+        ('年假有多少天？', '年假有多少天？'),
+        ('員工请假审批流程', '員工请假审批流程'),
+        ('病假材料无法核验怎么办', '病假材料无法核验怎么办'),
+    ],
+)
+def test_production_eval_mode_shares_normalizer(original, expected):
+    legacy_rewrite = Mock(side_effect=AssertionError('legacy rewrite must not run'))
+
+    production_query = normalize_retrieval_query(original)
+    eval_result = _build_rewrite_result(
+        original,
+        'production',
+        normalize_fn=normalize_retrieval_query,
+        rewrite_fn=legacy_rewrite,
+        normalization_reason=NORMALIZATION_REASON,
+    )
+
+    assert production_query == expected
+    assert eval_result['rewritten_query'] == production_query
+    legacy_rewrite.assert_not_called()
+
+
 @patch('app.services.rag_answer_service.log_gate_event')
 @patch('app.services.rag_answer_service.call_llm', return_value='answer')
 @patch('app.services.rag_answer_service.build_rag_prompt', return_value='prompt')
@@ -67,6 +98,14 @@ def test_production_entrypoint_normalizes_only_retrieval_query(
         top_k=3,
         mode='hybrid',
     )
+    eval_result = _build_rewrite_result(
+        '年假咋请？',
+        'production',
+        normalize_fn=normalize_retrieval_query,
+        rewrite_fn=Mock(),
+        normalization_reason=NORMALIZATION_REASON,
+    )
+    assert retrieve.call_args.args[0] == eval_result['rewritten_query']
     build_prompt.assert_called_once()
     assert build_prompt.call_args.args[0] == '年假咋请？'
     assert result.answer == 'answer'

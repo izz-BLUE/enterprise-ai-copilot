@@ -18,9 +18,12 @@ uv sync
 uv run pytest -q
 # app.core.config requires a reachable PostgreSQL checkpoint DSN for evaluations.
 export LANGGRAPH_CHECKPOINT_DSN=postgresql://checkpoint_user:checkpoint_password@localhost:5432/enterprise_ai_runtime
-uv run python scripts/eval/eval_retrieval.py --rewrite-mode none \
-  --min-source-hit-rate 100 --min-keyword-hit-rate 95 --min-final-pass-rate 95
-uv run python scripts/eval/eval_retrieval.py --rewrite-mode rule
+uv run python scripts/eval/eval_retrieval.py --rewrite-mode production \
+  --min-source-hit-rate 100 --min-keyword-hit-rate 100 --min-final-pass-rate 100
+
+正式门禁使用 `--rewrite-mode production`，复用生产窄范围查询规范化；`none` 仅用于
+无规范化对照实验。`--rewrite-mode rule` 已退役为 Legacy Experimental Rewrite，
+只能手工离线对比，不属于生产链路或 CI 门禁。
 
 # Frontend
 cd frontend
