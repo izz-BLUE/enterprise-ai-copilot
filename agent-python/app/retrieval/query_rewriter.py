@@ -55,13 +55,6 @@ _add(
     'VPN 口语问法 → 标准表述',
 )
 
-# ── 年假 ──
-_add(
-    r'(?:年假|年休).{0,4}(?:怎么请|怎么休|怎么申请|几天|多少天|多少|咋请|咋休)',
-    '员工如何申请年假以及年假天数规定',
-    '年假口语问法 → 标准表述',
-)
-
 # ── 请假通用 ──
 _add(
     r'请假.{0,4}(?:怎么(?:请|申请|操作)|流程|步骤)',
@@ -91,6 +84,42 @@ _add(
 )
 
 
+_NORMALIZATION_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    # 只匹配短口语申请表达，后面必须是结束、空白或标点，避免把“请假”等
+    # 更完整的业务表达截断成不完整的 query。
+    (
+        re.compile(r'咋申请(?=$|[\s，。！？；：、,.!?;:（）()【】\[\]{}])'),
+        '如何申请',
+    ),
+    (
+        re.compile(r'怎么请(?=$|[\s，。！？；：、,.!?;:（）()【】\[\]{}])'),
+        '如何申请',
+    ),
+    (
+        re.compile(r'咋请(?=$|[\s，。！？；：、,.!?;:（）()【】\[\]{}])'),
+        '如何申请',
+    ),
+)
+
+NORMALIZATION_REASON = 'colloquial_leave_apply'
+
+
+def normalize_retrieval_query(query: str) -> str:
+    """对送入 Retriever 的 query 做语义等价的窄口语规范化。
+
+    该函数不补充主题、天数、审批人等用户未表达的业务事实；未命中规则时
+    原样返回 query。原始用户问题仍由调用方单独保留并用于最终 Prompt。
+    """
+    if not isinstance(query, str) or not query:
+        return query
+
+    for pattern, replacement in _NORMALIZATION_RULES:
+        normalized, count = pattern.subn(replacement, query, count=1)
+        if count:
+            return normalized
+    return query
+
+
 def rewrite_query(query: str, mode: str = 'none') -> dict:
     """对 query 执行查询重写。
 
@@ -118,6 +147,13 @@ def rewrite_query(query: str, mode: str = 'none') -> dict:
 
     if mode != 'rule':
         logger.warning('不支持的 rewrite_mode: %s，跳过重写', mode)
+        return result
+
+    normalized_query = normalize_retrieval_query(query)
+    if normalized_query != query:
+        result['rewritten_query'] = normalized_query
+        result['rewrite_applied'] = True
+        result['rewrite_reason'] = NORMALIZATION_REASON
         return result
 
     query_lower = query.lower().strip()

@@ -4,7 +4,11 @@ from time import perf_counter
 from app.core.config import DEEPSEEK_MODEL, logger
 from app.prompts.system_prompt import SYSTEM_PROMPT, build_rag_prompt
 from app.retrieval.hybrid_retriever import retrieve_with_signals
-from app.retrieval.query_rewriter import rewrite_query
+from app.retrieval.query_rewriter import (
+    NORMALIZATION_REASON,
+    normalize_retrieval_query,
+    rewrite_query,
+)
 from app.retrieval.retrieval_gate import evaluate_gate_timed_fail_open, log_gate_event
 from app.services.llm_service import call_llm
 
@@ -44,10 +48,7 @@ def answer_rag(
     rewrite_mode: str | None = None,
     retrieval_query: str | None = None,
 ) -> RagAnswerResult:
-    """统一的生产 RAG 生成入口，供普通问答和 Agent Tool 共同复用。
-
-    生产路径固定不重写 query；rewrite_mode 仅保留给离线测试/评估调用方。
-    """
+    """统一的生产 RAG 生成入口，供普通问答和 Agent Tool 共同复用。"""
     effective_retrieval_query = retrieval_query
     if effective_retrieval_query is None:
         rewrite_result = rewrite_query(
@@ -61,6 +62,17 @@ def answer_rag(
                 trace_id,
                 rewrite_result['rewrite_reason'],
             )
+
+    normalized_retrieval_query = normalize_retrieval_query(
+        effective_retrieval_query,
+    )
+    if normalized_retrieval_query != effective_retrieval_query:
+        logger.info(
+            '[%s] Retrieval query normalization applied rule=%s',
+            trace_id,
+            NORMALIZATION_REASON,
+        )
+    effective_retrieval_query = normalized_retrieval_query
 
     gate_context = None
     llm_called = False
