@@ -32,14 +32,14 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
     @Test
     void ownershipSurvivesRestartAndIsCheckedBeforeNonceConsumption() {
         PendingActionView pending;
-        try (ConfigurableApplicationContext first = startContext("5.0")) {
+        try (ConfigurableApplicationContext first = startContext()) {
             reset(first);
             BusinessActionService service = first.getBean(BusinessActionService.class);
             pending = service.createPending(proposal(nextWeekday(new TestActionService(service), 2)),
                     "restart-owner", null, USER_A, null);
         }
 
-        try (ConfigurableApplicationContext second = startContext("9.0")) {
+        try (ConfigurableApplicationContext second = startContext()) {
             BusinessActionService service = second.getBean(BusinessActionService.class);
             ActionException denied = assertThrows(ActionException.class, () -> service.confirm(
                     pending.actionId(), pending.confirmationNonce(), UUID.randomUUID().toString(),
@@ -63,7 +63,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
     void pendingSuccessReplayAndCancellationSurviveContextRestarts() {
         PendingActionView pending;
         String firstKey = UUID.randomUUID().toString();
-        try (ConfigurableApplicationContext first = startContext("5.0")) {
+        try (ConfigurableApplicationContext first = startContext()) {
             reset(first);
             TestActionService service = service(first);
             pending = service.createPending(proposal(nextWeekday(service, 2)), "origin", null);
@@ -71,7 +71,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
 
         ActionExecutionResponse confirmed;
         PendingActionView cancelled;
-        try (ConfigurableApplicationContext second = startContext("9.0")) {
+        try (ConfigurableApplicationContext second = startContext()) {
             TestActionService service = service(second);
             assertEquals(new BigDecimal("5.0"), second.getBean(LeaveAccountRepository.class)
                     .findBalance("E10001").orElseThrow());
@@ -81,7 +81,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
             service.cancel(cancelled.actionId(), cancelled.confirmationNonce(), null, "cancel");
         }
 
-        try (ConfigurableApplicationContext third = startContext("9.0")) {
+        try (ConfigurableApplicationContext third = startContext()) {
             TestActionService service = service(third);
             ActionExecutionResponse sameKeyReplay = service.confirm(pending.actionId(),
                     pending.confirmationNonce(), firstKey, null, "same-key-replay");
@@ -108,7 +108,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
     void failedAndExpiredStatesSurviveContextRestart() {
         PendingActionView failed;
         PendingActionView expired;
-        try (ConfigurableApplicationContext first = startContext("5.0")) {
+        try (ConfigurableApplicationContext first = startContext()) {
             reset(first);
             TestActionService service = service(first);
             PendingActionView successful = service.createPending(
@@ -129,7 +129,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
                     null, "expired-confirm")).errorCode());
         }
 
-        try (ConfigurableApplicationContext second = startContext("9.0")) {
+        try (ConfigurableApplicationContext second = startContext()) {
             var repository = second.getBean(com.fantuan.copilot.repository.action.PendingActionRepository.class);
             assertEquals(com.fantuan.copilot.model.action.ActionStatus.FAILED,
                     repository.find(failed.actionId()).orElseThrow().status());
@@ -146,7 +146,7 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
         }
     }
 
-    private ConfigurableApplicationContext startContext(String configuredBalance) {
+    private ConfigurableApplicationContext startContext() {
         return new SpringApplicationBuilder(EnterpriseAiCopilotBackendApplication.class)
                 .web(WebApplicationType.NONE)
                 .run(
@@ -160,7 +160,6 @@ class BusinessActionRestartIntegrationTest extends PostgresIntegrationTestBase {
                         "--demo.auth.admin-password=admin-test-password",
                         "--business.actions.enabled=true",
                         "--business.actions.require-admin=false",
-                        "--business.actions.demo-annual-leave-balance=" + configuredBalance,
                         "--logging.level.org.springframework=WARN",
                         "--logging.level.org.flywaydb=WARN",
                         "--logging.level.com.zaxxer.hikari=WARN");

@@ -125,6 +125,3 @@ if JAVA_TIMEOUT_SECONDS < 1:
 # Scoped Conversation Memory P0：写入模式默认关闭，避免未显式配置时产生额外
 # Extractor LLM 成本或 Memory 提案。模式合法性在 Runtime Hook 构造时再次校验。
 MEMORY_WRITE_MODE = os.getenv('MEMORY_WRITE_MODE', 'DISABLED').strip()
-
-# 常量
-TOP_K = 3

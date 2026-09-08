@@ -34,13 +34,6 @@ _pooling_config = None
 _model_loaded = False
 
 
-def _load_config(model_dir: str) -> dict:
-    """加载模型配置。"""
-    config_path = os.path.join(model_dir, 'config.json')
-    with open(config_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
 def _load_pooling_config(model_dir: str) -> dict:
     """加载 pooling 配置。"""
     pooling_path = os.path.join(model_dir, '1_Pooling', 'config.json')

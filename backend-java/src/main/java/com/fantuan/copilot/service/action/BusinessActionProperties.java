@@ -1,12 +1,10 @@
 package com.fantuan.copilot.service.action;
 
-import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
 
-import java.math.BigDecimal;
 import java.time.ZoneId;
 
 @Component
@@ -21,8 +19,6 @@ public class BusinessActionProperties {
     private int maxPending = 100;
     @Min(1)
     private int maxCompleted = 500;
-    @DecimalMin("0.0")
-    private BigDecimal demoAnnualLeaveBalance = new BigDecimal("5.0");
     private String timezone = "Asia/Shanghai";
 
     public boolean isEnabled() { return enabled; }
@@ -35,8 +31,6 @@ public class BusinessActionProperties {
     public void setMaxPending(int maxPending) { this.maxPending = maxPending; }
     public int getMaxCompleted() { return maxCompleted; }
     public void setMaxCompleted(int maxCompleted) { this.maxCompleted = maxCompleted; }
-    public BigDecimal getDemoAnnualLeaveBalance() { return demoAnnualLeaveBalance; }
-    public void setDemoAnnualLeaveBalance(BigDecimal balance) { this.demoAnnualLeaveBalance = balance; }
     public String getTimezone() { return timezone; }
     public void setTimezone(String timezone) {
         ZoneId.of(timezone);

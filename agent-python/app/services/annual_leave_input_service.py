@@ -54,7 +54,6 @@ class AnnualLeaveInputError(ValueError):
 class AnnualLeaveInputAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    normalized_question: str
     date_evidence: list[str]
     start_date: date | None
     end_date: date | None
@@ -272,16 +271,6 @@ def parse_date_evidence(value: str, *, business_date: date) -> date:
     raise AnnualLeaveInputError("unsupported_date_evidence")
 
 
-def parse_half_day_evidence(value: str) -> Literal["NONE", "AM", "PM"]:
-    if not value:
-        return "NONE"
-    has_am = any(expression in value for expression in _AM_EXPRESSIONS)
-    has_pm = any(expression in value for expression in _PM_EXPRESSIONS)
-    if has_am == has_pm:
-        raise AnnualLeaveInputError("invalid_half_day_evidence")
-    return "AM" if has_am else "PM"
-
-
 def analyze_annual_leave_input(
     question: str,
     *,
@@ -374,7 +363,6 @@ def analyze_annual_leave_input(
         half_day = merged_half_day or "NONE"
 
     return AnnualLeaveInputAnalysis(
-        normalized_question=normalized,
         date_evidence=date_evidence,
         start_date=start_date,
         end_date=end_date,

@@ -54,7 +54,6 @@ class ExpenseInputAnalysis(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    is_claim_intent: bool
     trip_id: str | None
     invoice_ids: list[str]
     missing_fields: list[Literal["trip_id", "expense_items", "invoice_ids"]]
@@ -234,7 +233,6 @@ def analyze_expense_input(
         missing_fields.append("expense_items")
 
     return ExpenseInputAnalysis(
-        is_claim_intent=True,
         trip_id=trip_id,
         invoice_ids=invoice_ids,
         missing_fields=missing_fields,

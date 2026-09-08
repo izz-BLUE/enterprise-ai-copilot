@@ -55,11 +55,6 @@ def _build_index():
     logger.info('BM25 索引构建完成: %d chunks, %d terms', _doc_count, len(_idf))
 
 
-def retrieve(query: str, top_k: int = 3) -> list[dict]:
-    """BM25 检索，返回 top_k 个 chunk。"""
-    return [chunk for chunk, _score in retrieve_with_scores(query, top_k)]
-
-
 def retrieve_with_scores(query: str, top_k: int = 3) -> list[tuple[dict, float]]:
     """BM25 检索，返回 (chunk, score) 列表，供 RRF 使用。"""
     if not _chunks:

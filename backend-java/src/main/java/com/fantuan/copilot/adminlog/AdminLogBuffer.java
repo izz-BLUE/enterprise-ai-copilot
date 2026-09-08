@@ -116,22 +116,6 @@ public class AdminLogBuffer {
         return deque.size();
     }
 
-    public int capacity() {
-        return capacity;
-    }
-
-    /**
-     * 按时间倒序返回快照。可选 level / category / traceId 过滤。
-     * limit 默认 50，最大 100。非法参数抛 IllegalArgumentException，
-     * 由 ControllerAdvice 转 400。
-     */
-    public synchronized List<AdminLogEvent> snapshot(String level,
-                                                    String category,
-                                                    String traceId,
-                                                    Integer limit) {
-        return snapshotPage(level, category, traceId, limit, 0).items();
-    }
-
     /**
      * 按时间倒序分页返回快照，并返回过滤后的准确总数。
      */

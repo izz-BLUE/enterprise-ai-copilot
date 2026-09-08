@@ -41,12 +41,6 @@ def evaluate_gate(
     return decision
 
 
-def evaluate_gate_timed(candidates: list[CandidateSignals]) -> tuple[GateDecision, float]:
-    started = perf_counter()
-    decision = evaluate_gate(candidates)
-    return decision, (perf_counter() - started) * 1000
-
-
 def evaluate_gate_timed_fail_open(
     candidates: list[CandidateSignals], *, trace_id: str,
 ) -> tuple[GateDecision, float]:
