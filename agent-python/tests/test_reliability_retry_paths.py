@@ -1,9 +1,11 @@
-"""RAG/LLM 可靠性回归：统一入口、显式单次尝试和稳定失败契约。"""
+"""RAG/LLM 可靠性回归：统一入口、thinking 策略和稳定失败契约。"""
 
+import json
 from unittest.mock import patch
 
 from app.services.llm_service import LLMProviderError
 from app.services.rag_answer_service import RagAnswerResult, answer_rag
+from app.tools.rag_tools import rag_answer_tool
 
 CHUNKS = [{
     'id': 'c1', 'domain': 'hr', 'source_file': 'sample.md',
@@ -46,6 +48,37 @@ def test_valid_response_returns_traceable_sources(
     assert result.answer == 'answer'
     assert result.sources == ['hr/sample.md#chunk-0']
     call_llm.assert_called_once()
+
+
+@patch('app.services.rag_answer_service.log_gate_event')
+@patch('app.services.rag_answer_service.build_rag_prompt', return_value='prompt')
+@patch('app.services.rag_answer_service.retrieve_with_signals', return_value=(CHUNKS, []))
+@patch('app.services.rag_answer_service.rewrite_query', return_value=_rewrite_ok())
+def test_normal_rag_explicitly_disables_thinking(
+    _rewrite, _retrieve, _prompt, _log_event,
+):
+    with patch('app.services.rag_answer_service.call_llm', return_value='answer') as call_llm:
+        result = answer_rag('question', trace_id='trace-rag')
+
+    assert result.success is True
+    assert call_llm.call_args.kwargs['thinking'] is False
+
+
+@patch('app.services.rag_answer_service.log_gate_event')
+@patch('app.services.rag_answer_service.build_rag_prompt', return_value='prompt')
+@patch('app.services.rag_answer_service.retrieve_with_signals', return_value=(CHUNKS, []))
+@patch('app.services.rag_answer_service.rewrite_query', return_value=_rewrite_ok())
+def test_agent_rag_tool_uses_the_same_thinking_policy(
+    _rewrite, _retrieve, _prompt, _log_event,
+):
+    with patch('app.services.rag_answer_service.call_llm', return_value='answer') as call_llm:
+        output = json.loads(rag_answer_tool.invoke({
+            'question': 'question',
+            'trace_id': 'trace-agent-rag',
+        }))
+
+    assert output['success'] is True
+    assert call_llm.call_args.kwargs['thinking'] is False
 
 
 @patch('app.services.rag_answer_service.log_gate_event')

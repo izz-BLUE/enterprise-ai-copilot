@@ -8,6 +8,7 @@
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -41,13 +42,20 @@ def _status_exc(status_code: int):
 
 
 class _FakeChoice:
-    def __init__(self, content):
-        self.message = MagicMock(content=content)
+    def __init__(self, content, *, finish_reason=None, reasoning_content=None):
+        self.finish_reason = finish_reason
+        self.message = MagicMock(
+            content=content,
+            reasoning_content=reasoning_content,
+        )
 
 
 class _FakeResponse:
-    def __init__(self, choices):
+    def __init__(self, choices, *, usage=None, request_id=None):
         self.choices = choices
+        self.usage = usage
+        if request_id is not None:
+            self._request_id = request_id
 
 
 class TestClassifyProviderError:
@@ -166,6 +174,104 @@ class TestCallLlmEmptyResponse:
         kwargs = client.chat.completions.create.call_args.kwargs
         assert kwargs['response_format'] == {'type': 'json_object'}
         assert kwargs['extra_body'] == {'thinking': {'type': 'disabled'}}
+
+    def test_thinking_disabled_returns_content(self):
+        client = MagicMock()
+        client.chat.completions.create.return_value = _FakeResponse(
+            choices=[_FakeChoice('hello')],
+        )
+        with patch.object(llm_service, '_get_client', return_value=client):
+            assert call_llm('sys', 'usr', thinking=False) == 'hello'
+
+        assert client.chat.completions.create.call_args.kwargs['extra_body'] == {
+            'thinking': {'type': 'disabled'},
+        }
+
+
+class TestCallLlmEmptyResponseRetry:
+    def _patch_client(self, responses):
+        client = MagicMock()
+        client.chat.completions.create.side_effect = responses
+        return client, patch.object(llm_service, '_get_client', return_value=client)
+
+    def test_empty_choices_then_success_retries_once(self):
+        client, client_patch = self._patch_client([
+            _FakeResponse(choices=[]),
+            _FakeResponse(choices=[_FakeChoice('hello')]),
+        ])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            assert call_llm('sys', 'usr') == 'hello'
+
+        assert client.chat.completions.create.call_count == 2
+
+    def test_empty_content_then_success_retries_once(self):
+        client, client_patch = self._patch_client([
+            _FakeResponse(choices=[_FakeChoice('', finish_reason='stop')]),
+            _FakeResponse(choices=[_FakeChoice('hello')]),
+        ])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            assert call_llm('sys', 'usr') == 'hello'
+
+        assert client.chat.completions.create.call_count == 2
+
+    def test_length_empty_content_is_not_retried_and_is_classified(self, caplog):
+        usage = SimpleNamespace(
+            prompt_tokens=1190,
+            completion_tokens=1024,
+            total_tokens=2214,
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=1024),
+        )
+        client, client_patch = self._patch_client([
+            _FakeResponse(
+                choices=[_FakeChoice('', finish_reason='length')],
+                usage=usage,
+                request_id='provider-request-1',
+            ),
+            _FakeResponse(choices=[_FakeChoice('should-not-be-called')]),
+        ])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            with caplog.at_level('WARNING', logger='agent'):
+                assert call_llm('sys', 'usr') == ''
+
+        assert client.chat.completions.create.call_count == 1
+        log = caplog.text
+        assert 'reason=OUTPUT_BUDGET_EXHAUSTED' in log
+        assert 'finish_reason=length' in log
+        assert 'completion_tokens=1024' in log
+        assert 'reasoning_tokens=1024' in log
+        assert 'content_present=False' in log
+        assert 'provider_request_id=provider-request-1' in log
+
+    def test_two_empty_responses_return_empty_after_one_retry(self):
+        client, client_patch = self._patch_client([
+            _FakeResponse(choices=[]),
+            _FakeResponse(choices=[_FakeChoice('')]),
+        ])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            assert call_llm('sys', 'usr') == ''
+
+        assert client.chat.completions.create.call_count == 2
+
+    def test_first_normal_response_does_not_retry(self):
+        client, client_patch = self._patch_client([
+            _FakeResponse(choices=[_FakeChoice('hello')]),
+        ])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            assert call_llm('sys', 'usr') == 'hello'
+
+        assert client.chat.completions.create.call_count == 1
+
+    def test_provider_exception_is_not_retried_by_empty_response_loop(self):
+        client, client_patch = self._patch_client([_timeout_exc()])
+        with patch.object(llm_service, 'LLM_MAX_RETRIES', 0), client_patch:
+            try:
+                call_llm('sys', 'usr')
+            except LLMProviderError as exc:
+                assert exc.code == PROVIDER_ERROR_TIMEOUT
+            else:
+                raise AssertionError('LLMProviderError 未抛出')
+
+        assert client.chat.completions.create.call_count == 1
 
 
 class TestControlledClientUnchanged:

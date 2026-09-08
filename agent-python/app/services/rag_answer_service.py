@@ -111,9 +111,13 @@ def answer_rag(
 
         logger.info('[%s] 开始调用 LLM', trace_id)
         llm_called = True
-        answer = call_llm(SYSTEM_PROMPT, build_rag_prompt(question, chunks))
+        answer = call_llm(
+            SYSTEM_PROMPT,
+            build_rag_prompt(question, chunks),
+            thinking=False,
+        )
         if not (answer or '').strip():
-            logger.warning('[%s] LLM 返回空响应，走失败兜底', trace_id)
+            logger.warning('[%s] LLM 未返回有效答案，走失败兜底', trace_id)
             return RagAnswerResult(
                 answer=UNAVAILABLE_ANSWER,
                 model=DEEPSEEK_MODEL,
