@@ -15,7 +15,6 @@ from typing import Literal
 # ── 公共常量 ────────────────────────────────────────────────
 RAG_TOOL = 'rag_answer_tool'
 EVAL_TOOL = 'eval_report_tool'
-ALL_TOOLS = (RAG_TOOL, EVAL_TOOL)
 
 ToolScenario = Literal['normal', 'error_once', 'timeout_once', 'observation_injection']
 
@@ -97,14 +96,6 @@ _RAG_TOPIC_BY_KEYWORD = {
     '会议': 'meeting',
     '入职': 'onboarding',
 }
-
-# Eval report_type → 标准化 topic id
-_EVAL_TOPIC_BY_REPORT_TYPE = {
-    'retrieval': 'retrieval',
-    'generation': 'generation',
-    'all': 'all',
-}
-
 
 # Eval 固定指标：与 RAG/Eval 真实产物无关
 _RAG_EVAL_REPORT = {
@@ -513,15 +504,6 @@ def case_by_id(case_id: str) -> RealAgentEvalCase:
     return next(c for c in REAL_AGENT_EVAL_CASES if c.case_id == case_id)
 
 
-def cases_by_category(
-    category: str,
-    cases: list[RealAgentEvalCase] | None = None,
-) -> list[RealAgentEvalCase]:
-    """按 category 过滤 Case。"""
-    source = REAL_AGENT_EVAL_CASES if cases is None else cases
-    return [c for c in source if c.category == category]
-
-
 # Stub 暴露的辅助函数（tool_stubs 模块调用，避免重复定义）
 __all__ = [
     'REAL_AGENT_EVAL_CASES',
@@ -530,23 +512,11 @@ __all__ = [
     'REAL_AGENT_EVAL_SUITE_VERSION',
     'CATEGORY_LABELS',
     'case_by_id',
-    'cases_by_category',
     'find_rag_facts',
     'eval_payload',
     'observation_injection_prompt',
-    'rag_topic_for_question',
     'rag_topics_for_question',
-    'eval_topic_for_report_type',
 ]
-
-
-def rag_topic_for_question(question: str) -> str | None:
-    """把模型生成的 question 文本路由到单一 KB topic id（取首个命中）。
-
-    兼容旧接口；新代码请优先使用 rag_topics_for_question()。
-    """
-    topics = rag_topics_for_question(question)
-    return topics[0] if topics else None
 
 
 def rag_topics_for_question(question: str) -> list[str]:
@@ -559,10 +529,6 @@ def rag_topics_for_question(question: str) -> list[str]:
         topic for keyword, topic in _RAG_TOPIC_BY_KEYWORD.items()
         if keyword in question
     ]
-
-
-def eval_topic_for_report_type(report_type: str) -> str:
-    return _EVAL_TOPIC_BY_REPORT_TYPE.get(report_type, report_type)
 
 
 def find_rag_facts(question: str) -> str:

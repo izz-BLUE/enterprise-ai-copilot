@@ -80,8 +80,8 @@ class TraceIdFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        List<AdminLogEvent> events = buffer.snapshot(
-                null, AdminLogEvent.CATEGORY_REQUEST, null, 50);
+        List<AdminLogEvent> events = buffer.snapshotPage(
+                null, AdminLogEvent.CATEGORY_REQUEST, null, 50, 0).items();
         assertEquals(1, events.size());
         AdminLogEvent event = events.get(0);
         assertEquals("POST", event.httpMethod());

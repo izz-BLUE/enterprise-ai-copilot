@@ -17,10 +17,4 @@ public record TaskExecution(
         Instant createdAt,
         Instant updatedAt,
         Instant completedAt) {
-
-    public boolean isCurrentInteractiveTask() {
-        return status == TaskExecutionStatus.RUNNING
-                || status == TaskExecutionStatus.WAITING_CLARIFICATION
-                || status == TaskExecutionStatus.WAITING_USER;
-    }
 }

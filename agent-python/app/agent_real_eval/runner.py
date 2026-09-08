@@ -197,13 +197,6 @@ def _entry_topics(entry: dict) -> list[str]:
     return []
 
 
-# 兼容旧名：取首个 topic（用于历史 hit-path）
-def _entry_topic(entry: dict) -> str | None:
-    """单 topic 检索：取 _entry_topics 首个；多 topic 覆盖场景请直接用 _entry_topics。"""
-    topics = _entry_topics(entry)
-    return topics[0] if topics else None
-
-
 def _completed_required_tools(
     required_tools: tuple[str, ...],
     executed: list[str],

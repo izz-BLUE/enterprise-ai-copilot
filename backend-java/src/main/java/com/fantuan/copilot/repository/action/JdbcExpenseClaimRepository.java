@@ -77,21 +77,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                        external_last_checked_at, external_resume_last_attempt_at,
                        external_resume_completed_at
                 FROM expense_claim WHERE expense_id = :id
-                """, Map.of("id", expenseId), (rs, rowNum) -> new ExpenseClaim(
-                rs.getString("expense_id"),
-                rs.getString("source_action_id"),
-                rs.getString("employee_id"),
-                rs.getString("trip_id"),
-                rs.getString("cost_center"),
-                rs.getBigDecimal("claimed_amount"),
-                rs.getBigDecimal("reimbursable_amount"),
-                ExpenseStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at"),
-                nullableInstant(rs, "external_resume_last_attempt_at"),
-                nullableInstant(rs, "external_resume_completed_at")))
+                """, Map.of("id", expenseId), (rs, rowNum) -> mapClaim(rs))
                 .stream().findFirst();
     }
 
@@ -104,21 +90,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                        external_last_checked_at, external_resume_last_attempt_at,
                        external_resume_completed_at
                 FROM expense_claim WHERE external_request_id = :requestId
-                """, Map.of("requestId", requestId), (rs, rowNum) -> new ExpenseClaim(
-                rs.getString("expense_id"),
-                rs.getString("source_action_id"),
-                rs.getString("employee_id"),
-                rs.getString("trip_id"),
-                rs.getString("cost_center"),
-                rs.getBigDecimal("claimed_amount"),
-                rs.getBigDecimal("reimbursable_amount"),
-                ExpenseStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at"),
-                nullableInstant(rs, "external_resume_last_attempt_at"),
-                nullableInstant(rs, "external_resume_completed_at")))
+                """, Map.of("requestId", requestId), (rs, rowNum) -> mapClaim(rs))
                 .stream().findFirst();
     }
 
@@ -195,16 +167,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 ORDER BY external_last_checked_at ASC NULLS FIRST, expense_id ASC
                 LIMIT :limit
                 """, Map.of("cutoff", Timestamp.from(cutoff), "limit", boundedLimit),
-                (rs, rowNum) -> new ExpenseClaim(
-                rs.getString("expense_id"), rs.getString("source_action_id"),
-                rs.getString("employee_id"), rs.getString("trip_id"),
-                rs.getString("cost_center"), rs.getBigDecimal("claimed_amount"),
-                rs.getBigDecimal("reimbursable_amount"), ExpenseStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at"),
-                nullableInstant(rs, "external_resume_last_attempt_at"),
-                nullableInstant(rs, "external_resume_completed_at")));
+                (rs, rowNum) -> mapClaim(rs));
     }
 
     @Override
@@ -287,16 +250,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                   AND external_request_id IS NULL
                 ORDER BY updated_at ASC
                 LIMIT :limit
-                """, Map.of("limit", limit), (rs, rowNum) -> new ExpenseClaim(
-                rs.getString("expense_id"), rs.getString("source_action_id"),
-                rs.getString("employee_id"), rs.getString("trip_id"),
-                rs.getString("cost_center"), rs.getBigDecimal("claimed_amount"),
-                rs.getBigDecimal("reimbursable_amount"), ExpenseStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("external_provider"), rs.getString("external_request_id"),
-                rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at"),
-                nullableInstant(rs, "external_resume_last_attempt_at"),
-                nullableInstant(rs, "external_resume_completed_at")));
+                """, Map.of("limit", limit), (rs, rowNum) -> mapClaim(rs));
     }
 
     @Override
@@ -326,21 +280,7 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                 ORDER BY created_at DESC
                 LIMIT :limit
                 """, Map.of("employeeId", employeeId, "limit", limit),
-                (rs, rowNum) -> new ExpenseClaim(
-                        rs.getString("expense_id"),
-                        rs.getString("source_action_id"),
-                        rs.getString("employee_id"),
-                        rs.getString("trip_id"),
-                        rs.getString("cost_center"),
-                        rs.getBigDecimal("claimed_amount"),
-                        rs.getBigDecimal("reimbursable_amount"),
-                        ExpenseStatus.valueOf(rs.getString("status")),
-                        rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant(),
-                        rs.getString("external_provider"), rs.getString("external_request_id"),
-                        rs.getString("external_wait_id"), nullableInstant(rs, "external_last_checked_at"),
-                        nullableInstant(rs, "external_resume_last_attempt_at"),
-                        nullableInstant(rs, "external_resume_completed_at")));
+                (rs, rowNum) -> mapClaim(rs));
     }
 
     private Instant nullableInstant(ResultSet rs, String column) throws SQLException {

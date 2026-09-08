@@ -274,7 +274,6 @@ def test_real_sdk_serialized_request_contains_only_protocol_data(monkeypatch):
         )
 
     analysis = AnnualLeaveInputAnalysis(
-        normalized_question=question,
         date_evidence=["2026-11-17", "2026-11-18"],
         start_date=date(2026, 11, 17),
         end_date=date(2026, 11, 18),

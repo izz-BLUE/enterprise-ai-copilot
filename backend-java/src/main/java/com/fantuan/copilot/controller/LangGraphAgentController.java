@@ -73,26 +73,6 @@ public class LangGraphAgentController {
         return UUID.randomUUID().toString();
     }
 
-    /**
-     * 基于服务端可信 (userId, conversationId) 复合 key 读取当前会话的 ACTIVE memory，
-     * 构造内部 MemoryContextView。返回 empty 表示"无 Memory"。
-     *
-     * 安全/容错保证：
-     *  1. 仅按 (userId, conversationId) 复合 key 读取；userId 来自服务端已认证 identity。
-     *  2. 仅 status=ACTIVE 才返回 view；COMPLETED/ABANDONED/不存在 → empty。
-     *  3. 读库异常 → 记录安全日志 + 返回 empty，绝不阻断 Agent 请求。
-     *  4. 视图字段由 AiTaskMemoryService / DB CHECK 约束保证大小上限，无需在此重复校验。
-     *  5. 视图不包含 userId / conversationId / nonce / idempotencyKey 等敏感或业务字段。
-     */
-    Optional<InternalAgentChatRequest.MemoryContextView> loadMemoryContext(
-            String userId, String conversationId, String traceId) {
-        try {
-            return memoryCoordinator.load(userId, conversationId, traceId);
-        } catch (RuntimeException exception) {
-            return Optional.empty();
-        }
-    }
-
     private static final Logger log = LoggerFactory.getLogger(LangGraphAgentController.class);
     private final PythonAgentGateway pythonAgentGateway;
     private final AdminAccessService adminAccessService;
@@ -239,7 +219,7 @@ public class LangGraphAgentController {
         // Memory Read Path：服务端按 (userId, conversationId) 复合 key 读取 ai_task_memory，
         // 仅在 status=ACTIVE 时填充内部请求体的 memoryContext 字段。
         // memoryContext 不会出现在公共 ChatRequest 中（前端不可见 / 不可提交）。
-        Optional<InternalAgentChatRequest.MemoryContextView> memoryContext = loadMemoryContext(
+        Optional<InternalAgentChatRequest.MemoryContextView> memoryContext = memoryCoordinator.load(
                 identity.userId(), conversationId, traceId);
 
         log.info("[{}] 收到 LangGraph Agent 请求: allowEval={}, allowBusinessActions={}, conversationId={}, memoryAttached={}",

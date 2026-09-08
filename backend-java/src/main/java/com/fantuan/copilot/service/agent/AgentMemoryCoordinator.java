@@ -19,6 +19,16 @@ public final class AgentMemoryCoordinator {
         this.memoryService = memoryService;
     }
 
+    /**
+     * 基于服务端可信 (userId, conversationId) 复合 key 读取当前会话的 ACTIVE memory，
+     * 构造内部 MemoryContextView。返回 empty 表示"无 Memory"。
+     *
+     * 安全 / 容错保证（fail-open，异常绝不向 Agent 请求冒泡）：
+     *  1. 仅 status=ACTIVE 才返回 view；COMPLETED/ABANDONED/不存在 → empty。
+     *  2. 读库异常 → 记录日志 + 返回 empty。
+     *  3. 视图字段由 AiTaskMemoryService / DB CHECK 约束保证大小上限，此处不重复校验。
+     *  4. 视图不包含 userId / conversationId / nonce / idempotencyKey 等敏感或业务字段。
+     */
     public Optional<InternalAgentChatRequest.MemoryContextView> load(
             String userId, String conversationId, String traceId) {
         try {

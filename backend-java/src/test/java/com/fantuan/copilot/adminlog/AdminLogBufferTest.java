@@ -41,7 +41,7 @@ class AdminLogBufferTest {
         }
         assertEquals(500, buffer.size());
         // 第一页：最新 100 条
-        List<AdminLogEvent> firstPage = buffer.snapshot(null, null, null, 100);
+        List<AdminLogEvent> firstPage = buffer.snapshotPage(null, null, null, 100, 0).items();
         assertEquals(100, firstPage.size());
         assertEquals(Instant.ofEpochMilli(599), firstPage.get(0).timestamp());
         assertEquals(Instant.ofEpochMilli(500), firstPage.get(99).timestamp());
@@ -53,7 +53,7 @@ class AdminLogBufferTest {
                     Instant.ofEpochMilli(i)));
         }
         assertEquals(500, buffer.size());
-        List<AdminLogEvent> latest = buffer.snapshot(null, null, null, 100);
+        List<AdminLogEvent> latest = buffer.snapshotPage(null, null, null, 100, 0).items();
         assertEquals(Instant.ofEpochMilli(699), latest.get(0).timestamp());
         assertEquals(Instant.ofEpochMilli(600), latest.get(99).timestamp());
     }
@@ -69,18 +69,18 @@ class AdminLogBufferTest {
         buffer.record(sample("WARN", AdminLogEvent.CATEGORY_BUSINESS_ACTION, "ACTION_CANCELLED",
                 "trace-a", base.plusSeconds(2)));
 
-        List<AdminLogEvent> onlyError = buffer.snapshot("ERROR", null, null, null);
+        List<AdminLogEvent> onlyError = buffer.snapshotPage("ERROR", null, null, null, 0).items();
         assertEquals(1, onlyError.size());
         assertEquals("MEMORY_WRITE_REJECTED", onlyError.get(0).event());
 
-        List<AdminLogEvent> onlyMemory = buffer.snapshot(null, "MEMORY", null, null);
+        List<AdminLogEvent> onlyMemory = buffer.snapshotPage(null, "MEMORY", null, null, 0).items();
         assertEquals(1, onlyMemory.size());
         assertEquals("ERROR", onlyMemory.get(0).level());
 
-        List<AdminLogEvent> traceMatch = buffer.snapshot(null, null, "trace-a", null);
+        List<AdminLogEvent> traceMatch = buffer.snapshotPage(null, null, "trace-a", null, 0).items();
         assertEquals(2, traceMatch.size());
 
-        List<AdminLogEvent> traceMiss = buffer.snapshot(null, null, "trace-c", null);
+        List<AdminLogEvent> traceMiss = buffer.snapshotPage(null, null, "trace-c", null, 0).items();
         assertTrue(traceMiss.isEmpty());
     }
 
@@ -89,13 +89,13 @@ class AdminLogBufferTest {
         AdminLogBuffer buffer = new AdminLogBuffer();
         buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM, "X", null, Instant.now()));
         assertThrows(IllegalArgumentException.class,
-                () -> buffer.snapshot("BOGUS", null, null, null));
+                () -> buffer.snapshotPage("BOGUS", null, null, null, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> buffer.snapshot(null, "BOGUS", null, null));
+                () -> buffer.snapshotPage(null, "BOGUS", null, null, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> buffer.snapshot(null, null, null, 0));
+                () -> buffer.snapshotPage(null, null, null, 0, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> buffer.snapshot(null, null, null, 500));
+                () -> buffer.snapshotPage(null, null, null, 500, 0));
     }
 
     @Test
@@ -105,7 +105,7 @@ class AdminLogBufferTest {
         buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM, "A", null, t));
         buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM, "B", null, t.plusSeconds(1)));
         buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM, "C", null, t.plusSeconds(2)));
-        List<AdminLogEvent> snapshot = buffer.snapshot(null, null, null, 10);
+        List<AdminLogEvent> snapshot = buffer.snapshotPage(null, null, null, 10, 0).items();
         assertEquals("C", snapshot.get(0).event());
         assertEquals("B", snapshot.get(1).event());
         assertEquals("A", snapshot.get(2).event());
@@ -119,7 +119,7 @@ class AdminLogBufferTest {
             buffer.record(sample("INFO", AdminLogEvent.CATEGORY_SYSTEM, "X", null,
                     Instant.ofEpochMilli(i)));
         }
-        List<AdminLogEvent> snapshot = buffer.snapshot(null, null, null, null);
+        List<AdminLogEvent> snapshot = buffer.snapshotPage(null, null, null, null, 0).items();
         assertEquals(50, snapshot.size());
     }
 

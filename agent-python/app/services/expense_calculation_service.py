@@ -68,6 +68,4 @@ def infer_stay_nights(trip: dict[str, Any] | None) -> int:
 def _as_decimal(value: Any) -> Decimal:
     if isinstance(value, Decimal):
         return value
-    if isinstance(value, (int, float)):
-        return Decimal(str(value))
     return Decimal(str(value))

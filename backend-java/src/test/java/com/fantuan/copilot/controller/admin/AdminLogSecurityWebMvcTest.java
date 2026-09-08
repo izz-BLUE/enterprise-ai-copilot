@@ -106,7 +106,7 @@ class AdminLogSecurityWebMvcTest {
 
     @Test
     void adminJwtReturns200() throws Exception {
-        adminLogBuffer.snapshot(null, null, null, 1);
+        adminLogBuffer.snapshotPage(null, null, null, 1, 0);
         when(jwtDecoder.decode(anyString())).thenReturn(buildJwt("ADMIN", "U90001", "admin"));
         mockMvc.perform(get("/api/admin/logs").accept(MediaType.APPLICATION_JSON).with(bearer("ADMIN")))
                 .andExpect(status().isOk())
@@ -149,7 +149,7 @@ class AdminLogSecurityWebMvcTest {
      */
     @Test
     void employeeAccessDeniedRecordsSecurityEvent() throws Exception {
-        adminLogBuffer.snapshot(null, null, null, 1);
+        adminLogBuffer.snapshotPage(null, null, null, 1, 0);
         when(jwtDecoder.decode(anyString())).thenReturn(buildJwt("EMPLOYEE", "U10001", "zhangsan"));
         mockMvc.perform(get("/api/admin/logs").accept(MediaType.APPLICATION_JSON).with(bearer("EMPLOYEE")))
                 .andExpect(status().isForbidden());
@@ -177,7 +177,7 @@ class AdminLogSecurityWebMvcTest {
      */
     @Test
     void adminSelfQueryDoesNotGenerateRequestLog() throws Exception {
-        adminLogBuffer.snapshot(null, null, null, 1);
+        adminLogBuffer.snapshotPage(null, null, null, 1, 0);
         when(jwtDecoder.decode(anyString())).thenReturn(buildJwt("ADMIN", "U90001", "admin"));
 
         mockMvc.perform(get("/api/admin/logs").accept(MediaType.APPLICATION_JSON).with(bearer("ADMIN")))
