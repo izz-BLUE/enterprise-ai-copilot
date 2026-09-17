@@ -511,6 +511,38 @@ class ExpenseGuard:
                 'need_travel_history',
                 normalized_reason,
             )
+        elif (
+            decision.action == 'tool'
+            and decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+            and context.action_proposal is None
+            and context.continuation_original_request
+            and normalized_reason is not None
+            and _successful_observations(
+                context.tool_history, TRAVEL_RECORD_TOOL_NAME
+            )
+            and INVOICE_VERIFY_TOOL_NAME in tools
+        ):
+            source_question = context.continuation_original_request or context.question
+            view = _context_view(context)
+            try:
+                analysis = expense_input_service.analyze_expense_input(
+                    source_question, context=view
+                )
+            except expense_input_service.ExpenseInputError:
+                analysis = None
+            if analysis is not None:
+                progress = self._selected_invoice_progress(
+                    context, analysis=analysis, view=view
+                )
+                if progress is not None:
+                    _, _, pending_invoice_ids = progress
+                    if pending_invoice_ids:
+                        decision = self._tool_decision(
+                            INVOICE_VERIFY_TOOL_NAME,
+                            {'invoice_id': pending_invoice_ids[0]},
+                            'need_invoice_verify',
+                            normalized_reason,
+                        )
 
         if context.step_count == 0:
             frozen = self._normalize_reason(decision.expense_reason)
