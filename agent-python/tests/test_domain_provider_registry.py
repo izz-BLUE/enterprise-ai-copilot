@@ -251,6 +251,80 @@ def test_expense_guard_completion_recovery_selects_travel_for_active_reason_cont
     assert decision.reason_code == 'need_travel_history'
 
 
+def test_expense_guard_rewrites_proposal_to_travel_for_reason_continuation():
+    guard = ExpenseGuard()
+    decision, updates = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME, expense_reason='工作拜访'),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(),
+            request_expense_reason=None,
+            continuation_original_request='帮我报销最近的一次出差记录',
+            step_count=0,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == TRAVEL_RECORD_TOOL_NAME
+    assert decision.arguments == {}
+    assert decision.reason_code == 'need_travel_history'
+    assert decision.expense_reason == '工作拜访'
+    assert updates == {'request_expense_reason': '工作拜访'}
+
+
+def test_expense_guard_rewrites_proposal_to_travel_using_frozen_reason():
+    guard = ExpenseGuard()
+    decision, updates = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(),
+            request_expense_reason='工作拜访',
+            continuation_original_request='帮我报销最近的一次出差记录',
+            step_count=1,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == TRAVEL_RECORD_TOOL_NAME
+    assert decision.expense_reason == '工作拜访'
+    assert updates == {'request_expense_reason': '工作拜访'}
+
+
+def test_expense_guard_keeps_first_expense_proposal_for_missing_reason():
+    guard = ExpenseGuard()
+    decision, updates = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='帮我报销最近的一次出差记录',
+            tool_history=tuple(),
+            request_expense_reason=None,
+            continuation_original_request=None,
+            step_count=0,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert decision.expense_reason is None
+    assert updates == {'request_expense_reason': None}
+
+
 def test_expense_guard_completion_recovery_handles_single_invoice():
     provider = ExpenseGuard()
     history = _history()

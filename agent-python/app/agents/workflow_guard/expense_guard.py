@@ -488,6 +488,30 @@ class ExpenseGuard:
                 'expense_reason': None,
             }).validate_decision()
 
+        current_reason = (
+            decision.expense_reason
+            if context.step_count == 0
+            else context.request_expense_reason
+        )
+        normalized_reason = self._normalize_reason(current_reason)
+        if (
+            decision.action == 'tool'
+            and decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+            and context.action_proposal is None
+            and context.continuation_original_request
+            and normalized_reason is not None
+            and TRAVEL_RECORD_TOOL_NAME in tools
+            and not _successful_observations(
+                context.tool_history, TRAVEL_RECORD_TOOL_NAME
+            )
+        ):
+            decision = self._tool_decision(
+                TRAVEL_RECORD_TOOL_NAME,
+                {},
+                'need_travel_history',
+                normalized_reason,
+            )
+
         if context.step_count == 0:
             frozen = self._normalize_reason(decision.expense_reason)
         else:
