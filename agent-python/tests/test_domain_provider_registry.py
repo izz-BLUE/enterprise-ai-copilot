@@ -215,6 +215,42 @@ def test_expense_guard_completion_recovery_stays_fail_closed_without_selected_tr
     ) is None
 
 
+def test_expense_guard_completion_recovery_selects_travel_for_active_reason_continuation():
+    decision = ExpenseGuard().recover_completion_decision(
+        _finish_decision(),
+        [
+            RAG_TOOL_NAME,
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(),
+            request_expense_reason='工作拜访',
+            continuation_original_request='帮我报销最近的一次出差记录',
+            memory_context={
+                'taskType': 'EXPENSE_REQUEST',
+                'status': 'ACTIVE',
+                'taskStateJson': json.dumps(
+                    {
+                        'waiting_for': 'reason',
+                        'original_request': '帮我报销最近的一次出差记录',
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ),
+        'expense_proposal_missing',
+    )
+
+    assert decision is not None
+    assert decision.action == 'tool'
+    assert decision.tool_name == TRAVEL_RECORD_TOOL_NAME
+    assert decision.arguments == {}
+    assert decision.reason_code == 'need_travel_history'
+
+
 def test_expense_guard_completion_recovery_handles_single_invoice():
     provider = ExpenseGuard()
     history = _history()
