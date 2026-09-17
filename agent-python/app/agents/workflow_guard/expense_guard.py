@@ -133,6 +133,23 @@ class ExpenseGuard:
         if error_code != 'expense_proposal_missing' or decision.action != 'finish':
             return None
 
+        if (
+            context.continuation_original_request
+            and TRAVEL_RECORD_TOOL_NAME in tools
+            and not _successful_observations(
+                context.tool_history, TRAVEL_RECORD_TOOL_NAME
+            )
+        ):
+            # ACTIVE Expense continuation 的当前 execution 可能尚未重建
+            # travel facts；旧 execution_history 不属于当前 tool_history，
+            # 因此在 travel tool 可用时确定性补回第一步。
+            return self._tool_decision(
+                TRAVEL_RECORD_TOOL_NAME,
+                {},
+                'need_travel_history',
+                context.request_expense_reason,
+            )
+
         source_question = context.continuation_original_request or context.question
         view = _context_view(context)
         try:
