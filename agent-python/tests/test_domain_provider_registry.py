@@ -301,6 +301,129 @@ def test_expense_guard_rewrites_proposal_to_travel_using_frozen_reason():
     assert updates == {'request_expense_reason': '工作拜访'}
 
 
+def test_expense_guard_rewrites_proposal_to_first_pending_invoice():
+    guard = ExpenseGuard()
+    decision, updates = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(_history()),
+            request_expense_reason='工作拜访',
+            continuation_original_request='帮我报销最近的一次出差记录',
+            step_count=1,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert decision.arguments == {'invoice_id': 'INV-1'}
+    assert decision.reason_code == 'need_invoice_verify'
+    assert decision.expense_reason == '工作拜访'
+    assert updates == {'request_expense_reason': '工作拜访'}
+
+
+def test_expense_guard_invoice_rewrite_reaches_tool_executor():
+    guard = ExpenseGuard()
+    history = _history()
+    context = _context(
+        question='工作拜访',
+        tool_history=tuple(history),
+        request_expense_reason='工作拜访',
+        continuation_original_request='帮我报销最近的一次出差记录',
+        step_count=1,
+    )
+    decision, updates = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        context,
+    )
+
+    state = {
+        'question': context.question,
+        'employee_id': 'E10001',
+        'allow_business_actions': True,
+        'business_date': date(2026, 8, 26),
+        'request_expense_reason': updates['request_expense_reason'],
+        'continuation_original_request': context.continuation_original_request,
+        'action_proposal': None,
+        'tool_history': history,
+        'tool_call_count': 0,
+        'planner_decision': decision.model_dump(),
+    }
+    with patch('app.agents.tool_executor_node.invoice_verify_tool') as verifier:
+        verifier.invoke.return_value = json.dumps({
+            'success': True,
+            'invoice_id': 'INV-1',
+            'valid': True,
+        })
+        result = tool_executor_node(
+            checkpoint_safe_state(state), runtime_for_state(state)
+        )
+
+    assert result['stop_reason'] == 'tool_executed'
+    assert verifier.invoke.call_args.args[0]['invoice_id'] == 'INV-1'
+    assert result['tool_history'][-1]['tool_name'] == INVOICE_VERIFY_TOOL_NAME
+
+
+def test_expense_guard_rewrites_proposal_to_next_pending_invoice():
+    guard = ExpenseGuard()
+    decision, _ = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(_history('INV-1')),
+            request_expense_reason='工作拜访',
+            continuation_original_request='帮我报销最近的一次出差记录',
+            step_count=1,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == INVOICE_VERIFY_TOOL_NAME
+    assert decision.arguments == {'invoice_id': 'INV-2'}
+    assert decision.reason_code == 'need_invoice_verify'
+    assert decision.expense_reason == '工作拜访'
+
+
+def test_expense_guard_keeps_proposal_after_all_selected_invoices_verified():
+    guard = ExpenseGuard()
+    decision, _ = guard.postprocess_selected_tool(
+        _decision(EXPENSE_PROPOSAL_TOOL_NAME),
+        [
+            TRAVEL_RECORD_TOOL_NAME,
+            INVOICE_VERIFY_TOOL_NAME,
+            EXPENSE_PROPOSAL_TOOL_NAME,
+        ],
+        _context(
+            question='工作拜访',
+            tool_history=tuple(_history('INV-1', 'INV-2')),
+            request_expense_reason='工作拜访',
+            continuation_original_request='帮我报销最近的一次出差记录',
+            step_count=1,
+        ),
+    )
+
+    assert decision.action == 'tool'
+    assert decision.tool_name == EXPENSE_PROPOSAL_TOOL_NAME
+    assert decision.arguments == {}
+    assert decision.reason_code == 'need_expense_proposal'
+    assert decision.expense_reason == '工作拜访'
+
+
 def test_expense_guard_keeps_first_expense_proposal_for_missing_reason():
     guard = ExpenseGuard()
     decision, updates = guard.postprocess_selected_tool(
