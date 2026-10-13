@@ -28,6 +28,8 @@
 - **Phoenix 可观测性边界**：`PHOENIX_TRACING` 默认关闭；启用时以 OpenTelemetry/OpenInference + BatchSpanProcessor 旁路追踪 Python AI 请求，初始化/导出失败不得阻断业务。默认不采集 Prompt、用户输入、检索正文或模型输出；`business_trace_id` 只用于关联定位，不是身份、权限或业务事实来源。现有离线评估仍是回归门禁。
 - **公网状态约束**：仓库对公网实际运行版本无证据，文档统一表述"仓库部署默认固定 Planner-first；legacy deterministic graph 仅保留给直接测试/离线兼容"；公网是否启用受控业务动作以运维 `.env` 为准，本文件不据此做能力宣称。
 
+- **Expense submission recovery**：TaskRuntime 报销确认事务内的 `TaskExecution=WAITING_EXTERNAL` 是继续提交 OA 的 durable intent。Submission retry 按 `ExpenseClaim.source_action_id` 精确关联报销 task，即使尚未绑定 `external_wait_id` 也可恢复；Legacy 仍须先绑定有效 external wait。发送前重读 claim 并保留 `external_request_id` 门禁及稳定 OA 幂等键，HTTP 始终在本地事务之外。
+
 ## 高频命令
 
 - 启动：agent-python `uv run uvicorn app.main:app --reload --port 8000`；backend-java `./mvnw spring-boot:run`；frontend `npm run dev`

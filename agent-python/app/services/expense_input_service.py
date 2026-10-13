@@ -10,6 +10,7 @@ Proposal 业务字段。
 - 从 question 提取"报销/报账"业务词命中（意图判定）
 - 从成功 travel_record observation 中按显式 trip_id / 目的地匹配 trip
 - 支持主 Demo 的确定性相对语义："最近/最新"从 APPROVED 集合选择最新 trip
+- 目的地必须唯一；多候选返回固定排序的选择澄清，续接仅解析明确 ID / 序号 / 出发日期
 - "对应发票/相关发票"只从已选 trip 的 expense_documents 推导，并仍要求
   invoice_verify 成功，不能绕过验真事实
 - 缺 trip_id 或发票明细时返回固定顺序 missing_fields（V2 §十五）
@@ -18,9 +19,10 @@ Proposal 业务字段。
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # 报销意图动作词（"报销""报账""报销一下"）。咨询句（"报销流程是什么"）由
 # Planner 路由到 rag_answer_tool，不会进入 proposal 链路。
@@ -35,7 +37,7 @@ _QUERY_NOISE_EXPRESSIONS = (
     "如何填",
 )
 
-_TRIP_ID_PATTERN = re.compile(r"TRIP-[0-9A-Za-z-]+")
+_TRIP_ID_PATTERN = re.compile(r"(?<![0-9A-Za-z_-])(?:TRIP-[0-9A-Za-z-]+|T[0-9]+)(?![0-9A-Za-z_-])")
 
 # find_trip_records 已经只返回 APPROVED 记录，因此相对选择可以安全地支持
 # “最近这次出差”，不会误选仍处于 PENDING 的记录。
@@ -49,6 +51,17 @@ class ExpenseInputError(ValueError):
     pass
 
 
+class ExpenseTripCandidate(BaseModel):
+    """仅用于选择澄清的当前 APPROVED trip 元数据，不携带发票或金额。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    trip_id: str
+    destination: str
+    start_date: str
+    end_date: str
+
+
 class ExpenseInputAnalysis(BaseModel):
     """用户输入中的出差 / 发票引用抽取结果（规则版，确定性强）。"""
 
@@ -57,6 +70,7 @@ class ExpenseInputAnalysis(BaseModel):
     trip_id: str | None
     invoice_ids: list[str]
     missing_fields: list[Literal["trip_id", "expense_items", "invoice_ids"]]
+    trip_candidates: list[ExpenseTripCandidate] = Field(default_factory=list)
 
 
 def is_expense_claim_intent(question: str) -> bool:
@@ -158,6 +172,90 @@ def _wants_corresponding_invoices(question: str) -> bool:
     return any(expression in lowered for expression in _CORRESPONDING_INVOICE_EXPRESSIONS)
 
 
+def _trip_references(question: str, trips: list[dict[str, Any]]) -> set[str]:
+    references = {match.group(0) for match in _TRIP_ID_PATTERN.finditer(question)}
+    # 接口 trip_id 不限定 TRIP-* 前缀；仅按当前事实中的完整 ID 精确匹配。
+    for trip in trips:
+        trip_id = trip.get("trip_id")
+        if isinstance(trip_id, str) and trip_id and re.search(
+            rf"(?<![0-9A-Za-z_-]){re.escape(trip_id)}(?![0-9A-Za-z_-])", question
+        ):
+            references.add(trip_id)
+    return references
+
+
+def _trip_choice(question: str, candidates: list[dict[str, Any]]) -> tuple[bool, dict[str, Any] | None]:
+    """序号按澄清列表的固定顺序；日期仅精确匹配 start_date，非唯一时不选择。"""
+    ordinal = re.fullmatch(
+        r"(?:选(?:择)?|就选)?第([一二三四五六七八九十]|[1-9][0-9]*)条(?:行程|出差记录)?[。！.!]?", question
+    )
+    if ordinal:
+        number = ordinal.group(1)
+        index = int(number) if number.isdecimal() else "一二三四五六七八九十".index(number) + 1
+        return True, candidates[index - 1] if index <= len(candidates) else None
+    # 仅接受明确的行程日期选择，不把原因、发票日期或任意文本中的日期当作 trip 选择。
+    date_choice = re.fullmatch(
+        r"(?:选(?:择)?|就选)?(?:(?P<iso>\d{4}-\d{2}-\d{2})|"
+        r"(?:(?P<year>\d{4})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})(?:日|号))"
+        r"(?:那次|那次出差|出差)?[。！.!]?", question,
+    )
+    if date_choice is None:
+        return False, None
+    if date_choice.group("iso"):
+        year, month, day = (int(part) for part in date_choice.group("iso").split("-"))
+    else:
+        year = int(date_choice.group("year")) if date_choice.group("year") else None
+        month, day = int(date_choice.group("month")), int(date_choice.group("day"))
+    matches = []
+    for candidate in candidates:
+        try:
+            start = date.fromisoformat(str(candidate.get("start_date") or ""))
+        except ValueError:
+            continue
+        if (year is None or start.year == year) and start.month == month and start.day == day:
+            matches.append(candidate)
+    return True, matches[0] if len(matches) == 1 else None
+
+
+def _select_trip(question: str, trips: list[dict[str, Any]]) -> tuple[str | None, list[ExpenseTripCandidate]]:
+    # TaskRuntime 已有契约会把原任务与补充信息一起传入；最新补充优先于旧回答。
+    choice = question.rsplit("补充信息：", 1)[-1].strip().splitlines()[-1]
+    references = _trip_references(choice, trips) or _trip_references(question, trips)
+    if references:
+        matching = [trip for trip in trips if trip.get("trip_id") in references]
+        selected = matching[0] if len(references) == 1 and len(matching) == 1 else None
+        candidates = matching
+    elif _wants_latest_trip(choice) or _wants_latest_trip(question):
+        selected = _latest_approved_trip(trips)
+        candidates = []
+    else:
+        candidates = [trip for trip in trips if trip.get("destination")
+                      and trip["destination"] in question]
+        # 与接口返回顺序无关，澄清中的序号和后续序号解析共用此排序。
+        candidates.sort(key=lambda trip: (str(trip.get("start_date") or ""),
+                                         str(trip.get("end_date") or ""), str(trip.get("trip_id") or "")))
+        has_choice, selected = _trip_choice(choice, candidates)
+        if not has_choice:
+            selected = candidates[0] if len(candidates) == 1 else None
+    if selected is not None:
+        trip_id = selected.get("trip_id")
+        if isinstance(trip_id, str) and trip_id:
+            return trip_id, []
+    return None, [ExpenseTripCandidate(**{key: str(trip.get(key) or "")
+                                         for key in ("trip_id", "destination", "start_date", "end_date")})
+                  for trip in candidates]
+
+
+def trip_clarification_question(analysis: ExpenseInputAnalysis) -> str | None:
+    if analysis.trip_id is not None or not analysis.trip_candidates:
+        return None
+    lines = ["找到以下已审批的出差记录，请选择这次报销对应的行程："]
+    lines.extend(f"{index}. {trip.trip_id}：{trip.destination}，{trip.start_date} ～ {trip.end_date}"
+                 for index, trip in enumerate(analysis.trip_candidates, start=1))
+    lines.append("请提供具体 trip_id，或按序号、出发日期选择；也可以明确选择最近一次。")
+    return "\n".join(lines)
+
+
 def analyze_expense_input(
     question: str,
     *,
@@ -167,27 +265,10 @@ def analyze_expense_input(
     if not is_expense_claim_intent(normalized):
         raise ExpenseInputError("not_expense_claim_intent")
 
-    trip_id = extract_trip_reference(normalized)
     invoice_ids = extract_invoice_references(normalized)
     trips = find_trip_records(context)
     verified_invoices = find_invoice_records(context)
-
-    # 用户未显式给 trip_id 时，先处理相对选择语义。find_trip_records
-    # 已经完成 APPROVED 过滤，因此“最近/最新”不会选择 PENDING。
-    if trip_id is None and _wants_latest_trip(normalized):
-        latest_trip = _latest_approved_trip(trips)
-        if latest_trip is not None:
-            candidate = latest_trip.get("trip_id")
-            if isinstance(candidate, str) and candidate:
-                trip_id = candidate
-
-    # 仍未确定 trip 时，再按用户显式目的地匹配 APPROVED trip（保持旧行为）。
-    if trip_id is None:
-        for trip in trips:
-            destination = trip.get("destination", "")
-            if destination and destination in normalized:
-                trip_id = trip.get("trip_id")
-                break
+    trip_id, trip_candidates = _select_trip(normalized, trips)
 
     # 确定 trip 后：
     # 1. 用户显式给 INV → 原样保留，后续必须通过 verified_invoices 检查；
@@ -236,6 +317,7 @@ def analyze_expense_input(
         trip_id=trip_id,
         invoice_ids=invoice_ids,
         missing_fields=missing_fields,
+        trip_candidates=trip_candidates,
     )
 
 

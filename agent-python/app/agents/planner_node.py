@@ -20,6 +20,7 @@ from app.agents.domain_provider_registry import (
 )
 from app.agents.runtime_context import AgentRuntimeContext
 from app.agents.tool_catalog import TOOL_CATALOG
+from app.agents.workflow_guard.expense_guard import build_expense_proposal_context
 from app.core.config import (
     JAVA_BASE_URL,
     JAVA_INTERNAL_TOKEN,
@@ -42,6 +43,7 @@ from app.schemas.planner_schema import (
     ReasonCode,
     ToolName,
 )
+from app.services import expense_input_service
 from app.services.llm_service import LLMProviderError, call_llm
 
 
@@ -697,6 +699,29 @@ def planner_node(state: dict, runtime: Runtime[AgentRuntimeContext]) -> dict:
             'task_complete',
             category='business_action',
         )
+
+    # 当前 travel facts 存在多候选时直接澄清，不让 LLM 选 trip 或反复触碰被 Guard
+    # 拒绝的 invoice/Proposal。复用现有 missing_fields/finish 响应与 TaskRuntime 续接。
+    source_question = continuation_original_request or question
+    if (EXPENSE_PROPOSAL_TOOL_NAME in current_authorized_tools
+            and runtime.context['business_date'] is not None
+            and state.get('action_proposal') is None
+            and state.get('request_expense_reason') is not None
+            and expense_input_service.is_expense_claim_intent(source_question)):
+        analysis = expense_input_service.analyze_expense_input(
+            source_question,
+            context=expense_input_service.ExpenseProposalContextLike(
+                build_expense_proposal_context(domain_context.tool_history)
+            ),
+        )
+        trip_question = expense_input_service.trip_clarification_question(analysis)
+        if trip_question is not None:
+            decision = PlannerDecision.model_validate({
+                'action': 'finish', 'answer': trip_question, 'reason_code': 'task_complete',
+                'expense_reason': None,
+            }).model_dump()
+            return {**_decision_result(state, decision, 'task_complete', category='business_action'),
+                    'action_proposal': None, 'missing_fields': ['trip_id']}
 
     user_prompt = build_planner_prompt(
         question,

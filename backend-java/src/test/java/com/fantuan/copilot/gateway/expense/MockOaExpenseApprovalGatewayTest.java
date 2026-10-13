@@ -2,6 +2,8 @@ package com.fantuan.copilot.gateway.expense;
 
 import com.fantuan.copilot.model.action.ExpenseClaim;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpEntity;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
@@ -11,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 class MockOaExpenseApprovalGatewayTest {
     private final RestTemplate restTemplate = mock(RestTemplate.class);
@@ -30,6 +34,31 @@ class MockOaExpenseApprovalGatewayTest {
 
         assertEquals("OA-EXP-1", result.requestId());
         assertEquals("APPROVED", result.status());
+    }
+
+    @Test
+    void unboundTaskRuntimeRetryUsesSameExpenseIdempotencyKeyAndPayload() {
+        ExpenseClaim bound = claim();
+        ExpenseClaim unbound = new ExpenseClaim(bound.expenseId(), bound.sourceActionId(),
+                bound.employeeId(), bound.tripId(), bound.costCenter(), bound.claimedAmount(),
+                bound.reimbursableAmount(), bound.status(), bound.createdAt(), bound.updatedAt());
+        when(restTemplate.postForObject(
+                org.mockito.ArgumentMatchers.eq("http://mock-oa:8010/api/expense-approvals"),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(ExternalApprovalSubmissionResult.class)))
+                .thenReturn(new ExternalApprovalSubmissionResult("OA-EXP-1", "PENDING"));
+
+        gateway.submit(unbound);
+        gateway.submit(bound);
+
+        ArgumentCaptor<HttpEntity<?>> requests = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate, times(2)).postForObject(
+                org.mockito.ArgumentMatchers.eq("http://mock-oa:8010/api/expense-approvals"),
+                requests.capture(), org.mockito.ArgumentMatchers.eq(ExternalApprovalSubmissionResult.class));
+        for (HttpEntity<?> request : requests.getAllValues()) {
+            assertEquals("expense:EXP-1", request.getHeaders().getFirst("Idempotency-Key"));
+        }
+        assertEquals(requests.getAllValues().get(0).getBody(), requests.getAllValues().get(1).getBody());
     }
 
     @Test

@@ -29,7 +29,10 @@ public interface ExpenseClaimRepository {
     /** 只应用权威的 OA 终态 status；相同终态重放时为 no-op。 */
     void applyExternalApprovalStatus(String externalRequestId, ExpenseStatus status);
 
-    /** 仅返回有界重试候选；有意不执行审批 status 轮询。 */
+    /**
+     * 有界提交重试：Legacy 必须已绑定 external wait；TaskRuntime 也可由精确关联的
+     * Expense TaskExecution=WAITING_EXTERNAL 提供 durable intent。不轮询审批 status。
+     */
     List<ExpenseClaim> findPendingExternalSubmissions(int limit);
 
     List<ExpenseClaim> findExternalApprovalReconciliationCandidates(Instant cutoff, int limit);

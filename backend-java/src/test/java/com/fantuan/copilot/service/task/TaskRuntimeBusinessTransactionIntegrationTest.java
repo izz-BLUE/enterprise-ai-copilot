@@ -7,23 +7,32 @@ import com.fantuan.copilot.dto.action.AnnualLeaveActionProposal;
 import com.fantuan.copilot.dto.action.ExpenseActionProposal;
 import com.fantuan.copilot.dto.action.PendingActionView;
 import com.fantuan.copilot.identity.VerifiedIdentity;
+import com.fantuan.copilot.gateway.expense.ExpenseApprovalGateway;
+import com.fantuan.copilot.gateway.expense.ExternalApprovalSubmissionResult;
 import com.fantuan.copilot.model.action.ActionStatus;
 import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.HalfDay;
+import com.fantuan.copilot.model.action.ExpenseStatus;
+import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.memory.TaskStatus;
 import com.fantuan.copilot.model.task.TaskExecution;
 import com.fantuan.copilot.model.task.TaskExecutionStatus;
 import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
+import com.fantuan.copilot.repository.action.PendingActionRepository;
 import com.fantuan.copilot.repository.action.LeaveRequestRepository;
 import com.fantuan.copilot.repository.task.TaskExecutionRepository;
 import com.fantuan.copilot.service.action.BusinessActionService;
+import com.fantuan.copilot.service.action.ExpenseExternalApprovalCoordinator;
+import com.fantuan.copilot.service.action.ExpenseExternalSubmissionRetryWorker;
 import com.fantuan.copilot.service.memory.AiTaskMemoryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -35,6 +44,13 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = {
         "demo.auth.enabled=true",
@@ -57,7 +73,12 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
     @Autowired AiTaskMemoryService memoryService;
     @Autowired LeaveRequestRepository leaveRequests;
     @Autowired ExpenseClaimRepository expenseClaims;
+    @Autowired PendingActionRepository actions;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ExpenseExternalApprovalCoordinator externalApprovalCoordinator;
+    @MockitoBean ExpenseApprovalGateway approvalGateway;
+    // 测试显式调用真实 worker，避免后台调度与断点状态断言竞态。
+    @MockitoBean ExpenseExternalSubmissionRetryWorker scheduledSubmissionWorker;
 
     @BeforeEach
     void resetDatabase() {
@@ -109,6 +130,156 @@ class TaskRuntimeBusinessTransactionIntegrationTest extends PostgresIntegrationT
                 taskExecutions.findByActionId(pending.actionId()).orElseThrow().status());
         assertEquals(TaskStatus.COMPLETED,
                 memoryService.find(USER.userId(), CONVERSATION).orElseThrow().status());
+        var claim = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertNull(claim.externalWaitId());
+        assertNull(claim.externalRequestId());
+        assertEquals(List.of(claim.expenseId()), expenseClaims.findPendingExternalSubmissions(20)
+                .stream().map(ExpenseClaim::expenseId).toList());
+    }
+
+    @Test
+    void submissionWorkerRecoversCommittedTaskRuntimeBeforeWaitBindingAndDoesNotRepeat() {
+        ActionExecutionResponse response = confirmExpenseTask();
+        var before = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertNull(before.externalWaitId());
+        assertNull(before.externalRequestId());
+        assertEquals(ExpenseStatus.SUBMITTED, before.status());
+        when(approvalGateway.submit(any())).thenAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return new ExternalApprovalSubmissionResult("OA-RECOVERED", "PENDING");
+        });
+
+        submissionWorker().runOnce();
+
+        var after = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertEquals("OA-RECOVERED", after.externalRequestId());
+        assertEquals("MOCK_OA", after.externalProvider());
+        assertEquals(ExpenseStatus.WAITING_APPROVAL, after.status());
+        assertEquals(TaskExecutionStatus.WAITING_EXTERNAL,
+                taskExecutions.findByActionId(response.actionId()).orElseThrow().status());
+        assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty());
+        submissionWorker().runOnce();
+        verify(approvalGateway, times(1)).submit(any());
+        assertEquals(1, expenseClaims.countBySourceActionId(response.actionId()));
+    }
+
+    @Test
+    void firstOaFailureKeepsCommittedFactsAndLaterWorkerRetries() {
+        ActionExecutionResponse response = confirmExpenseTask();
+        when(approvalGateway.submit(any())).thenThrow(new RuntimeException("timeout"))
+                .thenReturn(new ExternalApprovalSubmissionResult("OA-RETRY", "PENDING"));
+
+        submissionWorker().runOnce();
+
+        var failedAttempt = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertEquals(ActionStatus.SUCCEEDED, actionStatus(response.actionId()));
+        assertEquals(ExpenseStatus.SUBMITTED, failedAttempt.status());
+        assertNull(failedAttempt.externalWaitId());
+        assertNull(failedAttempt.externalRequestId());
+        assertEquals(TaskExecutionStatus.WAITING_EXTERNAL,
+                taskExecutions.findByActionId(response.actionId()).orElseThrow().status());
+        assertEquals(1, expenseClaims.findPendingExternalSubmissions(20).size());
+
+        submissionWorker().runOnce();
+
+        assertEquals("OA-RETRY", expenseClaims.findByExpenseId(response.requestId())
+                .orElseThrow().externalRequestId());
+        verify(approvalGateway, times(2)).submit(any());
+        assertEquals(1, expenseClaims.countBySourceActionId(response.actionId()));
+    }
+
+    @Test
+    void unboundLegacyClaimIsNotSelectedAlongsideRecoverableTaskRuntimeClaim() {
+        ActionExecutionResponse taskResponse = confirmExpenseTask();
+        PendingActionView legacy = actionService.createPending(
+                expenseProposal(), "legacy-expense", null, USER, CONVERSATION);
+        ActionExecutionResponse legacyResponse = actionService.confirm(legacy.actionId(),
+                legacy.confirmationNonce(), UUID.randomUUID().toString(), null, "legacy-confirm", USER);
+        assertNull(expenseClaims.findByExpenseId(legacyResponse.requestId()).orElseThrow().externalWaitId());
+        assertEquals(List.of(taskResponse.requestId()), expenseClaims.findPendingExternalSubmissions(20)
+                .stream().map(ExpenseClaim::expenseId).toList());
+        when(approvalGateway.submit(any())).thenReturn(
+                new ExternalApprovalSubmissionResult("OA-TASK-ONLY", "PENDING"));
+
+        submissionWorker().runOnce();
+
+        verify(approvalGateway, times(1)).submit(any());
+        var legacyAfter = expenseClaims.findByExpenseId(legacyResponse.requestId()).orElseThrow();
+        assertEquals(ExpenseStatus.SUBMITTED, legacyAfter.status());
+        assertNull(legacyAfter.externalRequestId());
+        assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty());
+    }
+
+    @Test
+    void repositoryRequiresExactExpenseTaskWaitingExternalIntent() {
+        ActionExecutionResponse response = confirmExpenseTask();
+        for (TaskExecutionStatus status : TaskExecutionStatus.values()) {
+            if (status == TaskExecutionStatus.WAITING_EXTERNAL) {
+                continue;
+            }
+            jdbc.update("UPDATE task_execution SET status = ? WHERE action_id = ?",
+                    status.name(), response.actionId());
+            assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty(), status.name());
+        }
+        jdbc.update("UPDATE task_execution SET status = 'WAITING_EXTERNAL', task_type = 'LEAVE_REQUEST' "
+                + "WHERE action_id = ?", response.actionId());
+        assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty());
+        jdbc.update("UPDATE task_execution SET task_type = 'EXPENSE_CLAIM' WHERE action_id = ?",
+                response.actionId());
+        assertEquals(1, expenseClaims.findPendingExternalSubmissions(20).size());
+        jdbc.update("UPDATE expense_claim SET external_request_id = 'OA-EXISTING' WHERE expense_id = ?",
+                response.requestId());
+        assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty());
+        submissionWorker().runOnce();
+        verify(approvalGateway, never()).submit(any());
+    }
+
+    @Test
+    void normalTaskRuntimeBindThenDispatchStillSucceeds() {
+        ActionExecutionResponse response = confirmExpenseTask();
+        var action = actions.find(response.actionId()).orElseThrow();
+        when(approvalGateway.submit(any())).thenAnswer(invocation -> {
+            ExpenseClaim claim = invocation.getArgument(0);
+            assertTrue(claim.externalWaitId().startsWith("task_wait_"));
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return new ExternalApprovalSubmissionResult("OA-NORMAL", "PENDING");
+        });
+
+        assertTrue(externalApprovalCoordinator.registerTaskRuntimeAndDispatch(action, response, "normal"));
+
+        var claim = expenseClaims.findByExpenseId(response.requestId()).orElseThrow();
+        assertTrue(claim.externalWaitId().startsWith("task_wait_"));
+        assertEquals("OA-NORMAL", claim.externalRequestId());
+        assertEquals(ExpenseStatus.WAITING_APPROVAL, claim.status());
+        submissionWorker().runOnce();
+        verify(approvalGateway, times(1)).submit(any());
+    }
+
+    @Test
+    void recoveredTerminalOaReplayCompletesExactTask() {
+        ActionExecutionResponse response = confirmExpenseTask();
+        when(approvalGateway.submit(any())).thenReturn(
+                new ExternalApprovalSubmissionResult("OA-TERMINAL", "APPROVED"));
+
+        submissionWorker().runOnce();
+
+        assertEquals(ExpenseStatus.APPROVED, expenseClaims.findByExpenseId(response.requestId())
+                .orElseThrow().status());
+        assertEquals(TaskExecutionStatus.COMPLETED,
+                taskExecutions.findByActionId(response.actionId()).orElseThrow().status());
+        assertTrue(expenseClaims.findPendingExternalSubmissions(20).isEmpty());
+    }
+
+    private ActionExecutionResponse confirmExpenseTask() {
+        PendingActionView pending = actionService.createPending(
+                expenseProposal(), "recovery-expense", null, USER, CONVERSATION);
+        saveTask(pending.actionId(), TaskType.EXPENSE_CLAIM, TaskExecutionStatus.WAITING_USER);
+        return actionService.confirm(pending.actionId(), pending.confirmationNonce(),
+                UUID.randomUUID().toString(), null, "recovery-confirm", USER);
+    }
+
+    private ExpenseExternalSubmissionRetryWorker submissionWorker() {
+        return new ExpenseExternalSubmissionRetryWorker(externalApprovalCoordinator, 20);
     }
 
     @Test
