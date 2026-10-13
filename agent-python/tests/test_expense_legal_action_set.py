@@ -86,6 +86,27 @@ def test_reason_available_without_travel_facts_hides_invoice_and_proposal():
     assert EXPENSE_PROPOSAL_TOOL_NAME not in legal
 
 
+def test_ambiguous_trip_blocks_invoice_and_selection_keeps_exact_invoice_scope():
+    trips = [{
+        "trip_id": trip_id, "destination": "上海", "status": "APPROVED",
+        "start_date": start, "end_date": end,
+        "expense_documents": [{"invoice_id": invoice_id}],
+    } for trip_id, start, end, invoice_id in [
+        ("T001", "2026-10-01", "2026-10-03", "INV-001"),
+        ("T002", "2026-10-20", "2026-10-22", "INV-002"),
+    ]]
+    history = [{"tool_name": TRAVEL_RECORD_TOOL_NAME, "arguments": {}, "status": "success",
+                "observation": json.dumps({"success": True, "items": trips})}]
+    question = "帮我报销上海出差的全部发票"
+    assert INVOICE_VERIFY_TOOL_NAME not in _legal(history, question=question)
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in _legal(history, question=question)
+    selected = f"{question}\n补充信息：第一条"
+    assert INVOICE_VERIFY_TOOL_NAME in _legal(history, question=selected)
+    assert EXPENSE_PROPOSAL_TOOL_NAME not in _legal(history, question=selected)
+    assert ExpenseGuard().invoice_scope_allowed(selected, history, "INV-001")
+    assert not ExpenseGuard().invoice_scope_allowed(selected, history, "INV-002")
+
+
 def test_selected_trip_with_pending_invoices_hides_proposal():
     legal = _legal(_travel_history())
     assert INVOICE_VERIFY_TOOL_NAME in legal

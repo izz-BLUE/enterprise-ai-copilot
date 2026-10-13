@@ -123,6 +123,70 @@ def _run_with_history(question, tool_history, *, employee_id="E10001",
     )
 
 
+@pytest.mark.parametrize("answer,selected_id", [
+    ("T001", "T001"), ("第一条", "T001"), ("10月1号那次", "T001"), ("最近一次", "T002"),
+])
+def test_ambiguous_destination_clarifies_then_task_runtime_selection_preserves_workflow(answer, selected_id):
+    from app.main import _task_input_message
+    from app.schemas.chat_schema import ChatRequest
+
+    trips = [{
+        "trip_id": trip_id, "destination": "上海", "status": "APPROVED",
+        "start_date": start, "end_date": end,
+        "expense_documents": [{"invoice_id": f"INV-{trip_id}", "category": "TAXI"}],
+    } for trip_id, start, end in [
+        ("T001", "2026-10-01", "2026-10-03"), ("T002", "2026-10-20", "2026-10-22"),
+    ]]
+    original = "帮我报销上海出差的全部发票，原因客户拜访"
+    with patch("app.agents.planner_node.call_llm") as llm, \
+         patch("app.agents.tool_executor_node.travel_record_tool") as travel, \
+         patch("app.agents.tool_executor_node.invoice_verify_tool") as invoice:
+        travel.invoke.return_value = json.dumps({"success": True, "items": trips}, ensure_ascii=False)
+        llm.side_effect = [_tool("travel_record_tool", {}, "need_travel_history", expense_reason="客户拜访")]
+        first = run_langgraph_agent(
+            original, use_planner=True, employee_id="E10001", allow_business_actions=True,
+            business_date=date(2026, 10, 23), execution_mode="TASK_RUNTIME",
+        )
+        assert first["missing_fields"] == ["trip_id"]
+        assert first["action_proposal"] is None
+        assert first["stop_reason"] == "task_complete"
+        assert llm.call_count == 1  # travel facts 后直接确定性澄清，LLM 不选择 trip。
+        invoice.invoke.assert_not_called()
+        for record in trips:
+            for key in ("trip_id", "destination", "start_date", "end_date"):
+                assert record[key] in first["answer"]
+
+        # 使用当前生产 TaskRuntime 的输入契约，fresh Tool facts 改变返回顺序。
+        continuation = _task_input_message(ChatRequest(
+            message=original, clarificationContext=answer), "TASK_RUNTIME")
+        travel.invoke.return_value = json.dumps({"success": True, "items": list(reversed(trips))})
+        invoice.invoke.return_value = json.dumps({
+            "success": True, "invoice_id": f"INV-{selected_id}", "valid": True,
+            "duplicate": False, "amount": 100, "category": "TAXI",
+        })
+        llm.reset_mock()
+        llm.side_effect = [
+            _tool("travel_record_tool", {}, "need_travel_history", expense_reason="客户拜访"),
+            _tool("invoice_verify_tool", {"invoice_id": f"INV-{selected_id}"}, "need_invoice_verify"),
+            _tool("expense_proposal_tool", {}, "need_expense_proposal"),
+            _finish("请确认报销草稿。"),
+        ]
+        second = run_langgraph_agent(
+            continuation, use_planner=True, employee_id="E10001", allow_business_actions=True,
+            business_date=date(2026, 10, 23), execution_mode="TASK_RUNTIME",
+        )
+    assert second["route"] == "action"
+    assert second["missing_fields"] == []
+    proposal = second["action_proposal"]
+    assert proposal["trip_id"] == selected_id
+    assert proposal["invoice_ids"] == [f"INV-{selected_id}"]
+    assert proposal["reason"] == "客户拜访"
+    assert proposal["claimed_amount"] == "100.00"
+    assert proposal["reimbursable_amount"] == "100.00"
+    invoice.invoke.assert_called_once()
+    assert invoice.invoke.call_args.args[0]["invoice_id"] == f"INV-{selected_id}"
+
+
 class TestExpenseReasonContinuation:
     """ACTIVE Expense reason 补槽的 Java Memory contract。"""
 
