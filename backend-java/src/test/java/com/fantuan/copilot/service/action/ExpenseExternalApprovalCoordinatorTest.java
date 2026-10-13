@@ -9,10 +9,15 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskExecution;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -128,12 +133,62 @@ class ExpenseExternalApprovalCoordinatorTest {
     void retryOnlySubmitsDurablePendingCandidates() {
         ExpenseClaim claim = claim();
         when(claims.findPendingExternalSubmissions(anyInt())).thenReturn(List.of(claim));
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(claim));
         when(gateway.submit(claim)).thenReturn(new ExternalApprovalSubmissionResult("OA-EXP-1", "PENDING"));
 
         coordinator.retryPendingSubmissions(20);
 
         verify(gateway).submit(claim);
         verify(claims).bindExternalRequest(EXPENSE_ID, "MOCK_OA", "OA-EXP-1");
+    }
+
+    @Test
+    void retryRejectsUnboundLegacyEvenIfReturnedByCandidateScan() {
+        ExpenseClaim unbound = unboundClaim();
+        when(claims.findPendingExternalSubmissions(20)).thenReturn(List.of(unbound));
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(unbound));
+
+        coordinator.retryPendingSubmissions(20);
+
+        verify(gateway, never()).submit(any());
+        verify(claims, never()).bindExternalRequest(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TaskExecutionStatus.class,
+            names = "WAITING_EXTERNAL", mode = EnumSource.Mode.EXCLUDE)
+    void retryRejectsUnboundTaskWithoutCommittedExternalIntent(TaskExecutionStatus status) {
+        ExpenseClaim unbound = unboundClaim();
+        when(claims.findPendingExternalSubmissions(20)).thenReturn(List.of(unbound));
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(unbound));
+        when(taskRuntimeService.findByActionId("act-expense")).thenReturn(Optional.of(
+                new TaskExecution("group", "task", "U10001", "conv", 1,
+                        TaskType.EXPENSE_CLAIM, "报销", null, status,
+                        "act-expense", Instant.now(), Instant.now(), null)));
+
+        coordinator.retryPendingSubmissions(20);
+
+        verify(gateway, never()).submit(any());
+    }
+
+    @Test
+    void retryReReadsClaimAndDoesNotResubmitAlreadyBoundOaRequest() {
+        ExpenseClaim submittedElsewhere = new ExpenseClaim(EXPENSE_ID, "act-expense", "E10001",
+                "TRIP-1", "COST-IT", new BigDecimal("100"), new BigDecimal("100"),
+                ExpenseStatus.WAITING_APPROVAL, Instant.now(), Instant.now(),
+                "MOCK_OA", "OA-EXP-1", null);
+        when(claims.findPendingExternalSubmissions(20)).thenReturn(List.of(unboundClaim()));
+        when(claims.findByExpenseId(EXPENSE_ID)).thenReturn(Optional.of(submittedElsewhere));
+
+        coordinator.retryPendingSubmissions(20);
+
+        verify(gateway, never()).submit(any());
+    }
+
+    private static ExpenseClaim unboundClaim() {
+        return new ExpenseClaim(EXPENSE_ID, "act-expense", "E10001", "TRIP-1", "COST-IT",
+                new BigDecimal("100"), new BigDecimal("100"), ExpenseStatus.SUBMITTED,
+                Instant.now(), Instant.now());
     }
 
     @Test

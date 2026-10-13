@@ -246,8 +246,14 @@ public class JdbcExpenseClaimRepository implements ExpenseClaimRepository {
                        external_last_checked_at, external_resume_last_attempt_at,
                        external_resume_completed_at
                 FROM expense_claim
-                WHERE status = 'SUBMITTED' AND external_wait_id IS NOT NULL
+                WHERE status = 'SUBMITTED'
                   AND external_request_id IS NULL
+                  AND (external_wait_id IS NOT NULL OR EXISTS (
+                      SELECT 1 FROM task_execution task
+                      WHERE task.action_id = expense_claim.source_action_id
+                        AND task.task_type = 'EXPENSE_CLAIM'
+                        AND task.status = 'WAITING_EXTERNAL'
+                  ))
                 ORDER BY updated_at ASC
                 LIMIT :limit
                 """, Map.of("limit", limit), (rs, rowNum) -> mapClaim(rs));

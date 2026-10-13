@@ -10,6 +10,8 @@ import com.fantuan.copilot.model.action.BusinessActionType;
 import com.fantuan.copilot.model.action.ExpenseClaim;
 import com.fantuan.copilot.model.action.ExpenseStatus;
 import com.fantuan.copilot.model.action.PendingAction;
+import com.fantuan.copilot.model.task.TaskExecutionStatus;
+import com.fantuan.copilot.model.task.TaskType;
 import com.fantuan.copilot.repository.action.ExpenseClaimRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -117,7 +119,14 @@ public class ExpenseExternalApprovalCoordinator {
     public void retryPendingSubmissions(int batchSize) {
         List<ExpenseClaim> candidates = claims.findPendingExternalSubmissions(Math.max(1, batchSize));
         for (ExpenseClaim claim : candidates) {
-            dispatch(claim, "external-retry");
+            try {
+                // 候选扫描后正常 handoff 可能已经提交 OA；发送前重读持久化状态。
+                dispatchByExpenseId(claim.expenseId(), "external-retry");
+            } catch (RuntimeException exception) {
+                log.warn("EXTERNAL_RETRY_LOOKUP_FAILED expenseIdPrefix={} errorType={}",
+                        BusinessActionService.auditRef(claim.expenseId()),
+                        exception.getClass().getSimpleName());
+            }
         }
     }
 
@@ -156,17 +165,25 @@ public class ExpenseExternalApprovalCoordinator {
     }
 
     private void dispatch(ExpenseClaim claim, String traceId) {
-        if (claim.status() != ExpenseStatus.SUBMITTED || claim.externalWaitId() == null
-                || claim.externalRequestId() != null) {
+        if (claim.status() != ExpenseStatus.SUBMITTED || claim.externalRequestId() != null) {
             return;
         }
         try {
+            var task = taskRuntimeService.findByActionId(claim.sourceActionId());
+            // 确认事务已提交的 WAITING_EXTERNAL 足以恢复 TaskRuntime handoff。
+            // Legacy 仍必须等 Python external interrupt correlation 绑定完成。
+            if (claim.externalWaitId() == null && !task.map(execution ->
+                    execution.taskType() == TaskType.EXPENSE_CLAIM
+                            && execution.status() == TaskExecutionStatus.WAITING_EXTERNAL)
+                    .orElse(false)) {
+                return;
+            }
             ExternalApprovalSubmissionResult result = approvalGateway.submit(claim);
             if (result == null || result.requestId() == null || result.requestId().isBlank()
                     || !result.isSupportedStatus()) {
                 throw new IllegalStateException("Unexpected external approval submission result");
             }
-            boolean taskRuntimeClaim = isTaskRuntimeClaim(claim);
+            boolean taskRuntimeClaim = task.isPresent();
             ExpenseStatus terminal = result.isTerminal()
                     ? terminalStatus(result.status()) : null;
             com.fantuan.copilot.model.task.TaskExecutionStatus taskStatus = terminal == null
@@ -225,11 +242,6 @@ public class ExpenseExternalApprovalCoordinator {
                 && response.status() == ActionStatus.SUCCEEDED
                 && response.requestId() != null && !response.requestId().isBlank()
                 && action.actionId() != null && action.employeeId() != null;
-    }
-
-    private boolean isTaskRuntimeClaim(ExpenseClaim claim) {
-        return claim != null
-                && taskRuntimeService.findByActionId(claim.sourceActionId()).isPresent();
     }
 
     private ExpenseStatus terminalStatus(String status) {
